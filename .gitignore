@@ -45,11 +45,10 @@ tmp/
 *.vcp
 !examples/**/*.vcp
 
-# Whisper / ML models (large binaries)
-models/
+# Whisper / ML models (large binaries) — do NOT ignore src-tauri/src/models (Rust code)
+/models/
 *.onnx
 *.pt
-*.bin
 !src-tauri/resources/.gitkeep
 
 # Generated
