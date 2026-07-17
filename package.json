@@ -1,0 +1,41 @@
+{
+  "name": "vigilcut",
+  "version": "0.1.0",
+  "description": "Local open-source desktop video editor with human-in-the-loop supervision",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "setup:ffmpeg": "node scripts/setup-ffmpeg.mjs",
+    "dev:win": "powershell -ExecutionPolicy Bypass -File scripts/dev.ps1",
+    "check:all": "powershell -ExecutionPolicy Bypass -File scripts/check.ps1",
+    "lint": "eslint src --ext .ts,.svelte"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.2.0",
+    "@tauri-apps/plugin-dialog": "^2.2.0",
+    "@tauri-apps/plugin-fs": "^2.2.0",
+    "@tauri-apps/plugin-shell": "^2.2.0",
+    "@tauri-apps/plugin-store": "^2.2.0"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "@tauri-apps/cli": "^2.2.0",
+    "@tsconfig/svelte": "^5.0.4",
+    "@types/node": "^22.10.5",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "svelte": "^5.17.0",
+    "svelte-check": "^4.1.1",
+    "tailwindcss": "^3.4.17",
+    "tslib": "^2.8.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7"
+  }
+}
