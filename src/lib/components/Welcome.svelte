@@ -1,44 +1,92 @@
 <script lang="ts">
+  import { onMount } from "svelte";
+  import * as api from "$lib/utils/tauri";
+
   interface Props {
     onOpen: () => void;
-    onDemo: () => void;
   }
-  let { onOpen, onDemo }: Props = $props();
+  let { onOpen }: Props = $props();
+
+  let paths = $state<{ inbox: string; outbox: string } | null>(null);
+
+  onMount(() => {
+    if (!api.isTauri()) return;
+    void api.getFactoryPaths().then((p) => {
+      paths = { inbox: p.inbox, outbox: p.outbox };
+    });
+  });
+
+  async function openDir(which: string) {
+    if (!api.isTauri()) return;
+    try {
+      const dir = await api.openFactoryFolder(which);
+      const { open } = await import("@tauri-apps/plugin-shell");
+      await open(dir);
+    } catch (e) {
+      console.error(e);
+    }
+  }
 </script>
 
-<div class="flex flex-1 flex-col items-center justify-center gap-6 p-8 text-center">
+<div class="flex flex-col items-center justify-center gap-6 px-4 py-8 text-center">
   <div
-    class="flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-vigil-500 to-emerald-800 text-3xl font-bold text-white shadow-panel"
+    class="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-vigil-500 to-emerald-800 text-2xl font-bold text-white shadow-panel"
   >
     V
   </div>
-  <div>
-    <h1 class="text-2xl font-semibold tracking-tight text-white">VigilCut</h1>
-    <p class="mt-2 max-w-md text-sm text-surface-400">
-      Editor de video local con <strong class="text-surface-200">supervisión humana</strong>.
-      Auto-detecta silencios, tú apruebas cada corte.
-    </p>
-    <p class="mt-1 max-w-md text-xs text-surface-600">
-      Local open-source video editor — silence detection, audio enhance, color, subtitles — you stay
-      in control.
+
+  <div class="max-w-lg">
+    <h1 class="text-2xl font-semibold tracking-tight text-white">VigilCut Factory</h1>
+    <p class="mt-2 text-sm leading-relaxed text-surface-400">
+      Motor local: la IA corta silencios, propone capítulos y shorts. Tú solo supervisas
+      excepciones y exportas (o lanzas un lote completo).
     </p>
   </div>
 
   <div class="flex flex-wrap items-center justify-center gap-3">
-    <button class="btn-primary px-5 py-2" onclick={onOpen}>Abrir video / Open video</button>
-    <button class="btn-secondary px-5 py-2" onclick={onDemo}>Cargar demo timeline</button>
+    <button
+      class="btn-primary px-8 py-3 text-base font-semibold shadow-lg shadow-vigil-950/40"
+      onclick={onOpen}
+    >
+      Abrir un video
+    </button>
   </div>
 
-  <div class="mt-4 grid max-w-2xl grid-cols-1 gap-3 text-left sm:grid-cols-3">
+  <ol class="grid w-full max-w-xl grid-cols-1 gap-2 text-left sm:grid-cols-3">
     {#each [
-      { t: "1. Detectar", d: "Silero VAD + FFmpeg marcan silencios y habla." },
-      { t: "2. Revisar", d: "Toggle keep/cut en el timeline. Ajusta padding." },
-      { t: "3. Exportar", d: "Preview salta cortes. Export local con FFmpeg." },
+      { n: "1", t: "Analizar", d: "Events + política auto-corte" },
+      { n: "2", t: "Excepciones", d: "Solo baja confianza" },
+      { n: "3", t: "Artefactos", d: "MP4 · capítulos · shorts · JSON" },
     ] as step}
-      <div class="panel p-3">
-        <div class="text-xs font-semibold text-vigil-400">{step.t}</div>
-        <div class="mt-1 text-[11px] text-surface-400">{step.d}</div>
-      </div>
+      <li class="rounded-xl border border-surface-800 bg-surface-900/60 px-3 py-3">
+        <div class="text-[10px] font-bold text-vigil-400">PASO {step.n}</div>
+        <div class="mt-0.5 text-sm font-medium text-surface-100">{step.t}</div>
+        <div class="mt-0.5 text-[11px] text-surface-500">{step.d}</div>
+      </li>
     {/each}
-  </div>
+  </ol>
+
+  {#if paths}
+    <div class="w-full max-w-xl rounded-xl border border-surface-800 bg-surface-900/50 p-3 text-left text-[11px]">
+      <div class="mb-2 font-semibold text-surface-300">Carpetas de fábrica</div>
+      <div class="space-y-1 font-mono text-surface-500">
+        <div class="flex items-center justify-between gap-2">
+          <span class="truncate" title={paths.inbox}>inbox: {paths.inbox}</span>
+          <button type="button" class="btn-ghost shrink-0 text-[10px]" onclick={() => openDir("inbox")}
+            >Abrir</button
+          >
+        </div>
+        <div class="flex items-center justify-between gap-2">
+          <span class="truncate" title={paths.outbox}>outbox: {paths.outbox}</span>
+          <button type="button" class="btn-ghost shrink-0 text-[10px]" onclick={() => openDir("outbox")}
+            >Abrir</button
+          >
+        </div>
+      </div>
+      <p class="mt-2 text-surface-600">
+        Deja crudos en inbox y usa el panel Lote, o:
+        <code class="text-surface-400">npm run cli -- batch inbox outbox</code>
+      </p>
+    </div>
+  {/if}
 </div>

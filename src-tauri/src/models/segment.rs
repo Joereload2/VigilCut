@@ -22,7 +22,8 @@ pub enum SegmentDecision {
     Pending,
 }
 
-/// A continuous span on the source media timeline (seconds).
+/// Legacy UI projection of analysis (derived view — not the engine source of truth).
+/// Prefer Events + EDL in new code.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Segment {
@@ -37,6 +38,15 @@ pub struct Segment {
     pub label: Option<String>,
     /// Energy / loudness estimate (dBFS) when available
     pub energy_db: Option<f64>,
+    /// Linked analysis event (if any)
+    #[serde(default)]
+    pub event_id: Option<String>,
+    /// Policy auto-applied this decision (no human needed)
+    #[serde(default)]
+    pub auto_applied: bool,
+    /// Needs human supervision (exception queue)
+    #[serde(default)]
+    pub needs_review: bool,
 }
 
 impl Segment {
@@ -50,6 +60,9 @@ impl Segment {
             confidence: 1.0,
             label: None,
             energy_db: None,
+            event_id: None,
+            auto_applied: false,
+            needs_review: false,
         }
     }
 

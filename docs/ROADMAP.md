@@ -1,28 +1,27 @@
-# Roadmap — VigilCut
+# Roadmap — VigilCut Factory
 
-## v0.1 MVP (current scaffold)
-- Silence detection + human review timeline  
-- Skip-cuts preview plan  
-- FFmpeg export of Keep ranges  
-- Presets, project JSON, bilingual README  
+## Hecho (v1)
 
-## v0.2
-- Silero VAD ONNX runner  
-- Waveform polish + keyboard shortcuts  
-- Drag edges to adjust segment boundaries  
-- Progress events during export  
+- [x] Engine silence: Events + Policy + EDL  
+- [x] Auto-approve alta confianza + cola de excepciones  
+- [x] Preview video cortado  
+- [x] Export multi-artefacto (mp4, chapters, shorts, events, edl, manifest)  
+- [x] Batch worker async + UI lote  
+- [x] CLI `vigilcut-cli` (analyze / export / batch)  
+- [x] Detectores de estructura: capítulos + short candidates  
+- [x] Documentación arquitectura / CTO  
 
-## v0.3
-- Audio enhance applied on export  
-- Color eq + simple auto-levels  
-- Batch worker with multi-file queue  
+## Siguiente (v1.1)
 
-## v0.4
-- Whisper local subtitles  
-- SRT burn-in option  
-- Clip select mode UX  
+- [ ] Silero VAD real (ONNX)  
+- [ ] Whisper local → captions SRT artifact  
+- [ ] Watch de carpeta inbox  
+- [ ] Detector muletillas (sobre transcript)  
+- [ ] Export real de clips short (no solo JSON candidatos)  
 
-## v1.0
-- Stable presets marketplace (local files)  
-- Installers for Windows / macOS / Linux  
-- Accessibility + full ES/EN UI strings  
+## Más adelante
+
+- [ ] Feature cache (wav16k hash)  
+- [ ] Policy packs por marca/canal  
+- [ ] GPU opcional  
+- [ ] Métricas human-seconds / media-minute  

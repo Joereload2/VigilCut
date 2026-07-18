@@ -1,7 +1,9 @@
+pub mod analyze;
 pub mod audio;
 pub mod batch;
 pub mod color;
 pub mod export;
+pub mod factory;
 pub mod media;
 pub mod presets;
 pub mod project;

@@ -1,4 +1,5 @@
 import type {
+  AnalysisRun,
   ExportEstimate,
   MediaInfo,
   ProcessingPreset,
@@ -24,14 +25,40 @@ class ProjectStore {
 
   currentTime = $state(0);
   isPlaying = $state(false);
-  skipCutsPreview = $state(true);
+  /**
+   * original = fuente completa
+   * edited   = previsualiza el resultado (salta tramos CUT)
+   */
+  previewMode = $state<"original" | "edited">("edited");
   keepRanges = $state<[number, number][]>([]);
   estimate = $state<ExportEstimate | null>(null);
 
+  /** @deprecated use previewMode === 'edited' */
+  get skipCutsPreview() {
+    return this.previewMode === "edited";
+  }
+  set skipCutsPreview(v: boolean) {
+    this.previewMode = v ? "edited" : "original";
+  }
+
   busy = $state(false);
-  statusMessage = $state("Listo / Ready");
+  statusMessage = $state("Listo");
   error = $state<string | null>(null);
   selectedSegmentId = $state<string | null>(null);
+  /** Segment ids the user has explicitly decided (review progress). */
+  touchedIds = $state<string[]>([]);
+  /** Last successful export — drives success panel. */
+  lastExport = $state<{
+    path: string;
+    duration: number;
+    keptDuration: number;
+    cutDuration: number;
+  } | null>(null);
+  showExportSuccess = $state(false);
+  /** Engine analysis run (events + policy + exceptions + EDL). */
+  analysisRun = $state<AnalysisRun | null>(null);
+  /** Supervisor mode: focus exceptions, not every segment. */
+  supervisorMode = $state(true);
 
   duration = $derived(this.media?.duration ?? this.segments.at(-1)?.end ?? 0);
 
@@ -47,6 +74,106 @@ class ProjectStore {
     this.segments.find((s) => s.id === this.selectedSegmentId) ?? null,
   );
 
+  keepCount = $derived(this.segments.filter((s) => s.decision === "keep").length);
+  cutCount = $derived(this.segments.filter((s) => s.decision === "cut").length);
+  silenceCount = $derived(this.segments.filter((s) => s.kind === "silence").length);
+  autoCutCount = $derived(this.segments.filter((s) => s.autoApplied && s.decision === "cut").length);
+  pendingExceptions = $derived(
+    this.analysisRun?.exceptions.filter((e) => e.resolution === "pending") ?? [],
+  );
+  pendingExceptionCount = $derived(this.pendingExceptions.length);
+  needsReviewSegments = $derived(this.segments.filter((s) => s.needsReview || s.decision === "pending"));
+
+  selectedIndex = $derived(
+    this.selectedSegmentId
+      ? this.segments.findIndex((s) => s.id === this.selectedSegmentId)
+      : -1,
+  );
+
+  reviewPosition = $derived(
+    this.segments.length === 0
+      ? { current: 0, total: 0 }
+      : {
+          current: this.selectedIndex >= 0 ? this.selectedIndex + 1 : 1,
+          total: this.segments.length,
+        },
+  );
+
+  reviewedCount = $derived(
+    this.touchedIds.filter((id) => this.segments.some((s) => s.id === id)).length,
+  );
+
+  fileName = $derived(
+    this.mediaPath
+      ? (this.mediaPath.split(/[/\\]/).pop() ?? this.mediaPath)
+      : null,
+  );
+
+  markTouched(id: string) {
+    if (!this.touchedIds.includes(id)) {
+      this.touchedIds = [...this.touchedIds, id];
+    }
+  }
+
+  /** Select segment and seek playhead to its start. */
+  selectSegment(id: string, seek = true) {
+    this.selectedSegmentId = id;
+    const seg = this.segments.find((s) => s.id === id);
+    if (seg && seek) {
+      this.currentTime = seg.start;
+    }
+  }
+
+  /** After analysis: focus first exception (or first silence if none). */
+  focusReviewStart() {
+    this.touchedIds = [];
+    this.lastExport = null;
+    this.showExportSuccess = false;
+    if (!this.segments.length) {
+      this.selectedSegmentId = null;
+      return;
+    }
+    // Supervisor path: first item that needs human eyes
+    const needs = this.segments.find((s) => s.needsReview || s.decision === "pending");
+    if (needs) {
+      this.selectSegment(needs.id, true);
+      return;
+    }
+    // All auto — select first keep for preview context
+    const keep = this.segments.find((s) => s.decision === "keep");
+    this.selectSegment((keep ?? this.segments[0]).id, true);
+  }
+
+  applyAnalysisRun(run: AnalysisRun) {
+    this.analysisRun = run;
+    this.segments = run.segments;
+    this.keepRanges = run.edl.videoTrack.map((s) => [s.start, s.end] as [number, number]);
+    this.estimate = {
+      estimatedDuration: run.edl.outputDuration,
+      keepRanges: this.keepRanges,
+      cutDuration: run.edl.removedDuration,
+      sourceDuration: run.duration,
+    };
+  }
+
+  /** Mark decision and jump to next segment (single review behavior). */
+  markAndAdvance(id: string, decision: SegmentDecision) {
+    this.markTouched(id);
+    this.setDecision(id, decision);
+    const idx = this.segments.findIndex((s) => s.id === id);
+    if (idx >= 0 && idx < this.segments.length - 1) {
+      this.selectSegment(this.segments[idx + 1].id, true);
+    }
+  }
+
+  /** Toggle keep/cut and advance — same path as ActionBar / list badge. */
+  toggleAndAdvance(id: string) {
+    const seg = this.segments.find((s) => s.id === id);
+    if (!seg) return;
+    const next: SegmentDecision = seg.decision === "keep" ? "cut" : "keep";
+    this.markAndAdvance(id, next);
+  }
+
   async refreshPresets() {
     try {
       this.presets = await api.listPresets();
@@ -58,7 +185,10 @@ class ProjectStore {
   async openMedia(path: string, name?: string) {
     this.busy = true;
     this.error = null;
-    this.statusMessage = "Abriendo medio / Opening media…";
+    this.showExportSuccess = false;
+    this.lastExport = null;
+    this.analysisRun = null;
+    this.statusMessage = "Abriendo video…";
     try {
       this.mediaPath = path;
       if (api.isTauri()) {
@@ -67,13 +197,13 @@ class ProjectStore {
           name ?? path.split(/[/\\]/).pop() ?? "Untitled",
           path,
         );
-        this.statusMessage = "Detectando silencios / Detecting silences…";
-        const result = await api.detectSilences(path, this.silenceOptions);
-        this.segments = result.segments;
+        this.statusMessage = "Analizando (eventos + política)…";
+        const run = await api.runAnalysis(path, this.silenceOptions);
+        this.applyAnalysisRun(run);
         if (this.project) {
           this.project = {
             ...this.project,
-            segments: result.segments,
+            segments: run.segments,
             media: this.media,
           };
           await api.saveProject(this.project);
@@ -83,10 +213,15 @@ class ProjectStore {
         } catch {
           this.waveform = null;
         }
-        await this.refreshKeepRanges();
-        this.statusMessage = `Listo — ${result.method} · ${result.segments.length} segmentos`;
+        this.previewMode = "edited";
+        this.focusReviewStart();
+        const pe = run.stats.pendingExceptionCount;
+        const auto = run.stats.autoCutCount;
+        this.statusMessage =
+          pe > 0
+            ? `Auto-cortados ${auto} · ${pe} excepción(es) por revisar`
+            : `Auto-cortados ${auto} silencios · sin excepciones · listo para oír y exportar`;
       } else {
-        // Browser mock
         this.media = {
           path,
           duration: 60,
@@ -98,13 +233,13 @@ class ProjectStore {
           sizeBytes: 0,
         };
         this.segments = api.demoSegments(60);
-        this.statusMessage = "Modo demo (sin Tauri) / Demo mode";
+        this.statusMessage = "Modo demo (sin app de escritorio)";
         await this.refreshKeepRanges();
+        this.focusReviewStart();
       }
-      this.currentTime = 0;
     } catch (e) {
       this.error = String(e);
-      this.statusMessage = "Error";
+      this.statusMessage = "Error al abrir";
     } finally {
       this.busy = false;
     }
@@ -113,18 +248,23 @@ class ProjectStore {
   async reanalyze() {
     if (!this.mediaPath) return;
     this.busy = true;
-    this.statusMessage = "Re-analizando / Re-analyzing…";
+    this.statusMessage = "Re-analizando…";
     try {
       if (api.isTauri()) {
-        const result = await api.detectSilences(this.mediaPath, this.silenceOptions);
-        this.segments = result.segments;
+        const run = await api.runAnalysis(this.mediaPath, this.silenceOptions);
+        this.applyAnalysisRun(run);
         await this.persistSegments();
-        this.statusMessage = `Re-análisis listo · ${result.method}`;
+        const pe = run.stats.pendingExceptionCount;
+        this.statusMessage =
+          pe > 0
+            ? `Re-análisis · ${pe} excepciones pendientes`
+            : `Re-análisis · ${run.stats.autoCutCount} auto-cortes · sin excepciones`;
       } else {
         this.segments = api.demoSegments(this.duration || 60);
         this.statusMessage = "Demo re-analizado";
+        await this.refreshKeepRanges();
       }
-      await this.refreshKeepRanges();
+      this.focusReviewStart();
     } catch (e) {
       this.error = String(e);
     } finally {
@@ -132,15 +272,97 @@ class ProjectStore {
     }
   }
 
+  async resolveException(exceptionId: string, accept: boolean) {
+    if (!this.analysisRun || !api.isTauri()) {
+      // Local fallback: map exception span to segment
+      const ex = this.pendingExceptions.find((e) => e.id === exceptionId);
+      if (ex) {
+        this.segments = this.segments.map((s) => {
+          if (Math.abs(s.start - ex.span.start) < 0.05 && Math.abs(s.end - ex.span.end) < 0.05) {
+            return {
+              ...s,
+              decision: accept ? ("cut" as const) : ("keep" as const),
+              needsReview: false,
+              label: accept ? "aprobado" : "conservar",
+            };
+          }
+          return s;
+        });
+        void this.refreshKeepRanges();
+      }
+      return;
+    }
+    this.busy = true;
+    try {
+      const run = await api.resolveAnalysisException(
+        this.analysisRun.id,
+        exceptionId,
+        accept ? "accepted" : "rejected",
+      );
+      this.applyAnalysisRun(run);
+      await this.persistSegments();
+      this.focusReviewStart();
+      this.statusMessage = accept ? "Excepción: cortar" : "Excepción: conservar";
+    } catch (e) {
+      this.error = String(e);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  async resolveAllExceptions(accept: boolean) {
+    if (!this.analysisRun || !api.isTauri()) return;
+    this.busy = true;
+    try {
+      const run = await api.resolveAllExceptions(this.analysisRun.id, accept);
+      this.applyAnalysisRun(run);
+      await this.persistSegments();
+      this.focusReviewStart();
+      this.statusMessage = accept ? "Todas las excepciones → cortar" : "Todas → conservar";
+    } catch (e) {
+      this.error = String(e);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  /** @deprecated prefer toggleAndAdvance for consistent UX */
   toggleSegment(id: string) {
-    this.segments = this.segments.map((s) => {
-      if (s.id !== id) return s;
-      const decision: SegmentDecision =
-        s.decision === "keep" ? "cut" : s.decision === "cut" ? "keep" : "keep";
-      return { ...s, decision };
-    });
-    void this.refreshKeepRanges();
-    void this.persistSegments();
+    this.toggleAndAdvance(id);
+  }
+
+  recordExportSuccess(path: string, duration: number) {
+    this.lastExport = {
+      path,
+      duration,
+      keptDuration: this.keptDuration,
+      cutDuration: this.cutDuration,
+    };
+    this.showExportSuccess = true;
+    this.statusMessage = "Exportación lista";
+  }
+
+  dismissExportSuccess() {
+    this.showExportSuccess = false;
+  }
+
+  resetProject() {
+    this.project = null;
+    this.mediaPath = null;
+    this.media = null;
+    this.segments = [];
+    this.waveform = null;
+    this.currentTime = 0;
+    this.isPlaying = false;
+    this.selectedSegmentId = null;
+    this.touchedIds = [];
+    this.keepRanges = [];
+    this.estimate = null;
+    this.lastExport = null;
+    this.showExportSuccess = false;
+    this.analysisRun = null;
+    this.error = null;
+    this.statusMessage = "Listo";
   }
 
   setDecision(id: string, decision: SegmentDecision) {
@@ -238,13 +460,21 @@ class ProjectStore {
     }
   }
 
+  /** Keep ranges from current decisions (always fresh; do not trust async cache). */
+  localKeepRanges(): [number, number][] {
+    return this.segments
+      .filter((s) => s.decision === "keep")
+      .map((s) => [s.start, s.end] as [number, number]);
+  }
+
   /**
-   * Map source time → "edited" timeline time when skip-cuts preview is on.
+   * Source media time → continuous "edited" timeline (after cuts removed).
    */
   sourceToEdited(sourceTime: number): number {
-    if (!this.skipCutsPreview || this.keepRanges.length === 0) return sourceTime;
+    const ranges = this.localKeepRanges();
+    if (!ranges.length) return 0;
     let edited = 0;
-    for (const [s, e] of this.keepRanges) {
+    for (const [s, e] of ranges) {
       if (sourceTime < s) return edited;
       if (sourceTime <= e) return edited + (sourceTime - s);
       edited += e - s;
@@ -253,15 +483,46 @@ class ProjectStore {
   }
 
   /**
+   * Edited timeline time → source media time (for scrubbing the cut preview).
+   */
+  editedToSource(editedTime: number): number {
+    const ranges = this.localKeepRanges();
+    if (!ranges.length) return 0;
+    let remaining = Math.max(0, editedTime);
+    for (const [s, e] of ranges) {
+      const d = e - s;
+      if (remaining <= d + 1e-6) return s + remaining;
+      remaining -= d;
+    }
+    return ranges[ranges.length - 1][1];
+  }
+
+  /**
+   * While playing the cut preview: stay inside KEEP ranges; jump over CUT gaps.
+   * Returns { time, ended } — ended when past the last keep range.
+   */
+  advanceEditedPlayback(sourceTime: number): { time: number; ended: boolean } {
+    const ranges = this.localKeepRanges();
+    if (!ranges.length) return { time: sourceTime, ended: true };
+
+    for (let i = 0; i < ranges.length; i++) {
+      const [s, e] = ranges[i];
+      // In a cut gap before this keep → jump into it
+      if (sourceTime < s) return { time: s, ended: false };
+      // Still inside this keep
+      if (sourceTime < e - 0.04) return { time: sourceTime, ended: false };
+      // Past this keep → try next range in loop
+    }
+    // Past the last keep
+    const last = ranges[ranges.length - 1];
+    return { time: last[1], ended: true };
+  }
+
+  /**
    * If playhead is inside a cut region, jump to the next keep start.
    */
   snapPlayheadOverCuts(sourceTime: number): number {
-    if (!this.skipCutsPreview || this.keepRanges.length === 0) return sourceTime;
-    for (const [s, e] of this.keepRanges) {
-      if (sourceTime >= s && sourceTime < e) return sourceTime;
-      if (sourceTime < s) return s;
-    }
-    return this.keepRanges.at(-1)?.[1] ?? sourceTime;
+    return this.advanceEditedPlayback(sourceTime).time;
   }
 }
 

@@ -1,14 +1,37 @@
 # VigilCut Architecture / Arquitectura
 
-## Philosophy — Human in the loop
+## Philosophy — AI works, human supervises exceptions
 
-VigilCut never exports irreversible decisions without review. The pipeline:
+See also [ARCHITECTURAL_REVIEW.md](./ARCHITECTURAL_REVIEW.md) (CTO mandate).
 
-1. **Analyze** (automated) — VAD, silence, optional audio/color stats  
-2. **Propose** (segments with Keep/Cut/Pending)  
-3. **Supervise** (user toggles, splits, padding, presets)  
-4. **Preview** (playback that jumps cut regions)  
-5. **Approve & export** (FFmpeg concat of Keep ranges)
+Pipeline (engine, 2026-07):
+
+1. **Detect** — emit `Event[]` (e.g. `audio.silence`)  
+2. **Policy** — high-confidence auto `EditOp` (remove); low-confidence → `ExceptionItem`  
+3. **EDL** — compile keep ranges from ops + resolved exceptions  
+4. **Supervise** — human only on exception queue (not every segment)  
+5. **Preview / Export** — same keep ranges via skip-cuts / FFmpeg  
+
+Legacy `Segment[]` is a **UI projection** of events + policy, not the source of truth.
+
+### Factory batch (2026-07)
+
+```
+queue_batch_job / queue_inbox_batch
+  → async worker per file: run_silence_analysis → accept exceptions → export
+  → outbox/*.mp4 + *.json manifest
+  → events: batch://progress, batch://done
+```
+
+CLI (no UI):
+
+```
+cargo run --bin vigilcut-cli -- analyze video.mp4
+cargo run --bin vigilcut-cli -- batch ./inbox ./outbox
+cargo run --bin vigilcut-cli -- export video.mp4
+```
+
+App data: `%APPDATA%/VigilCut/inbox` and `outbox`.
 
 ---
 

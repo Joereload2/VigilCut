@@ -21,6 +21,78 @@ export interface Segment {
   confidence: number;
   label?: string | null;
   energyDb?: number | null;
+  eventId?: string | null;
+  autoApplied?: boolean;
+  needsReview?: boolean;
+}
+
+export interface Span {
+  start: number;
+  end: number;
+}
+
+export interface AnalysisEvent {
+  id: string;
+  runId: string;
+  type: string;
+  detector: string;
+  span: Span;
+  score: number;
+  payload: unknown;
+  tags: string[];
+}
+
+export interface ExceptionItem {
+  id: string;
+  eventIds: string[];
+  reason: "low_confidence" | "policy_conflict" | "duration_edge";
+  span: Span;
+  confidence: number;
+  suggestedOp: "remove_span" | "keep_span";
+  rationale: string;
+  resolution: "pending" | "accepted" | "rejected";
+}
+
+export interface Edl {
+  mediaPath: string;
+  sourceDuration: number;
+  videoTrack: Span[];
+  outputDuration: number;
+  removedDuration: number;
+}
+
+export interface AnalysisStats {
+  eventCount: number;
+  silenceEventCount: number;
+  autoCutCount: number;
+  exceptionCount: number;
+  pendingExceptionCount: number;
+  speechDuration: number;
+  silenceDuration: number;
+  autoRemovedDuration: number;
+  outputDuration: number;
+}
+
+export interface PolicyConfig {
+  autoApproveMinScore: number;
+  minSilenceDuration: number;
+  padding: number;
+  threshold: number;
+  preferSilero: boolean;
+}
+
+export interface AnalysisRun {
+  id: string;
+  mediaPath: string;
+  duration: number;
+  method: string;
+  policy: PolicyConfig;
+  events: AnalysisEvent[];
+  editOps: unknown[];
+  exceptions: ExceptionItem[];
+  edl: Edl;
+  segments: Segment[];
+  stats: AnalysisStats;
 }
 
 export interface SilenceDetectionOptions {

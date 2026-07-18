@@ -43,7 +43,7 @@ body {
     @apply btn bg-vigil-600 text-white hover:bg-vigil-500;
   }
   .btn-secondary {
-    @apply btn bg-surface-800 text-surface-100 hover:bg-surface-700 border border-surface-700;
+    @apply btn border border-surface-700 bg-surface-800 text-surface-100 hover:bg-surface-700;
   }
   .btn-danger {
     @apply btn bg-red-600/90 text-white hover:bg-red-500;
@@ -52,9 +52,15 @@ body {
     @apply btn bg-transparent text-surface-300 hover:bg-surface-800 hover:text-white;
   }
   .panel {
-    @apply rounded-xl border border-surface-800 bg-surface-900/80 shadow-panel;
+    @apply rounded-xl border border-surface-800 bg-surface-900/90 shadow-panel;
   }
   .label {
     @apply text-xs font-medium uppercase tracking-wide text-surface-400;
   }
+}
+
+/* Quieter focus for dense media UI */
+button:focus-visible {
+  outline: 2px solid #22c55e;
+  outline-offset: 1px;
 }

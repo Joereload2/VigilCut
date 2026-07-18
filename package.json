@@ -15,6 +15,8 @@
     "setup:ffmpeg": "node scripts/setup-ffmpeg.mjs",
     "dev:win": "powershell -ExecutionPolicy Bypass -File scripts/dev.ps1",
     "check:all": "powershell -ExecutionPolicy Bypass -File scripts/check.ps1",
+    "cli": "cargo run --manifest-path src-tauri/Cargo.toml --bin vigilcut-cli --",
+    "cli:release": "cargo run --manifest-path src-tauri/Cargo.toml --release --bin vigilcut-cli --",
     "lint": "eslint src --ext .ts,.svelte"
   },
   "dependencies": {

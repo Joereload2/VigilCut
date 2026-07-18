@@ -1,4 +1,8 @@
+pub mod analysis;
+pub mod artifacts;
 pub mod batch;
+pub mod edl;
+pub mod event;
 pub mod media;
 pub mod preset;
 pub mod project;

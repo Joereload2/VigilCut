@@ -21,7 +21,16 @@ impl AppState {
 
     pub fn ensure_dirs(&self) -> AppResult<()> {
         let root = Self::app_data_dir()?;
-        for sub in ["projects", "presets", "cache", "exports", "temp", "models"] {
+        for sub in [
+            "projects",
+            "presets",
+            "cache",
+            "exports",
+            "temp",
+            "models",
+            "inbox",
+            "outbox",
+        ] {
             std::fs::create_dir_all(root.join(sub))?;
         }
         Ok(())

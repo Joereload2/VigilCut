@@ -1,10 +1,11 @@
 mod commands;
 mod error;
 mod ffmpeg;
-mod models;
-mod pipeline;
+pub mod models;
+pub mod pipeline;
 mod state;
 
+use commands::analyze::AnalysisCache;
 use state::AppState;
 use tauri::Manager;
 
@@ -23,6 +24,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .manage(AppState::default())
+        .manage(AnalysisCache::default())
         .invoke_handler(tauri::generate_handler![
             // System
             commands::system::get_app_info,
@@ -32,7 +34,12 @@ pub fn run() {
             commands::media::probe_media,
             commands::media::extract_waveform,
             commands::media::generate_thumbnail,
-            // Analysis (VAD / silence)
+            // Analysis engine (events + policy + EDL)
+            commands::analyze::run_analysis,
+            commands::analyze::get_analysis_run,
+            commands::analyze::resolve_analysis_exception,
+            commands::analyze::resolve_all_exceptions,
+            // Analysis (legacy silence API — still works)
             commands::vad::detect_silences,
             commands::vad::analyze_speech_segments,
             // Project
@@ -54,6 +61,12 @@ pub fn run() {
             commands::presets::delete_preset,
             commands::batch::queue_batch_job,
             commands::batch::get_batch_status,
+            commands::batch::list_batch_jobs,
+            commands::batch::queue_inbox_batch,
+            // Factory paths / multi-artifact
+            commands::factory::get_factory_paths,
+            commands::factory::write_export_artifacts,
+            commands::factory::open_factory_folder,
             // Future-ready stubs
             commands::audio::enhance_audio_preview,
             commands::color::analyze_color_stats,

@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AnalysisRun,
   AppInfo,
   ExportEstimate,
   FfmpegStatus,
@@ -15,6 +16,7 @@ import type {
   WaveformData,
   ExportOptions,
   ColorOptions,
+  PolicyConfig,
 } from "$lib/types";
 
 /** Detect browser-only Vite preview (no Tauri runtime). */
@@ -50,6 +52,94 @@ export async function detectSilences(
   options?: SilenceDetectionOptions,
 ): Promise<SilenceDetectionResult> {
   return invoke("detect_silences", { path, options: options ?? null });
+}
+
+/** Engine analysis: events + policy + EDL + exceptions + segment projection. */
+export async function runAnalysis(
+  path: string,
+  options?: SilenceDetectionOptions,
+  policy?: PolicyConfig,
+): Promise<AnalysisRun> {
+  return invoke("run_analysis", {
+    path,
+    options: options ?? null,
+    policy: policy ?? null,
+  });
+}
+
+export async function resolveAnalysisException(
+  runId: string,
+  exceptionId: string,
+  resolution: "accepted" | "rejected",
+): Promise<AnalysisRun> {
+  return invoke("resolve_analysis_exception", {
+    runId,
+    request: { exceptionId, resolution },
+  });
+}
+
+export async function resolveAllExceptions(
+  runId: string,
+  accept: boolean,
+): Promise<AnalysisRun> {
+  return invoke("resolve_all_exceptions", { runId, accept });
+}
+
+export async function queueBatchJob(
+  mediaPaths: string[],
+  outputDir: string,
+  autoAcceptExceptions = true,
+): Promise<unknown> {
+  return invoke("queue_batch_job", {
+    mediaPaths,
+    outputDir,
+    presetId: "factory",
+    autoAcceptExceptions,
+    options: null,
+  });
+}
+
+export async function getBatchStatus(id: string): Promise<unknown> {
+  return invoke("get_batch_status", { id });
+}
+
+export async function listBatchJobs(): Promise<unknown[]> {
+  if (!isTauri()) return [];
+  return invoke("list_batch_jobs");
+}
+
+export async function queueInboxBatch(
+  inboxDir: string,
+  outputDir: string | null = null,
+  autoAcceptExceptions = true,
+): Promise<unknown> {
+  return invoke("queue_inbox_batch", {
+    inboxDir,
+    outputDir,
+    autoAcceptExceptions,
+  });
+}
+
+export async function getFactoryPaths(): Promise<{
+  appData: string;
+  inbox: string;
+  outbox: string;
+  exports: string;
+  models: string;
+  cache: string;
+}> {
+  return invoke("get_factory_paths");
+}
+
+export async function writeExportArtifacts(
+  runId: string,
+  outputPath: string,
+): Promise<unknown[]> {
+  return invoke("write_export_artifacts", { runId, outputPath });
+}
+
+export async function openFactoryFolder(which: string): Promise<string> {
+  return invoke("open_factory_folder", { which });
 }
 
 export async function createProject(name: string, mediaPath: string): Promise<Project> {
@@ -144,16 +234,23 @@ export function demoSegments(duration = 60): Segment[] {
       kind: "speech",
       decision: "keep",
       confidence: 0.95,
+      autoApplied: false,
+      needsReview: false,
     });
     t += speech;
     if (t >= duration) break;
+    const conf = i % 3 === 0 ? 0.72 : 0.9;
+    const auto = conf >= 0.8;
     segs.push({
       id: `demo-z-${i}`,
       start: t,
       end: Math.min(t + silence, duration),
       kind: "silence",
-      decision: "cut",
-      confidence: 0.9,
+      decision: auto ? "cut" : "pending",
+      confidence: conf,
+      autoApplied: auto,
+      needsReview: !auto,
+      label: auto ? "auto" : "revisar",
     });
     t += silence;
     i++;

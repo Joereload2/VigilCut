@@ -13,10 +13,16 @@ pub struct ExportPlan {
 }
 
 /// Build keep ranges from user-approved segments (decision == Keep).
+/// Pending (unresolved exceptions) are treated as Keep (conservative).
 pub fn keep_ranges_from_segments(segments: &[Segment]) -> Vec<(f64, f64)> {
     let mut ranges: Vec<(f64, f64)> = segments
         .iter()
-        .filter(|s| s.decision == SegmentDecision::Keep)
+        .filter(|s| {
+            matches!(
+                s.decision,
+                SegmentDecision::Keep | SegmentDecision::Pending
+            )
+        })
         .map(|s| (s.start, s.end))
         .collect();
 
