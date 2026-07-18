@@ -44,6 +44,8 @@ Documentación:
 cd VigilCut
 npm install
 npm run setup:ffmpeg
+npm run setup:models    # Silero VAD ONNX (~2 MB)
+# Opcional: whisper o whisper-cli en PATH → subtítulos + muletillas
 # Rust + VS Build Tools en Windows
 npm run dev:win
 ```

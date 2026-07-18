@@ -53,6 +53,15 @@ impl AppState {
     }
 
     pub fn models_dir() -> AppResult<PathBuf> {
-        Ok(Self::app_data_dir()?.join("models"))
+        let primary = Self::app_data_dir()?.join("models");
+        if primary.join("silero_vad.onnx").is_file() {
+            return Ok(primary);
+        }
+        // Dev fallback: project-local models/
+        let local = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("models");
+        if local.join("silero_vad.onnx").is_file() {
+            return Ok(local);
+        }
+        Ok(primary)
     }
 }

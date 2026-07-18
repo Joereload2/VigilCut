@@ -14,15 +14,16 @@
 - [x] **Watch inbox** + procesar inbox ahora  
 - [x] Documentación arquitectura / CTO  
 
-## Siguiente (v1.2 — modelos ML)
+## Hecho (v1.2 ML path)
 
-- [ ] Silero VAD real (ONNX sobre cache wav)  
-- [ ] Whisper local → captions SRT  
-- [ ] Detector muletillas sobre transcript  
-- [ ] Policy packs por canal  
+- [x] Silero VAD ONNX real (`ort`, model `silero_vad.onnx`) + fallback FFmpeg  
+- [x] Whisper CLI opcional → SRT + detector de muletillas  
+- [x] `npm run setup:models`  
 
 ## Más adelante
 
-- [ ] GPU opcional  
+- [ ] Policy packs por canal  
+- [ ] GPU / DirectML  
 - [ ] Métricas human-seconds / media-minute  
 - [ ] LLM local para CTA / frases memorables  
+- [ ] whisper.cpp embebido (sin CLI externa)  

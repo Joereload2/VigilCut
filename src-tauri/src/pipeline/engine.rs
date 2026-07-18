@@ -31,11 +31,31 @@ pub async fn run_silence_analysis(
     // Build alternating speech/silence events covering [0, duration]
     let mut events = ranges_to_events(&run_id, duration, &silence_ranges, &method, policy);
 
-    // Structure detectors (chapters, short candidates) — pure event enrichers
+    // Structure detectors (chapters, shorts, breath)
     crate::pipeline::detectors::enrich_events(&run_id, duration, &mut events);
 
+    // Optional Whisper captions → filler events (if whisper CLI installed)
+    let mut caption_srt: Option<std::path::PathBuf> = None;
+    match crate::pipeline::detectors::whisper_cli::try_generate_srt(media_path).await {
+        Ok(Some(cap)) => {
+            tracing::info!("Whisper captions via {}", cap.method);
+            caption_srt = Some(cap.srt_path.clone());
+            if let Ok(fillers) =
+                crate::pipeline::detectors::detect_fillers_from_srt(&run_id, &cap.srt_path)
+            {
+                events.extend(fillers);
+            }
+        }
+        Ok(None) => {
+            tracing::debug!("No whisper CLI on PATH — skip captions/fillers");
+        }
+        Err(e) => tracing::warn!("Whisper failed: {e}"),
+    }
+
     // Policy: high-confidence silence → auto remove; low → exception
-    let (edit_ops, exceptions) = apply_silence_policy(&events, policy);
+    // Also auto-cut high-confidence fillers if present
+    let (mut edit_ops, exceptions) = apply_silence_policy(&events, policy);
+    edit_ops.extend(apply_filler_policy(&events, policy));
 
     // Effective removes = auto ops + accepted exceptions (none yet at first run)
     let remove_spans = effective_removes(&edit_ops, &exceptions);
@@ -66,7 +86,7 @@ pub async fn run_silence_analysis(
         .map(|o| o.span.duration())
         .sum();
 
-    Ok(AnalysisRun {
+    let mut run = AnalysisRun {
         id: run_id,
         media_path: path_str,
         duration,
@@ -90,7 +110,18 @@ pub async fn run_silence_analysis(
         },
         artifacts: Vec::new(),
     }
-    .with_stats_filled())
+    .with_stats_filled();
+
+    // Stash caption path as pseudo-artifact for later copy on export
+    if let Some(srt) = caption_srt {
+        run.artifacts.push(crate::models::artifacts::ArtifactRef {
+            kind: "captions_srt_cache".into(),
+            path: srt.to_string_lossy().into_owned(),
+            label: Some("Captions (cache)".into()),
+        });
+    }
+
+    Ok(run)
 }
 
 trait WithStats {
@@ -112,7 +143,6 @@ async fn detect_silence_ranges(
     media_path: &Path,
     policy: &PolicyConfig,
 ) -> AppResult<(String, Vec<(f64, f64)>)> {
-    let ffmpeg = Ffmpeg::new()?;
     let silero_model = AppState::models_dir()
         .ok()
         .map(|d| d.join("silero_vad.onnx"));
@@ -121,18 +151,30 @@ async fn detect_silence_ranges(
         .map(|p| p.is_file())
         .unwrap_or(false);
 
+    if policy.prefer_silero && silero_available {
+        match crate::pipeline::detectors::detect_silences_silero(
+            media_path,
+            policy.min_silence_duration,
+            policy.threshold,
+        )
+        .await
+        {
+            Ok(ranges) => {
+                tracing::info!("Silero VAD OK ({} ranges)", ranges.len());
+                return Ok(("silero_vad".into(), ranges));
+            }
+            Err(e) => {
+                tracing::warn!("Silero VAD failed, falling back to FFmpeg: {e}");
+            }
+        }
+    }
+
+    let ffmpeg = Ffmpeg::new()?;
     let noise_db = threshold_to_noise_db(policy.threshold);
     let ranges = ffmpeg
         .detect_silences_ffmpeg(media_path, noise_db, policy.min_silence_duration)
         .await?;
-
-    let method = if policy.prefer_silero && silero_available {
-        "silero_vad+ffmpeg_fallback".to_string()
-    } else {
-        "ffmpeg_silencedetect".to_string()
-    };
-
-    Ok((method, ranges))
+    Ok(("ffmpeg_silencedetect".into(), ranges))
 }
 
 fn threshold_to_noise_db(threshold: f64) -> f64 {
@@ -246,8 +288,10 @@ fn ranges_to_events(
 }
 
 fn silence_confidence(duration: f64, method: &str) -> f64 {
-    let base = if method.contains("silero") && !method.contains("fallback") {
-        0.92
+    let base = if method == "silero_vad" {
+        0.93
+    } else if method.contains("silero") {
+        0.88
     } else {
         0.84 // ffmpeg silencedetect — good enough for factory auto-cut
     };
@@ -292,6 +336,31 @@ fn apply_silence_policy(
     }
 
     (ops, exceptions)
+}
+
+fn apply_filler_policy(events: &[Event], policy: &PolicyConfig) -> Vec<EditOp> {
+    use crate::pipeline::detectors::TYPE_SPEECH_FILLER;
+    let mut ops = Vec::new();
+    for ev in events.iter().filter(|e| e.event_type == TYPE_SPEECH_FILLER) {
+        // Slightly higher bar for auto-removing speech-like fillers
+        let thr = (policy.auto_approve_min_score + 0.05).min(0.95);
+        if ev.score >= thr {
+            ops.push(EditOp::remove(
+                ev.span,
+                vec![ev.id.clone()],
+                format!(
+                    "Auto-cut filler ({:.0}%): {}",
+                    ev.score * 100.0,
+                    ev.payload
+                        .get("text")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?")
+                ),
+                true,
+            ));
+        }
+    }
+    ops
 }
 
 fn effective_removes(ops: &[EditOp], exceptions: &[ExceptionItem]) -> Vec<(f64, f64)> {

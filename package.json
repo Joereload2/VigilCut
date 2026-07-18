@@ -13,6 +13,7 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "setup:ffmpeg": "node scripts/setup-ffmpeg.mjs",
+    "setup:models": "node scripts/setup-models.mjs",
     "dev:win": "powershell -ExecutionPolicy Bypass -File scripts/dev.ps1",
     "check:all": "powershell -ExecutionPolicy Bypass -File scripts/check.ps1",
     "cli": "cargo run --manifest-path src-tauri/Cargo.toml --bin vigilcut-cli --",

@@ -120,6 +120,25 @@ pub async fn write_run_artifacts(
         .iter()
         .filter(|e| e.event_type == "audio.breath")
         .count();
+    let fillers = run
+        .events
+        .iter()
+        .filter(|e| e.event_type == "speech.filler")
+        .count();
+
+    // Copy cached SRT next to export if present
+    for a in &run.artifacts {
+        if a.kind == "captions_srt_cache" {
+            let dest = dir.join(format!("{stem}.srt"));
+            if std::fs::copy(&a.path, &dest).is_ok() {
+                artifacts.push(ArtifactRef {
+                    kind: "captions_srt".into(),
+                    path: dest.to_string_lossy().into_owned(),
+                    label: Some("Subtítulos SRT".into()),
+                });
+            }
+        }
+    }
 
     let manifest = serde_json::json!({
         "source": run.media_path,
@@ -133,6 +152,7 @@ pub async fn write_run_artifacts(
         "shorts": shorts,
         "shortClips": short_clips,
         "breathEvents": breaths,
+        "fillerEvents": fillers,
         "extra": extra,
     });
     let manifest_path = dir.join(format!("{stem}.json"));
