@@ -89,11 +89,12 @@ export async function queueBatchJob(
   mediaPaths: string[],
   outputDir: string,
   autoAcceptExceptions = true,
+  policyPackId = "factory",
 ): Promise<unknown> {
   return invoke("queue_batch_job", {
     mediaPaths,
     outputDir,
-    presetId: "factory",
+    presetId: policyPackId,
     autoAcceptExceptions,
     options: null,
   });
@@ -166,6 +167,27 @@ export async function getInboxWatchStatus(): Promise<{
 
 export async function processFactoryInboxNow(): Promise<unknown> {
   return invoke("process_factory_inbox_now");
+}
+
+export async function listPolicyPacks(): Promise<
+  {
+    id: string;
+    name: string;
+    description?: string | null;
+    policy: {
+      autoApproveMinScore: number;
+      minSilenceDuration: number;
+      padding: number;
+      threshold: number;
+      preferSilero: boolean;
+    };
+    cutFillers: boolean;
+    exportShorts: boolean;
+    isBuiltin: boolean;
+  }[]
+> {
+  if (!isTauri()) return [];
+  return invoke("list_policy_packs");
 }
 
 export async function createProject(name: string, mediaPath: string): Promise<Project> {

@@ -4,6 +4,7 @@ use tauri::State;
 use crate::commands::analyze::AnalysisCache;
 use crate::error::{AppError, AppResult};
 use crate::models::artifacts::ArtifactRef;
+use crate::models::policy_pack::{builtin_policy_packs, PolicyPack};
 use crate::pipeline::artifacts::write_run_artifacts;
 use crate::state::AppState;
 
@@ -82,4 +83,50 @@ pub async fn open_factory_folder(which: String) -> AppResult<String> {
     };
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
+}
+
+#[tauri::command]
+pub fn list_policy_packs() -> AppResult<Vec<PolicyPack>> {
+    let mut packs = builtin_policy_packs();
+    if let Ok(dir) = AppState::app_data_dir().map(|d| d.join("policies")) {
+        if dir.is_dir() {
+            if let Ok(rd) = std::fs::read_dir(dir) {
+                for e in rd.flatten() {
+                    let p = e.path();
+                    if p.extension().and_then(|x| x.to_str()) != Some("json") {
+                        continue;
+                    }
+                    if let Ok(data) = std::fs::read_to_string(&p) {
+                        if let Ok(mut pack) = serde_json::from_str::<PolicyPack>(&data) {
+                            pack.is_builtin = false;
+                            if let Some(pos) = packs.iter().position(|x| x.id == pack.id) {
+                                packs[pos] = pack;
+                            } else {
+                                packs.push(pack);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(packs)
+}
+
+#[tauri::command]
+pub fn get_policy_pack(id: String) -> AppResult<PolicyPack> {
+    list_policy_packs()?
+        .into_iter()
+        .find(|p| p.id == id)
+        .ok_or_else(|| AppError::NotFound(format!("Policy pack {id}")))
+}
+
+#[tauri::command]
+pub fn save_policy_pack(mut pack: PolicyPack) -> AppResult<PolicyPack> {
+    pack.is_builtin = false;
+    let dir = AppState::app_data_dir()?.join("policies");
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join(format!("{}.json", pack.id));
+    std::fs::write(path, serde_json::to_string_pretty(&pack)?)?;
+    Ok(pack)
 }

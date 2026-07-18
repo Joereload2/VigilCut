@@ -1,7 +1,7 @@
 [package]
 name = "vigilcut"
-version = "0.1.0"
-description = "VigilCut — human-supervised local video editor"
+version = "1.0.0"
+description = "VigilCut Factory — local AI content post-production engine"
 authors = ["VigilCut Contributors"]
 license = "MIT"
 repository = "https://github.com/vigilcut/vigilcut"

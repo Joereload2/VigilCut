@@ -20,10 +20,15 @@
 - [x] Whisper CLI opcional → SRT + detector de muletillas  
 - [x] `npm run setup:models`  
 
-## Más adelante
+## Hecho (v1.0 release)
 
-- [ ] Policy packs por canal  
+- [x] Policy packs (factory, youtube, podcast, gentle, shorts-first)  
+- [x] Versión 1.0.0  
+
+## Post-1.0 (opcional)
+
 - [ ] GPU / DirectML  
 - [ ] Métricas human-seconds / media-minute  
 - [ ] LLM local para CTA / frases memorables  
 - [ ] whisper.cpp embebido (sin CLI externa)  
+- [ ] Policy packs custom UI editor  

@@ -47,9 +47,16 @@ pub fn queue_batch_job(
         .map_err(|e| AppError::Message(e.to_string()))?
         .insert(job.id.clone(), job.clone());
 
+    let pack_id = job.preset_id.clone();
     let policy = options
         .as_ref()
         .map(policy_from_silence_options)
+        .or_else(|| {
+            crate::models::policy_pack::builtin_policy_packs()
+                .into_iter()
+                .find(|p| p.id == pack_id)
+                .map(|p| p.policy)
+        })
         .unwrap_or_default();
 
     let job_id = job.id.clone();

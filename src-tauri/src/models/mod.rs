@@ -4,6 +4,7 @@ pub mod batch;
 pub mod edl;
 pub mod event;
 pub mod media;
+pub mod policy_pack;
 pub mod preset;
 pub mod project;
 pub mod segment;

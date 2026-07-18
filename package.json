@@ -1,7 +1,7 @@
 {
   "name": "vigilcut",
-  "version": "0.1.0",
-  "description": "Local open-source desktop video editor with human-in-the-loop supervision",
+  "version": "1.0.0",
+  "description": "Local AI content factory engine — Events → Policy → EDL → Artifacts",
   "type": "module",
   "license": "MIT",
   "scripts": {

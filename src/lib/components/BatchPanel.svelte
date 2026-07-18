@@ -36,6 +36,8 @@
   let panelOpen = $state(true);
   let watchRunning = $state(false);
   let watchMsg = $state("");
+  let packs = $state<{ id: string; name: string }[]>([]);
+  let policyId = $state("factory");
 
   onMount(() => {
     if (!api.isTauri()) return;
@@ -45,6 +47,11 @@
         watchRunning = st.running;
       } catch {
         /* ignore */
+      }
+      try {
+        packs = (await api.listPolicyPacks()).map((p) => ({ id: p.id, name: p.name }));
+      } catch {
+        packs = [{ id: "factory", name: "Factory default" }];
       }
       unsubs.push(
         await listen<BatchJob>("batch://progress", (e) => {
@@ -99,7 +106,7 @@
       });
       if (!out || typeof out !== "string") return;
 
-      const started = await api.queueBatchJob(paths, out, true);
+      const started = await api.queueBatchJob(paths, out, true, policyId);
       job = started as BatchJob;
       panelOpen = true;
       projectStore.statusMessage = `Lote ${paths.length} archivos en curso…`;
@@ -204,6 +211,20 @@
           Ver outbox
         </button>
       </div>
+
+      {#if packs.length}
+        <label class="block text-[11px] text-surface-400">
+          Policy pack
+          <select
+            class="mt-1 w-full rounded-lg border border-surface-700 bg-surface-950 px-2 py-1.5 text-xs text-surface-100"
+            bind:value={policyId}
+          >
+            {#each packs as p}
+              <option value={p.id}>{p.name}</option>
+            {/each}
+          </select>
+        </label>
+      {/if}
 
       {#if watchMsg}
         <p class="text-[10px] text-vigil-400">{watchMsg}</p>

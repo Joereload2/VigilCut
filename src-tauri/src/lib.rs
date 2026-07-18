@@ -69,6 +69,9 @@ pub fn run() {
             commands::factory::get_factory_paths,
             commands::factory::write_export_artifacts,
             commands::factory::open_factory_folder,
+            commands::factory::list_policy_packs,
+            commands::factory::get_policy_pack,
+            commands::factory::save_policy_pack,
             // Inbox watch
             commands::watch::start_inbox_watch,
             commands::watch::stop_inbox_watch,

@@ -36,12 +36,13 @@ fn main() -> ExitCode {
         "analyze" => {
             let path = args.first().cloned().unwrap_or_default();
             if path.is_empty() {
-                eprintln!("usage: vigilcut-cli analyze <video>");
+                eprintln!("usage: vigilcut-cli analyze <video> [--policy factory|youtube|podcast|gentle|shorts-first]");
                 return ExitCode::FAILURE;
             }
+            let policy = policy_from_args(&args);
             match rt.block_on(run_silence_analysis(
                 PathBuf::from(&path).as_path(),
-                &PolicyConfig::default(),
+                &policy,
             )) {
                 Ok(run) => {
                     println!("run_id={}", run.id);
@@ -106,8 +107,9 @@ fn main() -> ExitCode {
                 .map(|p| p.to_string_lossy().into_owned())
                 .collect();
             println!("batch {} files → {outbox}", paths.len());
+            let policy = policy_from_args(&args);
             let job = BatchJob::new(paths, "cli".into(), outbox, true);
-            let done = rt.block_on(run_batch_job(job, PolicyConfig::default()));
+            let done = rt.block_on(run_batch_job(job, policy));
             println!(
                 "done: {} ok, {} failed, status={:?}",
                 done.completed, done.failed, done.status
@@ -177,19 +179,40 @@ fn main() -> ExitCode {
     }
 }
 
+fn policy_from_args(args: &[String]) -> PolicyConfig {
+    use vigilcut_lib::models::policy_pack::builtin_policy_packs;
+    let mut id = "factory";
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--policy" {
+            if let Some(v) = args.get(i + 1) {
+                id = v.as_str();
+            }
+            break;
+        }
+        if let Some(rest) = args[i].strip_prefix("--policy=") {
+            id = rest;
+            break;
+        }
+        i += 1;
+    }
+    builtin_policy_packs()
+        .into_iter()
+        .find(|p| p.id == id)
+        .map(|p| p.policy)
+        .unwrap_or_default()
+}
+
 fn print_help() {
     eprintln!(
         "\
-VigilCut CLI — factory engine (no UI)
+VigilCut CLI v1.0 — factory engine (no UI)
 
-  vigilcut-cli analyze <video.mp4>
-      Run silence analysis; print auto-cuts and exceptions.
-
+  vigilcut-cli analyze <video.mp4> [--policy factory|youtube|podcast|gentle|shorts-first]
   vigilcut-cli export <video.mp4> [out.mp4]
-      Analyze, auto-accept exceptions, export cut video.
+  vigilcut-cli batch <inbox_dir> [outbox_dir] [--policy ...]
 
-  vigilcut-cli batch <inbox_dir> [outbox_dir]
-      Process all videos in folder (exceptions auto-accepted).
+  Policies: factory (default), youtube, podcast, gentle, shorts-first
 
 Factory dirs (desktop app):
   %APPDATA%/VigilCut/inbox
