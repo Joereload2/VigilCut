@@ -7,10 +7,15 @@ license = "MIT"
 repository = "https://github.com/vigilcut/vigilcut"
 edition = "2021"
 rust-version = "1.77"
+default-run = "vigilcut"
 
 [lib]
 name = "vigilcut_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "vigilcut"
+path = "src/main.rs"
 
 [[bin]]
 name = "vigilcut-cli"
