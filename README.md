@@ -31,9 +31,10 @@ Documentación:
    - `*.json` manifiesto
    - `*.events.json` · `*.edl.json`
    - `*.chapters.json` + `*.chapters.txt` (YouTube)
-   - `*.shorts.json` (candidatos)
-6. **Batch** de muchos archivos (inbox → outbox)  
+   - `*.shorts.json` + carpeta `*-shorts/short-01.mp4` … (clips reales)
+6. **Batch** + **watch inbox** (auto-procesa crudos)  
 7. **CLI** sin UI para automatización  
+8. Cache de audio 16 kHz + detectores breath / chapters / shorts
 
 ---
 

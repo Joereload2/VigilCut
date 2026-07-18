@@ -21,6 +21,11 @@ pub async fn run_silence_analysis(
     let duration = info.duration;
     let path_str = media_path.to_string_lossy().into_owned();
 
+    // Warm feature cache (16 kHz mono) for future Silero / Whisper detectors
+    if let Err(e) = crate::pipeline::features::ensure_audio_16k(media_path).await {
+        tracing::debug!("feature cache wav skip: {e}");
+    }
+
     let (method, silence_ranges) = detect_silence_ranges(media_path, policy).await?;
 
     // Build alternating speech/silence events covering [0, duration]

@@ -36,7 +36,7 @@ pub fn get_factory_paths() -> AppResult<FactoryPaths> {
 
 /// After a single-file export, write chapters/shorts/events/EDL/manifest next to the mp4.
 #[tauri::command]
-pub fn write_export_artifacts(
+pub async fn write_export_artifacts(
     run_id: String,
     output_path: String,
     cache: State<'_, AnalysisCache>,
@@ -59,11 +59,15 @@ pub fn write_export_artifacts(
         })
         .ok_or_else(|| AppError::NotFound(format!("Analysis run {run_id}")))?;
 
+    let source = std::path::PathBuf::from(&run.media_path);
     write_run_artifacts(
         &run,
         std::path::Path::new(&output_path),
+        &source,
+        true,
         serde_json::json!({ "singleExport": true }),
     )
+    .await
 }
 
 /// Open factory inbox folder in the OS file manager.

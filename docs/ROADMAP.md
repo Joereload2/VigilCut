@@ -1,27 +1,28 @@
 # Roadmap — VigilCut Factory
 
-## Hecho (v1)
+## Hecho (v1 / v1.1 factory)
 
 - [x] Engine silence: Events + Policy + EDL  
 - [x] Auto-approve alta confianza + cola de excepciones  
 - [x] Preview video cortado  
-- [x] Export multi-artefacto (mp4, chapters, shorts, events, edl, manifest)  
+- [x] Export multi-artefacto (mp4, chapters, shorts JSON, events, edl, manifest)  
+- [x] **Export real de shorts** (top 5 MP4 en carpeta `*-shorts/`)  
 - [x] Batch worker async + UI lote  
 - [x] CLI `vigilcut-cli` (analyze / export / batch)  
-- [x] Detectores de estructura: capítulos + short candidates  
+- [x] Detectores: capítulos, short candidates, breath/micro-pause  
+- [x] Feature cache wav 16 kHz por hash  
+- [x] **Watch inbox** + procesar inbox ahora  
 - [x] Documentación arquitectura / CTO  
 
-## Siguiente (v1.1)
+## Siguiente (v1.2 — modelos ML)
 
-- [ ] Silero VAD real (ONNX)  
-- [ ] Whisper local → captions SRT artifact  
-- [ ] Watch de carpeta inbox  
-- [ ] Detector muletillas (sobre transcript)  
-- [ ] Export real de clips short (no solo JSON candidatos)  
+- [ ] Silero VAD real (ONNX sobre cache wav)  
+- [ ] Whisper local → captions SRT  
+- [ ] Detector muletillas sobre transcript  
+- [ ] Policy packs por canal  
 
 ## Más adelante
 
-- [ ] Feature cache (wav16k hash)  
-- [ ] Policy packs por marca/canal  
 - [ ] GPU opcional  
 - [ ] Métricas human-seconds / media-minute  
+- [ ] LLM local para CTA / frases memorables  

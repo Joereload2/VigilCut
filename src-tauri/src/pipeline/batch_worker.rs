@@ -89,12 +89,15 @@ async fn run_one(
     let artifacts = write_run_artifacts(
         &run,
         out_path,
+        media_path,
+        true, // export real short clips
         serde_json::json!({
             "autoCuts": auto_cuts,
             "exceptionsForced": exceptions_forced,
             "factory": true,
         }),
-    )?;
+    )
+    .await?;
     run.artifacts = artifacts;
 
     Ok(BatchFileResult {

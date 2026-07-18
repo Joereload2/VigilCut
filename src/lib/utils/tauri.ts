@@ -142,6 +142,32 @@ export async function openFactoryFolder(which: string): Promise<string> {
   return invoke("open_factory_folder", { which });
 }
 
+export async function startInboxWatch(): Promise<{
+  running: boolean;
+  inbox: string;
+  outbox: string;
+  processedCount: number;
+}> {
+  return invoke("start_inbox_watch");
+}
+
+export async function stopInboxWatch(): Promise<void> {
+  return invoke("stop_inbox_watch");
+}
+
+export async function getInboxWatchStatus(): Promise<{
+  running: boolean;
+  inbox: string;
+  outbox: string;
+  processedCount: number;
+}> {
+  return invoke("get_inbox_watch_status");
+}
+
+export async function processFactoryInboxNow(): Promise<unknown> {
+  return invoke("process_factory_inbox_now");
+}
+
 export async function createProject(name: string, mediaPath: string): Promise<Project> {
   return invoke("create_project", { name, mediaPath });
 }

@@ -3,6 +3,7 @@ pub mod batch_worker;
 pub mod detectors;
 pub mod engine;
 pub mod export;
+pub mod features;
 pub mod silence;
 
 pub use engine::{

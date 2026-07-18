@@ -197,6 +197,45 @@ pub async fn export_with_cuts(
     Ok(output.to_path_buf())
 }
 
+/// Export a single source span as a standalone clip (e.g. Short).
+pub async fn export_clip(
+    input: &Path,
+    output: &Path,
+    start: f64,
+    end: f64,
+    export_opts: &ExportOptions,
+) -> AppResult<PathBuf> {
+    let ffmpeg = Ffmpeg::new()?;
+    let start = start.max(0.0);
+    let end = end.max(start + 0.1);
+    let mut args = vec![
+        "-y".into(),
+        "-ss".into(),
+        format!("{start:.3}"),
+        "-to".into(),
+        format!("{end:.3}"),
+        "-i".into(),
+        input.to_string_lossy().into_owned(),
+        "-c:v".into(),
+        export_opts.video_codec.clone(),
+        "-crf".into(),
+        export_opts.crf.to_string(),
+        "-preset".into(),
+        export_opts.preset.clone(),
+        "-c:a".into(),
+        export_opts.audio_codec.clone(),
+        "-b:a".into(),
+        format!("{}k", export_opts.audio_bitrate_k),
+        "-movflags".into(),
+        "+faststart".into(),
+        output.to_string_lossy().into_owned(),
+    ];
+    // avoid unused mut warning if we extend later
+    let _ = &mut args;
+    ffmpeg.run(&args).await?;
+    Ok(output.to_path_buf())
+}
+
 pub fn estimate_export(segments: &[Segment]) -> ExportPlan {
     let keep_ranges = keep_ranges_from_segments(segments);
     let estimated_duration = keep_ranges.iter().map(|(s, e)| e - s).sum();

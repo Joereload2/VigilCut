@@ -33,11 +33,19 @@
 
   let job = $state<BatchJob | null>(null);
   let unsubs: UnlistenFn[] = [];
-  let panelOpen = $state(false);
+  let panelOpen = $state(true);
+  let watchRunning = $state(false);
+  let watchMsg = $state("");
 
   onMount(() => {
     if (!api.isTauri()) return;
     void (async () => {
+      try {
+        const st = await api.getInboxWatchStatus();
+        watchRunning = st.running;
+      } catch {
+        /* ignore */
+      }
       unsubs.push(
         await listen<BatchJob>("batch://progress", (e) => {
           job = e.payload;
@@ -47,6 +55,16 @@
         await listen<BatchJob>("batch://done", (e) => {
           job = e.payload;
           projectStore.statusMessage = `Lote terminado · ${e.payload.completed} ok · ${e.payload.failed} fallos`;
+        }),
+      );
+      unsubs.push(
+        await listen<{ path: string }>("watch://processing", (e) => {
+          watchMsg = `Procesando ${e.payload.path.split(/[/\\]/).pop()}`;
+        }),
+      );
+      unsubs.push(
+        await listen("watch://done", () => {
+          watchMsg = "Archivo de inbox listo en outbox";
         }),
       );
     })();
@@ -131,8 +149,44 @@
         <button type="button" class="btn-primary text-xs" onclick={pickFilesAndRun}>
           Procesar archivos…
         </button>
+        <button
+          type="button"
+          class="btn-secondary text-xs"
+          onclick={async () => {
+            try {
+              const started = await api.processFactoryInboxNow();
+              job = started as BatchJob;
+              projectStore.statusMessage = "Procesando inbox de fábrica…";
+            } catch (e) {
+              projectStore.error = String(e);
+            }
+          }}
+        >
+          Procesar inbox ahora
+        </button>
         <button type="button" class="btn-secondary text-xs" onclick={runInbox}>
-          Carpeta inbox…
+          Otra carpeta…
+        </button>
+        <button
+          type="button"
+          class="btn-ghost text-xs"
+          onclick={async () => {
+            try {
+              if (watchRunning) {
+                await api.stopInboxWatch();
+                watchRunning = false;
+                watchMsg = "Watch detenido";
+              } else {
+                const st = await api.startInboxWatch();
+                watchRunning = st.running;
+                watchMsg = "Watch activo: deja vídeos en inbox";
+              }
+            } catch (e) {
+              projectStore.error = String(e);
+            }
+          }}
+        >
+          {watchRunning ? "■ Parar watch" : "▶ Watch inbox"}
         </button>
         <button
           type="button"
@@ -150,6 +204,10 @@
           Ver outbox
         </button>
       </div>
+
+      {#if watchMsg}
+        <p class="text-[10px] text-vigil-400">{watchMsg}</p>
+      {/if}
 
       {#if job}
         <div class="rounded-lg bg-surface-950 p-2 text-[11px]">

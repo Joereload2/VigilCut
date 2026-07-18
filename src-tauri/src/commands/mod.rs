@@ -11,3 +11,4 @@ pub mod subtitles;
 pub mod system;
 pub mod timeline;
 pub mod vad;
+pub mod watch;

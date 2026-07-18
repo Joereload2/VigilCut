@@ -6,6 +6,7 @@ pub mod pipeline;
 mod state;
 
 use commands::analyze::AnalysisCache;
+use commands::watch::InboxWatchState;
 use state::AppState;
 use tauri::Manager;
 
@@ -25,6 +26,7 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .manage(AppState::default())
         .manage(AnalysisCache::default())
+        .manage(InboxWatchState::default())
         .invoke_handler(tauri::generate_handler![
             // System
             commands::system::get_app_info,
@@ -67,6 +69,11 @@ pub fn run() {
             commands::factory::get_factory_paths,
             commands::factory::write_export_artifacts,
             commands::factory::open_factory_folder,
+            // Inbox watch
+            commands::watch::start_inbox_watch,
+            commands::watch::stop_inbox_watch,
+            commands::watch::get_inbox_watch_status,
+            commands::watch::process_factory_inbox_now,
             // Future-ready stubs
             commands::audio::enhance_audio_preview,
             commands::color::analyze_color_stats,
