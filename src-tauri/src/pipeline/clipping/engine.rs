@@ -37,32 +37,67 @@ pub async fn run_clipping_analysis(
     let mut transcript_source = TranscriptSourceKind::AnalysisSpeechFallback;
     let mut has_real = false;
 
-    let cues = if let Some(ref tp) = options.transcript_path {
-        match load_transcript_cues(Path::new(tp)) {
+    // 1) Explicit transcript path
+    // 2) Sidecar .srt / .vtt next to the media
+    // 3) Optional Whisper CLI when prefer_whisper
+    // 4) Speech-event fallback from silence engine
+    let mut cues = Vec::new();
+
+    let explicit = options.transcript_path.clone().filter(|p| !p.is_empty());
+    let sidecar = find_sidecar_transcript(media_path);
+
+    for (label, path) in [
+        ("explicit", explicit.as_deref()),
+        ("sidecar", sidecar.as_deref()),
+    ] {
+        if !cues.is_empty() {
+            break;
+        }
+        let Some(p) = path else { continue };
+        match load_transcript_cues(Path::new(p)) {
             Ok((c, kind)) => {
                 transcript_source = kind;
                 has_real = true;
-                c
+                cues = c;
+                if label == "sidecar" {
+                    warnings.push(format!("Transcripción: {p}"));
+                }
             }
             Err(e) => {
-                warnings.push(format!("Transcript import failed ({e}); using speech fallback"));
-                Vec::new()
+                if label == "explicit" {
+                    warnings.push(format!("Transcript import failed ({e})"));
+                }
             }
         }
-    } else {
-        Vec::new()
-    };
+    }
 
-    let cues = if cues.is_empty() {
-        // Reuse silence engine speech spans as timing backbone
+    if cues.is_empty() && options.prefer_whisper {
+        match crate::pipeline::detectors::whisper_cli::try_generate_srt(media_path).await {
+            Ok(Some(cap)) => match load_transcript_cues(&cap.srt_path) {
+                Ok((c, _)) => {
+                    transcript_source = TranscriptSourceKind::WhisperCli;
+                    has_real = true;
+                    cues = c;
+                    warnings.push(format!("Whisper captions via {}", cap.method));
+                }
+                Err(e) => warnings.push(format!("Whisper SRT unreadable: {e}")),
+            },
+            Ok(None) => {
+                // quiet — no binary
+            }
+            Err(e) => warnings.push(format!("Whisper failed: {e}")),
+        }
+    }
+
+    if cues.is_empty() {
         let policy = PolicyConfig {
             prefer_silero: true,
             ..PolicyConfig::default()
         };
         match run_silence_analysis(media_path, &policy).await {
             Ok(ar) => {
-                let c = cues_from_speech_events(&ar.events);
-                if c.is_empty() {
+                cues = cues_from_speech_events(&ar.events);
+                if cues.is_empty() {
                     warnings.push("No speech spans detected for clipping".into());
                 } else {
                     warnings.push(
@@ -70,16 +105,12 @@ pub async fn run_clipping_analysis(
                             .into(),
                     );
                 }
-                c
             }
             Err(e) => {
                 warnings.push(format!("Speech analysis failed: {e}"));
-                Vec::new()
             }
         }
-    } else {
-        cues
-    };
+    }
 
     let (_, _ideal, max_d) = options.resolved_bounds();
     let units = cues_to_semantic_units(&cues, 0.9, max_d * 1.2);
@@ -151,4 +182,15 @@ pub async fn run_clipping_analysis(
         summary,
         created_at: Utc::now().to_rfc3339(),
     })
+}
+
+fn find_sidecar_transcript(media_path: &Path) -> Option<String> {
+    let stem = media_path.with_extension("");
+    for ext in ["srt", "vtt", "SRT", "VTT"] {
+        let p = stem.with_extension(ext);
+        if p.is_file() {
+            return Some(p.to_string_lossy().into_owned());
+        }
+    }
+    None
 }
