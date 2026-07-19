@@ -2,6 +2,10 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AnalysisRun,
   AppInfo,
+  ClipCandidate,
+  ClipFraming,
+  ClippingOptions,
+  ClippingRun,
   ExportEstimate,
   FfmpegStatus,
   MediaInfo,
@@ -279,6 +283,77 @@ export async function listPresets(): Promise<ProcessingPreset[]> {
 
 export async function savePreset(preset: ProcessingPreset): Promise<ProcessingPreset> {
   return invoke("save_preset", { preset });
+}
+
+// ── Intelligent clipping ───────────────────────────────────────────────────
+
+export async function runClipping(
+  mediaPath: string,
+  options?: ClippingOptions | null,
+): Promise<ClippingRun> {
+  return invoke("run_clipping", {
+    mediaPath,
+    options: options ?? null,
+  });
+}
+
+export async function getClippingRun(runId: string): Promise<ClippingRun> {
+  return invoke("get_clipping_run", { runId });
+}
+
+export async function updateClipStatus(
+  runId: string,
+  candidateId: string,
+  status: string,
+): Promise<ClipCandidate> {
+  return invoke("update_clip_status", { runId, candidateId, status });
+}
+
+export async function updateClipSpan(
+  runId: string,
+  candidateId: string,
+  start: number,
+  end: number,
+): Promise<ClipCandidate> {
+  return invoke("update_clip_span", { runId, candidateId, start, end });
+}
+
+export async function updateClipFraming(
+  runId: string,
+  candidateId: string,
+  framing: ClipFraming,
+): Promise<ClipCandidate> {
+  return invoke("update_clip_framing", { runId, candidateId, framing });
+}
+
+export async function bulkClipStatus(
+  runId: string,
+  status: string,
+  onlyHighConfidence: boolean,
+): Promise<ClippingRun> {
+  return invoke("bulk_clip_status", {
+    runId,
+    status,
+    onlyHighConfidence,
+  });
+}
+
+export async function exportClips(params: {
+  runId: string;
+  outputDir: string;
+  candidateIds?: string[];
+  framingOverride?: ClipFraming | null;
+}): Promise<{
+  results: { candidateId: string; ok: boolean; outputPath?: string; error?: string }[];
+  outputDir: string;
+  run: ClippingRun;
+}> {
+  return invoke("export_clips", {
+    runId: params.runId,
+    outputDir: params.outputDir,
+    candidateIds: params.candidateIds ?? null,
+    framingOverride: params.framingOverride ?? null,
+  });
 }
 
 /** Demo segments for Vite-only UI work without backend. */

@@ -21,7 +21,7 @@
     "test": "powershell -ExecutionPolicy Bypass -File scripts/test-all.ps1",
     "test:unit": "cargo test --manifest-path src-tauri/Cargo.toml --lib",
     "test:smoke": "cargo test --manifest-path src-tauri/Cargo.toml --test smoke_pipeline -- --nocapture",
-    "test:e2e": "cargo test --manifest-path src-tauri/Cargo.toml --test e2e_factory -- --nocapture",
+    "test:e2e": "cargo test --manifest-path src-tauri/Cargo.toml --test e2e_factory --test e2e_clipping -- --nocapture",
     "launcher": "powershell -ExecutionPolicy Bypass -File scripts/create-launcher.ps1",
     "lint": "eslint src --ext .ts,.svelte"
   },

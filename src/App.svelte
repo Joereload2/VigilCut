@@ -10,12 +10,14 @@
   import Welcome from "$lib/components/Welcome.svelte";
   import ActionBar from "$lib/components/ActionBar.svelte";
   import ExportSuccess from "$lib/components/ExportSuccess.svelte";
+  import ClippingPanel from "$lib/components/ClippingPanel.svelte";
   import { projectStore } from "$lib/stores/project.svelte";
   import type { FfmpegStatus } from "$lib/types";
   import * as api from "$lib/utils/tauri";
 
   let ffmpeg = $state<FfmpegStatus | null>(null);
   let version = $state("0.1.0");
+  let workspaceTab = $state<"silence" | "clips">("silence");
 
   onMount(() => {
     void (async () => {
@@ -249,15 +251,39 @@
         />
       </div>
       <aside class="flex min-h-[200px] flex-col gap-2 overflow-y-auto lg:min-h-0">
-        <BatchPanel />
-        {#if !projectStore.supervisorMode}
-          <div class="min-h-[180px] flex-[1.2]">
-            <ExceptionQueue />
+        <div class="flex gap-1 rounded-lg border border-surface-800 bg-surface-950/80 p-0.5 text-[10px]">
+          <button
+            type="button"
+            class="flex-1 rounded-md px-2 py-1.5 font-medium
+              {workspaceTab === 'silence' ? 'bg-surface-800 text-surface-100' : 'text-surface-500'}"
+            onclick={() => (workspaceTab = "silence")}
+          >
+            Silencios
+          </button>
+          <button
+            type="button"
+            class="flex-1 rounded-md px-2 py-1.5 font-medium
+              {workspaceTab === 'clips' ? 'bg-vigil-900/80 text-vigil-200' : 'text-surface-500'}"
+            onclick={() => (workspaceTab = "clips")}
+          >
+            Clips
+          </button>
+        </div>
+        {#if workspaceTab === "clips"}
+          <div class="min-h-[320px] flex-1">
+            <ClippingPanel />
+          </div>
+        {:else}
+          <BatchPanel />
+          {#if !projectStore.supervisorMode}
+            <div class="min-h-[180px] flex-[1.2]">
+              <ExceptionQueue />
+            </div>
+          {/if}
+          <div class="min-h-[160px] flex-1">
+            <SidePanel />
           </div>
         {/if}
-        <div class="min-h-[160px] flex-1">
-          <SidePanel />
-        </div>
       </aside>
     </main>
   {/if}
