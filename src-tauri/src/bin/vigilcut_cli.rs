@@ -207,19 +207,17 @@ fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
             let media = PathBuf::from(&path);
-            let out_dir = args
-                .get(1)
-                .map(PathBuf::from)
-                .unwrap_or_else(|| {
-                    let stem = media
-                        .file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("video");
-                    media
-                        .parent()
-                        .unwrap_or_else(|| PathBuf::from(".").as_path())
-                        .join(format!("{stem}-clips"))
-                });
+            let out_dir = args.get(1).map(PathBuf::from).unwrap_or_else(|| {
+                let stem = media
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("video");
+                let parent = media
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| PathBuf::from("."));
+                parent.join(format!("{stem}-clips"))
+            });
             let opts = ClippingOptions {
                 prefer_whisper: true,
                 ..ClippingOptions::default()
