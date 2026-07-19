@@ -286,9 +286,9 @@
               class="flex shrink-0 items-center justify-between gap-2 border-b border-amber-900/40 px-3 py-2"
             >
               <span class="text-xs font-semibold text-amber-100/95"
-                >Short seleccionado · vista 9:16 en vivo</span
+                >Vista 9:16 · short seleccionado</span
               >
-              <span class="text-[10px] text-surface-500">clic en candidato = play</span>
+              <span class="text-[10px] text-surface-500">lista a la derecha = clasificar</span>
             </div>
             <div class="min-h-0 flex-1">
               <ShortPlayer />

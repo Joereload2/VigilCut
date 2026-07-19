@@ -45,10 +45,10 @@
       3) ▶ Oír cortado<br />
       4) Exportar
     {:else}
-      1) Encontrar clips<br />
-      2) Selecciona uno<br />
-      3) Ver 9:16 al centro<br />
-      4) Aprobar · Export 9:16
+      1) Sacar clips<br />
+      2) Ver 9:16 al centro<br />
+      3) Aprobar / Descartar<br />
+      4) Exportar 9:16
     {/if}
   </div>
 </aside>

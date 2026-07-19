@@ -184,10 +184,10 @@
       class="flex aspect-[9/16] w-full max-w-[min(100%,340px)] max-h-full flex-col items-center justify-center rounded-2xl border border-dashed border-surface-700 bg-surface-900/80 px-4 text-center"
     >
       <div class="mb-2 text-3xl opacity-60">📱</div>
-      <p class="text-sm font-medium text-surface-300">Preview del short 9:16</p>
+      <p class="text-sm font-medium text-surface-300">Preview 9:16</p>
       <p class="mt-2 text-[11px] leading-relaxed text-surface-500">
-        Pulsa <strong class="text-surface-300">Encontrar clips</strong> a la derecha y selecciona un
-        candidato. El vídeo se recorta en vivo a 9:16.
+        A la derecha: <strong class="text-surface-300">Sacar clips</strong>, luego elige uno para
+        verlo aquí en vertical.
       </p>
     </div>
   {:else if !src}
