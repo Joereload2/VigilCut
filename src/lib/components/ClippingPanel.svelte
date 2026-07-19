@@ -46,6 +46,25 @@
     ).length;
   }
 
+  function variantsOf(c: ClipCandidate): ClipCandidate[] {
+    if (!run) return [];
+    return run.candidates.filter(
+      (x) => x.variantGroupId === c.variantGroupId && !x.isPrimaryVariant,
+    );
+  }
+
+  let openVariants = $state<Record<string, boolean>>({});
+
+  async function promoteVariant(id: string) {
+    if (!run) return;
+    try {
+      run = await api.promoteClipVariant(run.id, id);
+      selectedId = id;
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
   const selected = $derived(visible.find((c) => c.id === selectedId) ?? visible[0] ?? null);
 
   async function analyze() {
@@ -571,7 +590,45 @@
                   disabled={busy}
                   onclick={() => exportOne(c)}>Export 9:16</button
                 >
+                {#if variantCount(c) > 0}
+                  <button
+                    type="button"
+                    class="btn-ghost text-[10px]"
+                    onclick={() =>
+                      (openVariants = {
+                        ...openVariants,
+                        [c.id]: !openVariants[c.id],
+                      })}
+                  >
+                    {openVariants[c.id] ? "Ocultar" : "Ver"} variantes
+                  </button>
+                {/if}
               </div>
+              {#if openVariants[c.id]}
+                <ul class="mt-2 space-y-1 border-t border-surface-800 pt-2">
+                  {#each variantsOf(c) as v (v.id)}
+                    <li
+                      class="flex items-center justify-between gap-2 rounded-lg bg-surface-900/80 px-2 py-1.5 text-[10px]"
+                    >
+                      <span class="min-w-0 truncate text-surface-400">
+                        {formatTime(v.start)}–{formatTime(v.end)} · {Math.round(v.score)}
+                      </span>
+                      <span class="flex shrink-0 gap-1">
+                        <button
+                          type="button"
+                          class="btn-ghost text-[10px]"
+                          onclick={() => seekPlay(v)}>▶</button
+                        >
+                        <button
+                          type="button"
+                          class="btn-ghost text-[10px] text-vigil-300"
+                          onclick={() => promoteVariant(v.id)}>Usar</button
+                        >
+                      </span>
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
             </li>
           {/each}
         </ul>

@@ -2,8 +2,6 @@
 
 mod common;
 
-use std::path::PathBuf;
-
 use vigilcut_lib::models::clipping::{
     ClipReviewStatus, ClippingOptions, DurationProfile, SelectionProfile,
 };
@@ -12,9 +10,8 @@ use vigilcut_lib::pipeline::clipping::{export_approved_clips, run_clipping_analy
 #[tokio::test]
 async fn e2e_clipping_finds_and_exports_vertical() {
     let ws = common::test_workspace("e2e_clipping");
-    // Longer synthetic: 45s with mid silence blocks for speech units
     let media = ws.join("long.mp4");
-    make_long_fixture(&media);
+    common::make_long_talking_fixture(&media);
 
     let opts = ClippingOptions {
         duration_profile: DurationProfile::Micro,
@@ -39,13 +36,16 @@ async fn e2e_clipping_finds_and_exports_vertical() {
         run.summary.warnings
     );
 
-    // Approve top primary
     for c in run.candidates.iter_mut() {
         if c.is_primary_variant && c.status == ClipReviewStatus::Preselected {
             c.status = ClipReviewStatus::Approved;
         }
     }
-    if !run.candidates.iter().any(|c| c.status == ClipReviewStatus::Approved) {
+    if !run
+        .candidates
+        .iter()
+        .any(|c| c.status == ClipReviewStatus::Approved)
+    {
         if let Some(c) = run.candidates.iter_mut().find(|c| c.is_primary_variant) {
             c.status = ClipReviewStatus::Approved;
         }
@@ -73,47 +73,22 @@ async fn e2e_clipping_finds_and_exports_vertical() {
     assert!(out_dir.join("metadata.json").is_file());
     assert!(out_dir.join("clipping-report.json").is_file());
 
+    // At least one exported file non-trivial size
+    let mut any_big = false;
+    if let Ok(rd) = std::fs::read_dir(out_dir.join("clips")) {
+        for e in rd.flatten() {
+            if e.path().extension().and_then(|x| x.to_str()) == Some("mp4")
+                && e.metadata().map(|m| m.len()).unwrap_or(0) > 2000
+            {
+                any_big = true;
+            }
+        }
+    }
+    assert!(any_big, "exported mp4 files missing or too small");
+
     println!(
         "e2e clipping OK candidates={} exported={}",
         run.summary.candidates_found,
         results.iter().filter(|r| r.ok).count()
     );
-}
-
-fn make_long_fixture(path: &PathBuf) {
-    use std::process::Command;
-    #[cfg(windows)]
-    use std::os::windows::process::CommandExt;
-    common::ensure_ffmpeg();
-    // 30s: speech-like tone with two silence gaps
-    let mut cmd = Command::new(common::bundled_ffmpeg());
-    cmd.args([
-        "-y",
-        "-f",
-        "lavfi",
-        "-i",
-        "color=c=black:s=320x240:d=30:r=25",
-        "-f",
-        "lavfi",
-        "-i",
-        "sine=frequency=660:sample_rate=44100:duration=30",
-        "-af",
-        "volume=enable='between(t,8,10)+between(t,18,20)':volume=0",
-        "-c:v",
-        "libx264",
-        "-pix_fmt",
-        "yuv420p",
-        "-preset",
-        "ultrafast",
-        "-c:a",
-        "aac",
-        "-shortest",
-        &path.to_string_lossy(),
-    ]);
-    #[cfg(windows)]
-    {
-        cmd.creation_flags(0x0800_0000);
-    }
-    let out = cmd.output().expect("ffmpeg");
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
 }

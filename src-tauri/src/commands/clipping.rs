@@ -204,6 +204,29 @@ pub async fn export_clips(
     })
 }
 
+/// Promote a secondary variant to primary within its group.
+#[tauri::command]
+pub fn promote_clip_variant(
+    run_id: String,
+    candidate_id: String,
+    cache: State<'_, ClippingCache>,
+) -> AppResult<ClippingRun> {
+    take_mut(&cache, &run_id, |run| {
+        let gid = run
+            .candidates
+            .iter()
+            .find(|c| c.id == candidate_id)
+            .map(|c| c.variant_group_id.clone())
+            .ok_or_else(|| AppError::NotFound(candidate_id.clone()))?;
+        for c in run.candidates.iter_mut() {
+            if c.variant_group_id == gid {
+                c.is_primary_variant = c.id == candidate_id;
+            }
+        }
+        Ok(run.clone())
+    })
+}
+
 #[tauri::command]
 pub async fn export_single_clip(
     run_id: String,

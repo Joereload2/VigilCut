@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — feat/intelligent-clipping
+
+### Intelligent clipping
+- Domain: `ClipCandidate`, scores, framing 9:16, duration/selection profiles
+- Pipeline: SRT/VTT / sidecar / optional Whisper / speech fallback → candidates → score → dedupe → preselect
+- UI: Clips tab, approve/reject, span editor (I/O), live 9:16 canvas preview, variants
+- Export: individual + batch vertical MP4 + metadata/report
+- CLI: `vigilcut-cli clips <video> [outdir]`
+- Tests: unit + smoke (SRT/sidecar) + e2e vertical export
+- Docs: `docs/CLIPPING.md`, `docs/ci-workflow.example.yml`
+
 ## 1.0.0 — 2026-07-18
 
 ### Factory engine

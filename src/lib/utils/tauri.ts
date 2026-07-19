@@ -338,6 +338,13 @@ export async function bulkClipStatus(
   });
 }
 
+export async function promoteClipVariant(
+  runId: string,
+  candidateId: string,
+): Promise<ClippingRun> {
+  return invoke("promote_clip_variant", { runId, candidateId });
+}
+
 export async function exportClips(params: {
   runId: string;
   outputDir: string;

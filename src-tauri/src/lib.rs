@@ -88,6 +88,7 @@ pub fn run() {
             commands::clipping::bulk_clip_status,
             commands::clipping::export_clips,
             commands::clipping::export_single_clip,
+            commands::clipping::promote_clip_variant,
             // Future-ready stubs
             commands::audio::enhance_audio_preview,
             commands::color::analyze_color_stats,
