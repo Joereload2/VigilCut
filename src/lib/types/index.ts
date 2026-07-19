@@ -351,6 +351,9 @@ export const DEFAULT_CLIPPING_OPTIONS: ClippingOptions = {
   maxCandidates: 40,
 };
 
+/** Matches backend MIN_CLIP_SCORE — clips below this never surface. */
+export const MIN_CLIP_SCORE = 50;
+
 export function segmentDuration(s: Segment): number {
   return Math.max(0, s.end - s.start);
 }

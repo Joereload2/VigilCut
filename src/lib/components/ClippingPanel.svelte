@@ -2,6 +2,7 @@
   import { projectStore } from "$lib/stores/project.svelte";
   import {
     DEFAULT_CLIPPING_OPTIONS,
+    MIN_CLIP_SCORE,
     formatTime,
     type ClipCandidate,
     type ClipFraming,
@@ -25,7 +26,11 @@
   const mediaDuration = $derived(projectStore.duration || run?.sourceDuration || 1);
 
   const allPrimary = $derived(
-    run ? run.candidates.filter((c) => c.isPrimaryVariant) : ([] as ClipCandidate[]),
+    run
+      ? run.candidates.filter(
+          (c) => c.isPrimaryVariant && c.score >= MIN_CLIP_SCORE,
+        )
+      : ([] as ClipCandidate[]),
   );
 
   const counts = $derived.by(() => {
@@ -411,7 +416,7 @@
         {busy ? "Sacando clips…" : "Sacar clips"}
       </button>
       <p class="mt-2 text-center text-[10px] text-surface-500">
-        La fábrica propone momentos. Aquí solo clasificas y ves.
+        Solo salen clips con score ≥ {MIN_CLIP_SCORE}. Aquí clasificas y ves el 9:16.
       </p>
       <button
         type="button"

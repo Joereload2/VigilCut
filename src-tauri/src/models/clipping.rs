@@ -46,16 +46,20 @@ pub enum SelectionProfile {
 }
 
 impl SelectionProfile {
-    /// Max preselected + min score floor for auto-preselect.
+    /// Max preselected + min score floor (0..1) for auto-preselect.
+    /// Floors are always ≥ [`MIN_CLIP_SCORE`] / 100.
     pub fn limits(self) -> (usize, f64) {
         match self {
             Self::Conservative => (5, 0.72),
             Self::Balanced => (8, 0.58),
-            Self::Broad => (14, 0.45),
-            Self::Exploratory => (20, 0.35),
+            Self::Broad => (14, 0.50),
+            Self::Exploratory => (20, 0.50),
         }
     }
 }
+
+/// Hard floor: clips with score below this are never returned for review/export.
+pub const MIN_CLIP_SCORE: f64 = 50.0;
 
 // ── Transcript ─────────────────────────────────────────────────────────────
 

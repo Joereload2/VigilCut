@@ -9,6 +9,7 @@ use crate::error::AppResult;
 use crate::ffmpeg::Ffmpeg;
 use crate::models::clipping::{
     ClipReviewStatus, ClippingOptions, ClippingRun, ClippingSummary, TranscriptSourceKind,
+    MIN_CLIP_SCORE,
 };
 use crate::pipeline::clipping::dedupe::dedupe_and_group;
 use crate::pipeline::clipping::framing::default_framing_for_media;
@@ -125,7 +126,17 @@ pub async fn run_clipping_analysis(
         framing,
     );
     candidates = dedupe_and_group(candidates);
+    // Drop weak windows before preselect — they never leave the factory.
+    let dropped_weak = candidates.iter().filter(|c| c.score < MIN_CLIP_SCORE).count();
+    candidates.retain(|c| c.score >= MIN_CLIP_SCORE);
+    if dropped_weak > 0 {
+        warnings.push(format!(
+            "Omitidos {dropped_weak} clips con score < {MIN_CLIP_SCORE:.0}"
+        ));
+    }
     apply_preselection(&mut candidates, &options);
+    // Belt: never return discarded-below-floor leftovers (variants, etc.)
+    candidates.retain(|c| c.score >= MIN_CLIP_SCORE);
 
     let preselected = candidates
         .iter()
@@ -158,11 +169,26 @@ pub async fn run_clipping_analysis(
         .map(|c| c.duration)
         .sum();
 
+    // Only count clips that survive the score floor (what the user actually sees).
+    let candidates_found = candidates
+        .iter()
+        .filter(|c| {
+            c.is_primary_variant
+                && c.score >= MIN_CLIP_SCORE
+                && !matches!(c.status, ClipReviewStatus::Discarded)
+        })
+        .count();
+    if candidates_found == 0 && !warnings.iter().any(|w| w.contains("score <")) {
+        warnings.push(format!(
+            "Ningún clip superó el score mínimo ({MIN_CLIP_SCORE:.0})"
+        ));
+    }
+
     let analysis_seconds = t0.elapsed().as_secs_f64();
     let summary = ClippingSummary {
         source_duration,
         analysis_seconds,
-        candidates_found: candidates.iter().filter(|c| c.is_primary_variant).count(),
+        candidates_found,
         preselected,
         high_confidence,
         needs_review,

@@ -1,10 +1,13 @@
 //! Preselection profiles: mark top candidates, discard weak ones.
 
-use crate::models::clipping::{ClipCandidate, ClipReviewStatus, ClippingOptions};
+use crate::models::clipping::{
+    ClipCandidate, ClipReviewStatus, ClippingOptions, MIN_CLIP_SCORE,
+};
 
 pub fn apply_preselection(candidates: &mut [ClipCandidate], options: &ClippingOptions) {
     let (max_pre, floor) = options.selection_profile.limits();
-    let floor_score = floor * 100.0;
+    // Profile floor in 0..100, never below the hard product minimum.
+    let floor_score = (floor * 100.0).max(MIN_CLIP_SCORE);
 
     let mut order: Vec<usize> = candidates
         .iter()
@@ -22,17 +25,17 @@ pub fn apply_preselection(candidates: &mut [ClipCandidate], options: &ClippingOp
     let mut pre_count = 0usize;
     for &idx in &order {
         let c = &mut candidates[idx];
-        if c.score < floor_score * 0.55 {
+        // Hard rule: never surface clips below MIN_CLIP_SCORE (engine also drops them).
+        if c.score < MIN_CLIP_SCORE {
             c.status = ClipReviewStatus::Discarded;
             continue;
         }
+        // Top band for this profile → preselected; rest ≥50 stay suggested for human classify.
         if pre_count < max_pre && c.score >= floor_score {
             c.status = ClipReviewStatus::Preselected;
             pre_count += 1;
-        } else if c.score >= floor_score * 0.75 {
-            c.status = ClipReviewStatus::Suggested;
         } else {
-            c.status = ClipReviewStatus::Discarded;
+            c.status = ClipReviewStatus::Suggested;
         }
     }
 
@@ -112,12 +115,33 @@ mod tests {
             .count();
         assert!(pre >= 1);
         assert!(pre <= 8);
-        // weak discarded
+        // below MIN_CLIP_SCORE discarded
         assert_eq!(
             list.iter().find(|x| x.id == "c").unwrap().status,
             ClipReviewStatus::Discarded
         );
         // secondary stays non-primary
         assert!(!list.iter().find(|x| x.id == "a2").unwrap().is_primary_variant);
+    }
+
+    #[test]
+    fn never_preselects_or_suggests_below_min_score() {
+        let mut list = vec![
+            c("low", 49.9, true, "g1"),
+            c("edge", 50.0, true, "g2"),
+            c("ok", 61.0, true, "g3"),
+        ];
+        let mut opts = ClippingOptions::default();
+        opts.selection_profile = SelectionProfile::Exploratory;
+        apply_preselection(&mut list, &opts);
+        assert_eq!(
+            list.iter().find(|x| x.id == "low").unwrap().status,
+            ClipReviewStatus::Discarded
+        );
+        let edge = list.iter().find(|x| x.id == "edge").unwrap();
+        assert_ne!(edge.status, ClipReviewStatus::Discarded);
+        assert!(edge.score >= MIN_CLIP_SCORE);
+        let ok = list.iter().find(|x| x.id == "ok").unwrap();
+        assert_ne!(ok.status, ClipReviewStatus::Discarded);
     }
 }
