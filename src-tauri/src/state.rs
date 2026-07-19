@@ -48,6 +48,7 @@ impl AppState {
         Ok(Self::app_data_dir()?.join("cache"))
     }
 
+    #[allow(dead_code)]
     pub fn temp_dir() -> AppResult<PathBuf> {
         Ok(Self::app_data_dir()?.join("temp"))
     }

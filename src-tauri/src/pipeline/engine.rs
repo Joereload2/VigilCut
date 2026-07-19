@@ -4,13 +4,15 @@ use crate::error::AppResult;
 use crate::ffmpeg::Ffmpeg;
 use crate::models::analysis::{AnalysisRun, AnalysisStats};
 use crate::models::edl::{
-    EditOp, EditOpKind, Edl, ExceptionItem, ExceptionReason, ExceptionResolution, PolicyConfig,
+    EditOp, EditOpKind, Edl, ExceptionItem, ExceptionResolution, PolicyConfig,
 };
 use crate::models::event::{Event, Span, TYPE_AUDIO_SILENCE, TYPE_AUDIO_SPEECH};
 use crate::models::segment::{Segment, SegmentDecision, SegmentKind, SilenceDetectionOptions};
+use crate::pipeline::detectors::{run_secondary, DetectorContext};
+use crate::pipeline::policy::{apply_policies, effective_removes};
 use crate::state::AppState;
 
-/// Run full silence analysis: detect → events → policy → EDL → segment projection.
+/// Run full analysis: detect → events → secondary detectors → policy → EDL → segment projection.
 pub async fn run_silence_analysis(
     media_path: &Path,
     policy: &PolicyConfig,
@@ -21,30 +23,26 @@ pub async fn run_silence_analysis(
     let duration = info.duration;
     let path_str = media_path.to_string_lossy().into_owned();
 
-    // Warm feature cache (16 kHz mono) for future Silero / Whisper detectors
-    if let Err(e) = crate::pipeline::features::ensure_audio_16k(media_path).await {
-        tracing::debug!("feature cache wav skip: {e}");
-    }
+    // Warm feature cache (16 kHz mono) for Silero / Whisper / future detectors
+    let wav_path = match crate::pipeline::features::ensure_audio_16k(media_path).await {
+        Ok(p) => Some(p),
+        Err(e) => {
+            tracing::debug!("feature cache wav skip: {e}");
+            None
+        }
+    };
 
     let (method, silence_ranges) = detect_silence_ranges(media_path, policy).await?;
 
     // Build alternating speech/silence events covering [0, duration]
     let mut events = ranges_to_events(&run_id, duration, &silence_ranges, &method, policy);
 
-    // Structure detectors (chapters, shorts, breath)
-    crate::pipeline::detectors::enrich_events(&run_id, duration, &mut events);
-
-    // Optional Whisper captions → filler events (if whisper CLI installed)
+    // Optional Whisper captions (feeds filler detector via context)
     let mut caption_srt: Option<std::path::PathBuf> = None;
     match crate::pipeline::detectors::whisper_cli::try_generate_srt(media_path).await {
         Ok(Some(cap)) => {
             tracing::info!("Whisper captions via {}", cap.method);
             caption_srt = Some(cap.srt_path.clone());
-            if let Ok(fillers) =
-                crate::pipeline::detectors::detect_fillers_from_srt(&run_id, &cap.srt_path)
-            {
-                events.extend(fillers);
-            }
         }
         Ok(None) => {
             tracing::debug!("No whisper CLI on PATH — skip captions/fillers");
@@ -52,12 +50,26 @@ pub async fn run_silence_analysis(
         Err(e) => tracing::warn!("Whisper failed: {e}"),
     }
 
-    // Policy: high-confidence silence → auto remove; low → exception
-    // Also auto-cut high-confidence fillers if present
-    let (mut edit_ops, exceptions) = apply_silence_policy(&events, policy);
-    edit_ops.extend(apply_filler_policy(&events, policy));
+    // Secondary detectors: breath, chapters, shorts, fillers (registry)
+    {
+        let mut ctx = DetectorContext {
+            run_id: &run_id,
+            media_path,
+            duration,
+            policy,
+            events: &mut events,
+            wav_path: wav_path.as_deref(),
+            srt_path: caption_srt.as_deref(),
+        };
+        run_secondary(&mut ctx);
+    }
 
-    // Effective removes = auto ops + accepted exceptions (none yet at first run)
+    // Policies: event_type → auto-cut / exception (registry)
+    let outcome = apply_policies(&events, policy);
+    let edit_ops = outcome.ops;
+    let exceptions = outcome.exceptions;
+
+    // EDL is the export source of truth
     let remove_spans = effective_removes(&edit_ops, &exceptions);
     let edl = Edl::from_remove_spans(&path_str, duration, &remove_spans);
 
@@ -301,91 +313,7 @@ fn silence_confidence(duration: f64, method: &str) -> f64 {
     (base + boost - penalty).clamp(0.5, 0.98)
 }
 
-fn apply_silence_policy(
-    events: &[Event],
-    policy: &PolicyConfig,
-) -> (Vec<EditOp>, Vec<ExceptionItem>) {
-    let mut ops = Vec::new();
-    let mut exceptions = Vec::new();
-
-    for ev in events.iter().filter(|e| e.event_type == TYPE_AUDIO_SILENCE) {
-        if ev.score >= policy.auto_approve_min_score {
-            ops.push(EditOp::remove(
-                ev.span,
-                vec![ev.id.clone()],
-                format!(
-                    "Auto-cut silence ({:.0}% conf, {:.2}s)",
-                    ev.score * 100.0,
-                    ev.span.duration()
-                ),
-                true,
-            ));
-        } else {
-            exceptions.push(ExceptionItem::new(
-                vec![ev.id.clone()],
-                ExceptionReason::LowConfidence,
-                ev.span,
-                ev.score,
-                format!(
-                    "Silencio dudoso ({:.0}% < {:.0}% umbral). ¿Cortar?",
-                    ev.score * 100.0,
-                    policy.auto_approve_min_score * 100.0
-                ),
-            ));
-        }
-    }
-
-    (ops, exceptions)
-}
-
-fn apply_filler_policy(events: &[Event], policy: &PolicyConfig) -> Vec<EditOp> {
-    use crate::pipeline::detectors::TYPE_SPEECH_FILLER;
-    let mut ops = Vec::new();
-    for ev in events.iter().filter(|e| e.event_type == TYPE_SPEECH_FILLER) {
-        // Slightly higher bar for auto-removing speech-like fillers
-        let thr = (policy.auto_approve_min_score + 0.05).min(0.95);
-        if ev.score >= thr {
-            ops.push(EditOp::remove(
-                ev.span,
-                vec![ev.id.clone()],
-                format!(
-                    "Auto-cut filler ({:.0}%): {}",
-                    ev.score * 100.0,
-                    ev.payload
-                        .get("text")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("?")
-                ),
-                true,
-            ));
-        }
-    }
-    ops
-}
-
-fn effective_removes(ops: &[EditOp], exceptions: &[ExceptionItem]) -> Vec<(f64, f64)> {
-    let mut remove: Vec<(f64, f64)> = ops
-        .iter()
-        .filter(|o| o.op == EditOpKind::RemoveSpan)
-        .map(|o| (o.span.start, o.span.end))
-        .collect();
-
-    for ex in exceptions {
-        match ex.resolution {
-            ExceptionResolution::Accepted => {
-                remove.push((ex.span.start, ex.span.end));
-            }
-            ExceptionResolution::Rejected | ExceptionResolution::Pending => {
-                // Pending: do NOT cut yet (conservative — keep until human decides)
-                // Rejected: keep
-            }
-        }
-    }
-
-    remove
-}
-
-/// Project events + decisions into legacy Segment[] for the current UI.
+/// Project events + decisions into Segment[] for the supervision UI (derived view).
 fn project_segments(
     duration: f64,
     events: &[Event],
@@ -511,10 +439,10 @@ pub fn reject_all_exceptions(mut run: AnalysisRun) -> AnalysisRun {
     recompile_run(run)
 }
 
-/// Map legacy SilenceDetectionOptions → PolicyConfig.
+/// Map SilenceDetectionOptions → PolicyConfig (single knobs surface for UI/CLI).
 pub fn policy_from_silence_options(opts: &SilenceDetectionOptions) -> PolicyConfig {
     PolicyConfig {
-        auto_approve_min_score: 0.80,
+        auto_approve_min_score: opts.auto_approve_min_score.clamp(0.5, 0.99),
         min_silence_duration: opts.min_silence_duration,
         padding: opts.padding,
         threshold: opts.threshold,
@@ -577,6 +505,7 @@ pub async fn detect_and_build_segments_legacy(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pipeline::policy::apply_policies;
 
     #[test]
     fn policy_auto_cuts_high_score() {
@@ -611,10 +540,10 @@ mod tests {
             auto_approve_min_score: 0.80,
             ..Default::default()
         };
-        let (ops, ex) = apply_silence_policy(&events, &policy);
-        assert_eq!(ops.len(), 1);
-        assert!(ops[0].auto_applied);
-        assert!(ex.is_empty());
+        let out = apply_policies(&events, &policy);
+        assert_eq!(out.ops.len(), 1);
+        assert!(out.ops[0].auto_applied);
+        assert!(out.exceptions.is_empty());
     }
 
     #[test]
@@ -628,10 +557,10 @@ mod tests {
             serde_json::json!({}),
         )];
         let policy = PolicyConfig::default();
-        let (ops, ex) = apply_silence_policy(&events, &policy);
-        assert!(ops.is_empty());
-        assert_eq!(ex.len(), 1);
-        assert!(ex[0].is_pending());
+        let out = apply_policies(&events, &policy);
+        assert!(out.ops.is_empty());
+        assert_eq!(out.exceptions.len(), 1);
+        assert!(out.exceptions[0].is_pending());
     }
 
     #[test]
@@ -639,5 +568,40 @@ mod tests {
         let edl = Edl::from_remove_spans("x.mp4", 10.0, &[(2.0, 3.0)]);
         assert!((edl.output_duration - 9.0).abs() < 0.05);
         assert_eq!(edl.video_track.len(), 2);
+    }
+
+    #[test]
+    fn recompile_after_accept_updates_edl() {
+        let events = vec![Event::new(
+            "r",
+            TYPE_AUDIO_SILENCE,
+            "t",
+            Span::new(2.0, 3.0),
+            0.5,
+            serde_json::json!({}),
+        )];
+        let policy = PolicyConfig::default();
+        let out = apply_policies(&events, &policy);
+        assert_eq!(out.exceptions.len(), 1);
+        let mut run = AnalysisRun {
+            id: "r".into(),
+            media_path: "x.mp4".into(),
+            duration: 10.0,
+            method: "test".into(),
+            policy,
+            events,
+            edit_ops: out.ops,
+            exceptions: out.exceptions,
+            edl: Edl::from_remove_spans("x.mp4", 10.0, &[]),
+            segments: vec![],
+            stats: AnalysisStats::default(),
+            artifacts: vec![],
+        };
+        run = recompile_run(run);
+        // pending → keep full-ish
+        assert!((run.edl.output_duration - 10.0).abs() < 0.1);
+        let ex_id = run.exceptions[0].id.clone();
+        run = resolve_exception(run, &ex_id, true);
+        assert!((run.edl.output_duration - 9.0).abs() < 0.1);
     }
 }

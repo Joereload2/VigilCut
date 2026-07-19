@@ -10,6 +10,16 @@ use crate::error::{AppError, AppResult};
 use crate::pipeline::features::ensure_audio_16k;
 use crate::state::AppState;
 
+fn cmd_hidden(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    let mut cmd = Command::new(program);
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
 #[derive(Debug, Clone)]
 pub struct CaptionResult {
     pub srt_path: PathBuf,
@@ -37,7 +47,7 @@ pub async fn try_generate_srt(media_path: &Path) -> AppResult<Option<CaptionResu
     let bin_name = bin.file_stem().and_then(|s| s.to_str()).unwrap_or("");
     let status = if bin_name.contains("whisper-cli") || bin_name == "main" {
         // whisper.cpp style
-        Command::new(&bin)
+        cmd_hidden(&bin)
             .args([
                 "-f",
                 &wav.to_string_lossy(),
@@ -54,7 +64,7 @@ pub async fn try_generate_srt(media_path: &Path) -> AppResult<Option<CaptionResu
             .map_err(|e| AppError::Message(e.to_string()))?
     } else {
         // openai-whisper python CLI
-        Command::new(&bin)
+        cmd_hidden(&bin)
             .args([
                 wav.to_string_lossy().as_ref(),
                 "--model",

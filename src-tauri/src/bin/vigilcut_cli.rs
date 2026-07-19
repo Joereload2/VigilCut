@@ -133,34 +133,64 @@ fn main() -> ExitCode {
             }
         }
         "export" => {
-            // analyze + force exceptions + export single file
+            // analyze + force exceptions + export single file (factory headless path)
             let path = args.first().cloned().unwrap_or_default();
             let out = args.get(1).cloned();
             if path.is_empty() {
-                eprintln!("usage: vigilcut-cli export <video> [out.mp4]");
+                eprintln!(
+                    "usage: vigilcut-cli export <video> [out.mp4|outdir] [--policy factory|...]"
+                );
                 return ExitCode::FAILURE;
             }
             let media = PathBuf::from(&path);
-            let out_dir = out
-                .as_ref()
-                .map(|p| {
+            let policy = policy_from_args(&args);
+            let (out_dir, rename_to) = match out.as_ref() {
+                Some(p) => {
                     let pb = PathBuf::from(p);
-                    pb.parent()
-                        .filter(|par| !par.as_os_str().is_empty())
-                        .map(|par| par.to_path_buf())
-                        .unwrap_or_else(|| PathBuf::from("."))
-                })
-                .unwrap_or_else(|| media.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from(".")));
+                    if pb.extension().and_then(|e| e.to_str()) == Some("mp4") {
+                        let dir = pb
+                            .parent()
+                            .filter(|par| !par.as_os_str().is_empty())
+                            .map(|par| par.to_path_buf())
+                            .unwrap_or_else(|| PathBuf::from("."));
+                        (dir, Some(pb))
+                    } else {
+                        (pb, None)
+                    }
+                }
+                None => (
+                    media
+                        .parent()
+                        .map(|p| p.to_path_buf())
+                        .unwrap_or_else(|| PathBuf::from(".")),
+                    None,
+                ),
+            };
             let result = rt.block_on(process_one_file(
                 &media,
                 &out_dir,
-                &PolicyConfig::default(),
+                &policy,
                 true,
                 &ExportOptions::default(),
                 &ColorOptions::default(),
             ));
             if result.ok {
-                println!("exported {}", result.output_path.as_deref().unwrap_or("?"));
+                let mut final_path = result.output_path.clone().unwrap_or_default();
+                if let (Some(target), Some(src)) = (rename_to, result.output_path.as_ref()) {
+                    if src != &target.to_string_lossy() {
+                        if let Err(e) = std::fs::rename(src, &target) {
+                            eprintln!("warn: could not rename to {}: {e}", target.display());
+                        } else {
+                            // Move meta folder if present next to default name
+                            final_path = target.to_string_lossy().into_owned();
+                        }
+                    }
+                }
+                println!("exported {final_path}");
+                println!(
+                    "auto_cuts={} exceptions_forced={}",
+                    result.auto_cuts, result.exceptions_forced
+                );
                 ExitCode::SUCCESS
             } else {
                 eprintln!("{}", result.error.unwrap_or_else(|| "export failed".into()));

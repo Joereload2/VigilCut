@@ -1,10 +1,11 @@
 use uuid::Uuid;
 
 use crate::models::artifacts::{ChapterMarker, ShortCandidate};
-use crate::models::event::{Event, Span, TYPE_AUDIO_SILENCE, TYPE_AUDIO_SPEECH};
+use crate::models::event::{Event, Span, TYPE_AUDIO_SILENCE, TYPE_AUDIO_SPEECH, TYPE_STRUCTURE_SHORT};
 
-pub const TYPE_STRUCTURE_CHAPTER: &str = "structure.chapter";
-pub const TYPE_SHORT_CANDIDATE: &str = "short.candidate";
+pub use crate::models::event::TYPE_STRUCTURE_CHAPTER;
+/// Canonical short-candidate event type (alias of model constant).
+pub const TYPE_SHORT_CANDIDATE: &str = TYPE_STRUCTURE_SHORT;
 
 /// Chapter candidates: long silence gaps between speech blocks → topic breaks.
 pub fn detect_chapters(run_id: &str, _duration: f64, events: &mut Vec<Event>) {
@@ -174,4 +175,56 @@ fn source_to_output(source: f64, keep: &[(f64, f64)]) -> Option<f64> {
     }
     // past end
     Some(acc)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::event::TYPE_STRUCTURE_CHAPTER;
+
+    #[test]
+    fn maps_chapter_into_output_timeline() {
+        let events = vec![
+            Event::new(
+                "r",
+                TYPE_STRUCTURE_CHAPTER,
+                "t",
+                Span::new(0.0, 0.0),
+                0.8,
+                serde_json::json!({ "index": 0, "title": "Inicio" }),
+            ),
+            Event::new(
+                "r",
+                TYPE_STRUCTURE_CHAPTER,
+                "t",
+                Span::new(5.0, 5.0),
+                0.8,
+                serde_json::json!({ "index": 1, "title": "Parte 2" }),
+            ),
+        ];
+        // Keep [0,2] and [4,6] → source 5.0 maps into second keep at output 2+(5-4)=3
+        let keep = vec![(0.0, 2.0), (4.0, 6.0)];
+        let chapters = chapters_from_events(&events, &keep);
+        assert_eq!(chapters.len(), 2);
+        assert!((chapters[0].at_output - 0.0).abs() < 0.01);
+        assert!((chapters[1].at_output - 3.0).abs() < 0.01);
+        assert_eq!(chapters[1].title, "Parte 2");
+    }
+
+    #[test]
+    fn drops_chapter_inside_removed_span_maps_to_boundary() {
+        // Chapter at 3.0 is inside removed gap (2,4); maps to start of next keep → output 2.0
+        let events = vec![Event::new(
+            "r",
+            TYPE_STRUCTURE_CHAPTER,
+            "t",
+            Span::new(3.0, 3.0),
+            0.8,
+            serde_json::json!({ "title": "Mid" }),
+        )];
+        let keep = vec![(0.0, 2.0), (4.0, 6.0)];
+        let chapters = chapters_from_events(&events, &keep);
+        assert_eq!(chapters.len(), 1);
+        assert!((chapters[0].at_output - 2.0).abs() < 0.01);
+    }
 }

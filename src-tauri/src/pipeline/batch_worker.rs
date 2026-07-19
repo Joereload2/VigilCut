@@ -7,7 +7,7 @@ use crate::models::preset::{ColorOptions, ExportOptions};
 use crate::models::segment::{Segment, SegmentDecision};
 use crate::pipeline::artifacts::write_run_artifacts;
 use crate::pipeline::engine::{accept_all_exceptions, run_silence_analysis};
-use crate::pipeline::export::export_with_cuts;
+use crate::pipeline::export::export_from_edl;
 
 /// Process one media file: analyze → force exceptions (factory) → export + artifacts.
 pub async fn process_one_file(
@@ -69,17 +69,17 @@ async fn run_one(
         exceptions_forced = pending_before;
     }
 
-    let segments = run.segments.clone();
     let has_audio = true;
 
     if let Some(parent) = out_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
 
-    export_with_cuts(
+    // Factory path: EDL is the export source of truth (not Segment UI state).
+    export_from_edl(
         media_path,
         out_path,
-        &segments,
+        &run.edl,
         export_opts,
         color,
         has_audio,

@@ -79,7 +79,8 @@
       }
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
-        void exportVideo();
+        // Ctrl+Shift+Enter = elegir destino; Ctrl+Enter = 1-clic al lado del origen
+        void exportVideo(e.shiftKey);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -115,14 +116,34 @@
     window.dispatchEvent(new CustomEvent("vigilcut:listen-result"));
   }
 
-  async function exportVideo() {
+  /** Factory default: same folder as source, no save dialog. */
+  function defaultExportPath(mediaPath: string): string {
+    const parts = mediaPath.split(/[/\\]/);
+    const file = parts.pop() ?? "video.mp4";
+    const dir = parts.join(mediaPath.includes("\\") ? "\\" : "/") || ".";
+    const sep = mediaPath.includes("\\") ? "\\" : "/";
+    const base = file.replace(/\.[^.]+$/, "") || "vigilcut";
+    return `${dir}${sep}${base}-editado.mp4`;
+  }
+
+  function canExport(): boolean {
+    if (!projectStore.mediaPath || projectStore.mediaPath.startsWith("demo://")) return false;
+    if (projectStore.keepRanges.length > 0) return true;
+    if ((projectStore.estimate?.estimatedDuration ?? 0) > 0.05) return true;
+    if (projectStore.keepCount > 0) return true;
+    // pending-as-keep still yields exportable speech blocks
+    return projectStore.segments.some((s) => s.decision !== "cut");
+  }
+
+  /** @param saveAs — true = choose path (rare); false = 1-click next to source */
+  async function exportVideo(saveAs = false) {
     if (!projectStore.mediaPath || projectStore.segments.length === 0) return;
     if (projectStore.mediaPath.startsWith("demo://")) {
       projectStore.statusMessage = "Abre un video real para exportar";
       return;
     }
-    if (projectStore.keepCount === 0) {
-      projectStore.statusMessage = "Marca al menos un tramo como Mantener";
+    if (!canExport()) {
+      projectStore.statusMessage = "No hay tramos que conservar para exportar";
       return;
     }
     if (!api.isTauri()) {
@@ -132,21 +153,32 @@
     try {
       const base =
         projectStore.mediaPath.split(/[/\\]/).pop()?.replace(/\.[^.]+$/, "") ?? "vigilcut";
-      const { save } = await import("@tauri-apps/plugin-dialog");
-      const out = await save({
-        filters: [{ name: "MP4", extensions: ["mp4"] }],
-        defaultPath: `${base}-editado.mp4`,
-      });
-      if (!out) {
-        projectStore.statusMessage = "Exportación cancelada";
-        return;
+      let out: string;
+      if (saveAs) {
+        const { save } = await import("@tauri-apps/plugin-dialog");
+        const picked = await save({
+          filters: [{ name: "MP4", extensions: ["mp4"] }],
+          defaultPath: `${base}-editado.mp4`,
+        });
+        if (!picked) {
+          projectStore.statusMessage = "Exportación cancelada";
+          return;
+        }
+        out = picked;
+      } else {
+        out = defaultExportPath(projectStore.mediaPath);
       }
       projectStore.busy = true;
       projectStore.error = null;
       projectStore.statusMessage = "Exportando video…";
+      // EDL-first: prefer keepRanges from engine; segments only as override surface
       const result = await api.exportVideo({
         mediaPath: projectStore.mediaPath,
         outputPath: out,
+        keepRanges:
+          projectStore.keepRanges.length > 0
+            ? projectStore.keepRanges
+            : undefined,
         segments: projectStore.segments,
         exportOptions: projectStore.project?.preset.export,
         colorOptions: projectStore.project?.preset.color,
@@ -191,14 +223,38 @@
     >
       <div class="flex min-h-0 min-w-0 flex-col gap-2">
         <VideoPreview />
-        <Timeline />
-        <ActionBar onApply={exportVideo} onListenResult={listenResult} />
+        <!-- Supervisor mode: exception queue first; timeline is diagnostic only -->
+        {#if projectStore.supervisorMode}
+          <div class="min-h-[200px] shrink-0 lg:min-h-[240px]">
+            <ExceptionQueue />
+          </div>
+        {/if}
+        <details
+          class="rounded-xl border border-surface-800 bg-surface-900/40 open:bg-surface-900/70"
+          open={!projectStore.supervisorMode}
+        >
+          <summary
+            class="cursor-pointer select-none px-3 py-2 text-xs font-medium text-surface-400 hover:text-surface-200"
+          >
+            Timeline diagnóstico ({projectStore.segments.length} tramos)
+          </summary>
+          <div class="border-t border-surface-800 p-1">
+            <Timeline />
+          </div>
+        </details>
+        <ActionBar
+          onApply={() => exportVideo(false)}
+          onApplyAs={() => exportVideo(true)}
+          onListenResult={listenResult}
+        />
       </div>
       <aside class="flex min-h-[200px] flex-col gap-2 overflow-y-auto lg:min-h-0">
         <BatchPanel />
-        <div class="min-h-[180px] flex-[1.2]">
-          <ExceptionQueue />
-        </div>
+        {#if !projectStore.supervisorMode}
+          <div class="min-h-[180px] flex-[1.2]">
+            <ExceptionQueue />
+          </div>
+        {/if}
         <div class="min-h-[160px] flex-1">
           <SidePanel />
         </div>

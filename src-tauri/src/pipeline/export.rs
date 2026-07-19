@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{AppError, AppResult};
 use crate::ffmpeg::Ffmpeg;
+use crate::models::edl::Edl;
 use crate::models::preset::{ColorOptions, ExportOptions};
 use crate::models::segment::{Segment, SegmentDecision};
 
@@ -12,27 +13,17 @@ pub struct ExportPlan {
     pub filter_complex: Option<String>,
 }
 
-/// Build keep ranges from user-approved segments (decision == Keep).
-/// Pending (unresolved exceptions) are treated as Keep (conservative).
-pub fn keep_ranges_from_segments(segments: &[Segment]) -> Vec<(f64, f64)> {
-    let mut ranges: Vec<(f64, f64)> = segments
-        .iter()
-        .filter(|s| {
-            matches!(
-                s.decision,
-                SegmentDecision::Keep | SegmentDecision::Pending
-            )
-        })
-        .map(|s| (s.start, s.end))
-        .collect();
-
+/// Merge overlapping / adjacent keep ranges (fewer cuts → stabler export).
+pub fn merge_keep_ranges(ranges: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
+    let mut ranges = ranges;
     ranges.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-
-    // Merge adjacent/overlapping keep ranges
     let mut merged: Vec<(f64, f64)> = Vec::new();
     for (s, e) in ranges {
+        if e - s <= 0.001 {
+            continue;
+        }
         if let Some(last) = merged.last_mut() {
-            if s <= last.1 + 0.02 {
+            if s <= last.1 + 0.08 {
                 last.1 = last.1.max(e);
                 continue;
             }
@@ -42,6 +33,60 @@ pub fn keep_ranges_from_segments(segments: &[Segment]) -> Vec<(f64, f64)> {
     merged
 }
 
+/// Canonical path: keep ranges from EDL (engine truth).
+pub fn keep_ranges_from_edl(edl: &Edl) -> Vec<(f64, f64)> {
+    merge_keep_ranges(edl.keep_ranges())
+}
+
+/// UI / supervision path: keep ranges from segment decisions.
+/// Pending (unresolved exceptions) are treated as Keep (conservative).
+pub fn keep_ranges_from_segments(segments: &[Segment]) -> Vec<(f64, f64)> {
+    let ranges: Vec<(f64, f64)> = segments
+        .iter()
+        .filter(|s| {
+            matches!(
+                s.decision,
+                SegmentDecision::Keep | SegmentDecision::Pending
+            )
+        })
+        .map(|s| (s.start, s.end))
+        .collect();
+    merge_keep_ranges(ranges)
+}
+
+/// Resolve keep ranges with EDL preferred over segments when provided.
+pub fn resolve_keep_ranges(
+    edl: Option<&Edl>,
+    segments: Option<&[Segment]>,
+    explicit: Option<Vec<(f64, f64)>>,
+) -> AppResult<Vec<(f64, f64)>> {
+    if let Some(k) = explicit {
+        let m = merge_keep_ranges(k);
+        if m.is_empty() {
+            return Err(AppError::Invalid(
+                "No keep ranges — nothing to export".into(),
+            ));
+        }
+        return Ok(m);
+    }
+    if let Some(edl) = edl {
+        let m = keep_ranges_from_edl(edl);
+        if !m.is_empty() {
+            return Ok(m);
+        }
+    }
+    if let Some(segs) = segments {
+        let m = keep_ranges_from_segments(segs);
+        if !m.is_empty() {
+            return Ok(m);
+        }
+    }
+    Err(AppError::Invalid(
+        "No keep ranges — nothing to export".into(),
+    ))
+}
+
+/// Build a single-pass select/aselect filter (stable with dozens of cuts).
 pub fn build_export_filter(
     keep: &[(f64, f64)],
     has_audio: bool,
@@ -53,77 +98,63 @@ pub fn build_export_filter(
         ));
     }
 
-    let mut parts = Vec::new();
-    let mut v_labels = Vec::new();
-    let mut a_labels = Vec::new();
-
-    for (i, (start, end)) in keep.iter().enumerate() {
-        let dur = end - start;
-        if dur <= 0.0 {
-            continue;
-        }
-        let v = format!("v{i}");
-        parts.push(format!(
-            "[0:v]trim=start={start}:end={end},setpts=PTS-STARTPTS[{v}]"
-        ));
-        v_labels.push(format!("[{v}]"));
-
-        if has_audio {
-            let a = format!("a{i}");
-            parts.push(format!(
-                "[0:a]atrim=start={start}:end={end},asetpts=PTS-STARTPTS[{a}]"
-            ));
-            a_labels.push(format!("[{a}]"));
-        }
-    }
-
-    if v_labels.is_empty() {
+    let ranges: Vec<(f64, f64)> = keep
+        .iter()
+        .copied()
+        .filter(|(s, e)| e - s > 0.001)
+        .collect();
+    if ranges.is_empty() {
         return Err(AppError::Invalid("All keep ranges empty".into()));
     }
 
-    let n = v_labels.len();
-    parts.push(format!(
-        "{}concat=n={n}:v=1:a=0[vout_raw]",
-        v_labels.join("")
-    ));
+    // Commas inside select expressions must be escaped for filter_complex.
+    let expr = ranges
+        .iter()
+        .map(|(s, e)| format!("between(t\\,{s:.3}\\,{e:.3})"))
+        .collect::<Vec<_>>()
+        .join("+");
 
-    let mut color_chain = String::from("[vout_raw]");
+    let mut parts = Vec::new();
     if color.enabled {
-        color_chain.push_str(&format!(
-            "eq=brightness={}:contrast={}:saturation={}:gamma={}",
+        parts.push(format!(
+            "[0:v]select='{expr}',setpts=N/FRAME_RATE/TB,eq=brightness={}:contrast={}:saturation={}:gamma={}[vout]",
             color.brightness, color.contrast, color.saturation, color.gamma
         ));
-        color_chain.push_str("[vout]");
     } else {
-        color_chain.push_str("null[vout]");
-    }
-    parts.push(color_chain);
-
-    if has_audio && !a_labels.is_empty() {
         parts.push(format!(
-            "{}concat=n={}:v=0:a=1[aout]",
-            a_labels.join(""),
-            a_labels.len()
+            "[0:v]select='{expr}',setpts=N/FRAME_RATE/TB[vout]"
+        ));
+    }
+
+    if has_audio {
+        parts.push(format!(
+            "[0:a]aselect='{expr}',asetpts=N/SR/TB[aout]"
         ));
     }
 
     Ok(parts.join(";"))
 }
 
-pub async fn export_with_cuts(
+/// Primary export API — EDL / keep-ranges based (not Segment-centric).
+pub async fn export_keep_ranges(
     input: &Path,
     output: &Path,
-    segments: &[Segment],
+    keep: &[(f64, f64)],
     export_opts: &ExportOptions,
     color: &ColorOptions,
     has_audio: bool,
 ) -> AppResult<PathBuf> {
     let ffmpeg = Ffmpeg::new()?;
-    let keep = keep_ranges_from_segments(segments);
+    let keep = merge_keep_ranges(keep.to_vec());
     let estimated: f64 = keep.iter().map(|(s, e)| e - s).sum();
 
+    if keep.is_empty() {
+        return Err(AppError::Invalid(
+            "No keep ranges — nothing to export".into(),
+        ));
+    }
+
     if !export_opts.apply_cuts {
-        // Simple remux / reencode full file
         let mut args = vec![
             "-y".into(),
             "-i".into(),
@@ -146,7 +177,7 @@ pub async fn export_with_cuts(
             args.extend(["-c".into(), "copy".into()]);
         }
         args.push(output.to_string_lossy().into_owned());
-        ffmpeg.run(&args).await?;
+        ffmpeg.run_expecting(&args, Some(output)).await?;
         return Ok(output.to_path_buf());
     }
 
@@ -193,8 +224,40 @@ pub async fn export_with_cuts(
         output.display()
     );
 
-    ffmpeg.run(&args).await?;
+    ffmpeg.run_expecting(&args, Some(output)).await?;
+    if !output.exists() {
+        return Err(AppError::Ffmpeg(format!(
+            "Export finished but file missing: {}",
+            output.display()
+        )));
+    }
     Ok(output.to_path_buf())
+}
+
+/// Convenience: export from segment decisions (UI path).
+pub async fn export_with_cuts(
+    input: &Path,
+    output: &Path,
+    segments: &[Segment],
+    export_opts: &ExportOptions,
+    color: &ColorOptions,
+    has_audio: bool,
+) -> AppResult<PathBuf> {
+    let keep = keep_ranges_from_segments(segments);
+    export_keep_ranges(input, output, &keep, export_opts, color, has_audio).await
+}
+
+/// Export from EDL (factory / batch / CLI path).
+pub async fn export_from_edl(
+    input: &Path,
+    output: &Path,
+    edl: &Edl,
+    export_opts: &ExportOptions,
+    color: &ColorOptions,
+    has_audio: bool,
+) -> AppResult<PathBuf> {
+    let keep = keep_ranges_from_edl(edl);
+    export_keep_ranges(input, output, &keep, export_opts, color, has_audio).await
 }
 
 /// Export a single source span as a standalone clip (e.g. Short).
@@ -208,7 +271,7 @@ pub async fn export_clip(
     let ffmpeg = Ffmpeg::new()?;
     let start = start.max(0.0);
     let end = end.max(start + 0.1);
-    let mut args = vec![
+    let args = vec![
         "-y".into(),
         "-ss".into(),
         format!("{start:.3}"),
@@ -230,9 +293,7 @@ pub async fn export_clip(
         "+faststart".into(),
         output.to_string_lossy().into_owned(),
     ];
-    // avoid unused mut warning if we extend later
-    let _ = &mut args;
-    ffmpeg.run(&args).await?;
+    ffmpeg.run_expecting(&args, Some(output)).await?;
     Ok(output.to_path_buf())
 }
 
@@ -243,5 +304,72 @@ pub fn estimate_export(segments: &[Segment]) -> ExportPlan {
         keep_ranges,
         estimated_duration,
         filter_complex: None,
+    }
+}
+
+pub fn estimate_from_keep(keep: &[(f64, f64)]) -> ExportPlan {
+    let keep_ranges = merge_keep_ranges(keep.to_vec());
+    let estimated_duration = keep_ranges.iter().map(|(s, e)| e - s).sum();
+    ExportPlan {
+        keep_ranges,
+        estimated_duration,
+        filter_complex: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::edl::Edl;
+    use crate::models::segment::{Segment, SegmentDecision, SegmentKind};
+
+    #[test]
+    fn merge_adjacent() {
+        let m = merge_keep_ranges(vec![(0.0, 1.0), (1.05, 2.0), (5.0, 6.0)]);
+        assert_eq!(m.len(), 2);
+        assert!((m[0].1 - 2.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn filter_escapes_commas() {
+        let f = build_export_filter(&[(1.0, 2.0), (5.0, 6.0)], true, &ColorOptions::default())
+            .unwrap();
+        assert!(f.contains("between(t\\,"));
+        assert!(f.contains("[vout]"));
+        assert!(f.contains("[aout]"));
+    }
+
+    #[test]
+    fn resolve_prefers_explicit_then_edl_then_segments() {
+        let edl = Edl::from_remove_spans("x.mp4", 10.0, &[(2.0, 3.0)]);
+        let segs = vec![
+            Segment::new(0.0, 10.0, SegmentKind::Speech, SegmentDecision::Keep),
+        ];
+
+        let k = resolve_keep_ranges(None, None, Some(vec![(0.0, 1.0), (2.0, 3.0)])).unwrap();
+        assert_eq!(k.len(), 2);
+
+        let k2 = resolve_keep_ranges(Some(&edl), Some(&segs), None).unwrap();
+        assert!(!k2.is_empty());
+        let dur: f64 = k2.iter().map(|(s, e)| e - s).sum();
+        assert!((dur - 9.0).abs() < 0.1);
+
+        let k3 = resolve_keep_ranges(None, Some(&segs), None).unwrap();
+        assert_eq!(k3.len(), 1);
+    }
+
+    #[test]
+    fn pending_segments_count_as_keep() {
+        let segs = vec![
+            Segment::new(0.0, 1.0, SegmentKind::Speech, SegmentDecision::Keep),
+            Segment::new(1.0, 2.0, SegmentKind::Silence, SegmentDecision::Pending),
+            Segment::new(2.0, 3.0, SegmentKind::Speech, SegmentDecision::Keep),
+            Segment::new(3.0, 4.0, SegmentKind::Silence, SegmentDecision::Cut),
+        ];
+        let k = keep_ranges_from_segments(&segs);
+        // keep+pending merge → [0,2] then [2,3]? 0-1 keep, 1-2 pending, 2-3 keep → merge to [0,3]
+        assert_eq!(k.len(), 1);
+        assert!((k[0].0 - 0.0).abs() < 0.01);
+        assert!((k[0].1 - 3.0).abs() < 0.01);
     }
 }

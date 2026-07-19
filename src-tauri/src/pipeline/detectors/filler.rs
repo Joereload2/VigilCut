@@ -5,7 +5,7 @@ use std::path::Path;
 use crate::error::AppResult;
 use crate::models::event::{Event, Span};
 
-pub const TYPE_SPEECH_FILLER: &str = "speech.filler";
+pub use crate::models::event::TYPE_SPEECH_FILLER;
 
 const FILLERS_ES: &[&str] = &[
     "eh", "ehh", "mmm", "mm", "este", "esto", "o sea", "tipo", "digamos", "bueno", "vale",

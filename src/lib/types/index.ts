@@ -101,6 +101,8 @@ export interface SilenceDetectionOptions {
   threshold: number;
   preferSilero: boolean;
   autoCutSilence: boolean;
+  /** Min confidence for auto-cut without human review */
+  autoApproveMinScore: number;
 }
 
 export interface SilenceDetectionResult {
@@ -233,6 +235,7 @@ export const DEFAULT_SILENCE_OPTIONS: SilenceDetectionOptions = {
   threshold: 0.5,
   preferSilero: true,
   autoCutSilence: true,
+  autoApproveMinScore: 0.8,
 };
 
 export function segmentDuration(s: Segment): number {

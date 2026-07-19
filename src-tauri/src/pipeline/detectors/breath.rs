@@ -1,6 +1,6 @@
 use crate::models::event::{Event, TYPE_AUDIO_SILENCE};
 
-pub const TYPE_AUDIO_BREATH: &str = "audio.breath";
+pub use crate::models::event::TYPE_AUDIO_BREATH;
 
 /// Tag short mid-speech silences as breath / micro-pause candidates.
 /// Does not invent new spans — re-emits refined events from short silences.

@@ -6,6 +6,18 @@ use tokio::process::Command;
 use crate::error::{AppError, AppResult};
 use crate::models::media::MediaInfo;
 
+/// On Windows, ffmpeg/ffprobe are console apps — without this flag a black
+/// terminal window flashes for every probe/export/preview call.
+fn cmd_hidden(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    let mut cmd = Command::new(program);
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
 #[derive(Debug, Clone)]
 pub struct FfmpegPaths {
     pub ffmpeg: PathBuf,
@@ -24,23 +36,41 @@ impl FfmpegPaths {
     }
 
     fn sidecar_dir() -> PathBuf {
-        // In Tauri, externalBin is next to the executable under binaries/
+        // Prefer a directory that actually contains ffmpeg — never return the
+        // test/deps folder just because it exists (that broke cargo tests).
+        let mut candidates: Vec<PathBuf> = Vec::new();
         if let Ok(exe) = std::env::current_exe() {
             if let Some(dir) = exe.parent() {
-                let candidates = [
-                    dir.join("binaries"),
-                    dir.to_path_buf(),
-                    // Dev layout: src-tauri/binaries
-                    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries"),
-                ];
-                for c in candidates {
-                    if c.exists() {
-                        return c;
-                    }
+                candidates.push(dir.join("binaries"));
+                candidates.push(dir.to_path_buf());
+                // target/release or target/debug (parent of deps when running tests)
+                if let Some(parent) = dir.parent() {
+                    candidates.push(parent.join("binaries"));
+                    candidates.push(parent.to_path_buf());
                 }
             }
         }
+        candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries"));
+
+        for c in &candidates {
+            if Self::dir_has_ffmpeg(c) {
+                return c.clone();
+            }
+        }
+        // Last resort: project binaries even if missing (error message later)
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries")
+    }
+
+    fn dir_has_ffmpeg(dir: &Path) -> bool {
+        #[cfg(windows)]
+        {
+            dir.join("ffmpeg.exe").is_file()
+                || dir.join("ffmpeg-x86_64-pc-windows-msvc.exe").is_file()
+        }
+        #[cfg(not(windows))]
+        {
+            dir.join("ffmpeg").is_file()
+        }
     }
 
     fn find_binary(name: &str, sidecar_dir: &Path) -> AppResult<PathBuf> {
@@ -105,7 +135,7 @@ impl Ffmpeg {
     }
 
     pub async fn version(&self) -> AppResult<String> {
-        let output = Command::new(&self.paths.ffmpeg)
+        let output = cmd_hidden(&self.paths.ffmpeg)
             .arg("-version")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -118,7 +148,7 @@ impl Ffmpeg {
     }
 
     pub async fn probe(&self, path: &Path) -> AppResult<MediaInfo> {
-        let output = Command::new(&self.paths.ffprobe)
+        let output = cmd_hidden(&self.paths.ffprobe)
             .args([
                 "-v",
                 "quiet",
@@ -144,21 +174,99 @@ impl Ffmpeg {
         parse_probe_json(path, &json)
     }
 
+    /// Run ffmpeg. Global quiet flags are prepended so progress spam does not
+    /// fill the stderr pipe (which can deadlock long exports on Windows).
     pub async fn run(&self, args: &[String]) -> AppResult<std::process::Output> {
-        let output = Command::new(&self.paths.ffmpeg)
-            .args(args)
+        self.run_expecting(args, None).await
+    }
+
+    /// Like [`run`], but if ffmpeg exits non-zero after a finished encode
+    /// (e.g. SIGTERM / signal 15 while closing), accept a valid output file.
+    pub async fn run_expecting(
+        &self,
+        args: &[String],
+        expected_output: Option<&Path>,
+    ) -> AppResult<std::process::Output> {
+        let mut full_args: Vec<String> = Vec::with_capacity(args.len() + 4);
+        // Keep banner/stats off — UI already shows its own progress.
+        full_args.extend([
+            "-hide_banner".into(),
+            "-nostats".into(),
+            "-loglevel".into(),
+            "error".into(),
+        ]);
+        full_args.extend(args.iter().cloned());
+
+        // kill_on_drop(false): a cancelled Tauri invoke must not SIGTERM a
+        // nearly-finished export (that was showing up as "signal 15").
+        let mut child = cmd_hidden(&self.paths.ffmpeg)
+            .args(&full_args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .output()
-            .await
+            .stdin(Stdio::null())
+            .kill_on_drop(false)
+            .spawn()
             .map_err(|e| AppError::Ffmpeg(e.to_string()))?;
 
-        if !output.status.success() {
-            return Err(AppError::Ffmpeg(
-                String::from_utf8_lossy(&output.stderr).to_string(),
-            ));
+        let stdout_pipe = child.stdout.take();
+        let stderr_pipe = child.stderr.take();
+
+        let stdout_task = tokio::spawn(async move {
+            use tokio::io::AsyncReadExt;
+            let mut buf = Vec::new();
+            if let Some(mut r) = stdout_pipe {
+                let _ = r.read_to_end(&mut buf).await;
+            }
+            buf
+        });
+        let stderr_task = tokio::spawn(async move {
+            use tokio::io::AsyncReadExt;
+            let mut buf = Vec::new();
+            if let Some(mut r) = stderr_pipe {
+                let _ = r.read_to_end(&mut buf).await;
+            }
+            buf
+        });
+
+        let status = child
+            .wait()
+            .await
+            .map_err(|e| AppError::Ffmpeg(e.to_string()))?;
+        let stdout = stdout_task.await.unwrap_or_default();
+        let stderr = stderr_task.await.unwrap_or_default();
+        let output = std::process::Output {
+            status,
+            stdout,
+            stderr,
+        };
+
+        if output.status.success() {
+            return Ok(output);
         }
-        Ok(output)
+
+        let err_text = String::from_utf8_lossy(&output.stderr);
+        let out_text = String::from_utf8_lossy(&output.stdout);
+        let combined = format!("{err_text}\n{out_text}");
+
+        if let Some(path) = expected_output {
+            if output_looks_usable(path) {
+                // Encode finished but process was signalled during teardown.
+                if combined.contains("signal 15")
+                    || combined.contains("muxing overhead")
+                    || combined.contains("Lsize=")
+                    || err_text.trim().is_empty()
+                {
+                    tracing::warn!(
+                        path = %path.display(),
+                        code = ?output.status.code(),
+                        "ffmpeg exited non-zero but output file is usable — treating as success"
+                    );
+                    return Ok(output);
+                }
+            }
+        }
+
+        Err(AppError::Ffmpeg(summarize_ffmpeg_error(&combined)))
     }
 
     /// Extract mono 16kHz PCM WAV for VAD / analysis.
@@ -188,7 +296,7 @@ impl Ffmpeg {
         min_duration: f64,
     ) -> AppResult<Vec<(f64, f64)>> {
         let filter = format!("silencedetect=noise={noise_db}dB:d={min_duration}");
-        let output = Command::new(&self.paths.ffmpeg)
+        let output = cmd_hidden(&self.paths.ffmpeg)
             .args([
                 "-i",
                 &input.to_string_lossy(),
@@ -234,7 +342,7 @@ impl Ffmpeg {
             "-".into(),
         ];
 
-        let output = Command::new(&self.paths.ffmpeg)
+        let output = cmd_hidden(&self.paths.ffmpeg)
             .args(&args)
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -360,6 +468,70 @@ fn parse_frame_rate(s: &str) -> Option<f64> {
         }
     }
     s.parse().ok()
+}
+
+fn output_looks_usable(path: &Path) -> bool {
+    match std::fs::metadata(path) {
+        Ok(m) => m.is_file() && m.len() > 8_192,
+        Err(_) => false,
+    }
+}
+
+/// Keep UI errors short — full ffmpeg dumps are useless for the user.
+fn summarize_ffmpeg_error(log: &str) -> String {
+    let mut useful: Vec<&str> = log
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .filter(|l| {
+            let lower = l.to_ascii_lowercase();
+            !lower.starts_with("ffmpeg version")
+                && !lower.starts_with("built with")
+                && !lower.starts_with("configuration:")
+                && !lower.starts_with("libav")
+                && !lower.starts_with("libsw")
+                && !lower.starts_with("frame=")
+                && !lower.starts_with("press [q]")
+                && !lower.contains("copyright (c)")
+                && !lower.contains("http://")
+                && !lower.contains("https://")
+        })
+        .collect();
+
+    // Prefer lines that look like real errors.
+    let errors: Vec<&str> = useful
+        .iter()
+        .copied()
+        .filter(|l| {
+            let lower = l.to_ascii_lowercase();
+            lower.contains("error")
+                || lower.contains("failed")
+                || lower.contains("invalid")
+                || lower.contains("no such")
+                || lower.contains("does not exist")
+                || lower.contains("permission")
+                || lower.contains("signal ")
+                || lower.starts_with('[')
+        })
+        .collect();
+
+    if !errors.is_empty() {
+        useful = errors;
+    }
+
+    if useful.is_empty() {
+        return "FFmpeg falló sin mensaje útil. Revisa el archivo de salida o vuelve a intentar."
+            .into();
+    }
+
+    // Last ~8 meaningful lines are usually the real failure.
+    let start = useful.len().saturating_sub(8);
+    let msg = useful[start..].join("\n");
+    if msg.len() > 1200 {
+        format!("{}…", &msg[..1200])
+    } else {
+        msg
+    }
 }
 
 /// Parse pairs (silence_start, silence_end) from ffmpeg silencedetect stderr.

@@ -27,7 +27,7 @@ pub struct AnalysisRun {
     pub artifacts: Vec<ArtifactRef>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct AnalysisStats {
     pub event_count: usize,

@@ -418,7 +418,13 @@ class ProjectStore {
 
   applyPreset(preset: ProcessingPreset) {
     this.activePresetId = preset.id;
-    this.silenceOptions = { ...preset.silence };
+    // Always fill factory knobs even if older presets omit new fields
+    this.silenceOptions = {
+      ...DEFAULT_SILENCE_OPTIONS,
+      ...preset.silence,
+      autoApproveMinScore:
+        preset.silence.autoApproveMinScore ?? DEFAULT_SILENCE_OPTIONS.autoApproveMinScore,
+    };
     if (this.project) {
       this.project = { ...this.project, preset };
     }
@@ -427,12 +433,23 @@ class ProjectStore {
   async refreshKeepRanges() {
     try {
       if (api.isTauri() && this.segments.length) {
-        const plan = await api.previewSkipCuts(this.segments);
+        // Prefer EDL keep ranges when analysis is in sync (no manual tramo edits)
+        const fromEdl = this.analysisRun?.edl?.videoTrack?.map(
+          (s) => [s.start, s.end] as [number, number],
+        );
+        const plan = await api.previewSkipCuts(
+          this.segments,
+          this.touchedIds.length === 0 && fromEdl?.length ? fromEdl : undefined,
+        );
         this.keepRanges = plan.keepRanges;
-        this.estimate = await api.estimateExport(this.segments, this.duration);
+        this.estimate = await api.estimateExport(
+          this.segments,
+          this.duration,
+          this.keepRanges,
+        );
       } else {
         this.keepRanges = this.segments
-          .filter((s) => s.decision === "keep")
+          .filter((s) => s.decision === "keep" || s.decision === "pending")
           .map((s) => [s.start, s.end] as [number, number]);
         this.estimate = {
           estimatedDuration: this.keptDuration,
@@ -443,7 +460,7 @@ class ProjectStore {
       }
     } catch {
       this.keepRanges = this.segments
-        .filter((s) => s.decision === "keep")
+        .filter((s) => s.decision === "keep" || s.decision === "pending")
         .map((s) => [s.start, s.end] as [number, number]);
     }
   }

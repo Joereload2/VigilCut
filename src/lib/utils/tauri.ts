@@ -229,21 +229,34 @@ export async function mergeAdjacentSegments(
   return invoke("merge_adjacent_segments", { segments, maxGap: maxGap ?? null });
 }
 
-export async function previewSkipCuts(segments: Segment[]): Promise<PreviewSkipPlan> {
-  return invoke("preview_skip_cuts", { segments });
+export async function previewSkipCuts(
+  segments: Segment[],
+  keepRanges?: [number, number][],
+): Promise<PreviewSkipPlan> {
+  return invoke("preview_skip_cuts", {
+    segments,
+    keepRanges: keepRanges ?? null,
+  });
 }
 
 export async function estimateExport(
   segments: Segment[],
   sourceDuration: number,
+  keepRanges?: [number, number][],
 ): Promise<ExportEstimate> {
-  return invoke("estimate_export", { segments, sourceDuration });
+  return invoke("estimate_export", {
+    segments,
+    keepRanges: keepRanges ?? null,
+    sourceDuration,
+  });
 }
 
 export async function exportVideo(params: {
   mediaPath: string;
   outputPath: string;
-  segments: Segment[];
+  segments?: Segment[];
+  /** Preferred: EDL / factory keep ranges (source of truth). */
+  keepRanges?: [number, number][];
   exportOptions?: ExportOptions;
   colorOptions?: ColorOptions;
   hasAudio?: boolean;
@@ -251,7 +264,8 @@ export async function exportVideo(params: {
   return invoke("export_video", {
     mediaPath: params.mediaPath,
     outputPath: params.outputPath,
-    segments: params.segments,
+    segments: params.segments ?? null,
+    keepRanges: params.keepRanges ?? null,
     exportOptions: params.exportOptions ?? null,
     colorOptions: params.colorOptions ?? null,
     hasAudio: params.hasAudio ?? null,

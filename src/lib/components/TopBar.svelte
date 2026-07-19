@@ -59,11 +59,23 @@
       <span
         >{formatTime(projectStore.duration)}
         <span class="text-surface-600">→</span>
-        <strong class="font-mono text-keep">{formatTime(projectStore.keptDuration)}</strong></span
+        <strong class="font-mono text-keep"
+          >{formatTime(
+            projectStore.estimate?.estimatedDuration ?? projectStore.keptDuration,
+          )}</strong
+        ></span
       >
-      {#if projectStore.reviewPosition.total > 0}
-        <span class="rounded-full border border-surface-700 px-2 py-0.5 font-mono text-[10px] text-surface-300">
-          Tramo {projectStore.reviewPosition.current}/{projectStore.reviewPosition.total}
+      {#if projectStore.pendingExceptionCount > 0}
+        <span
+          class="rounded-full border border-warning/40 bg-warning/10 px-2 py-0.5 font-mono text-[10px] text-warning"
+        >
+          {projectStore.pendingExceptionCount} excepciones
+        </span>
+      {:else if projectStore.analysisRun}
+        <span
+          class="rounded-full border border-keep/30 bg-keep/10 px-2 py-0.5 text-[10px] text-keep"
+        >
+          listo
         </span>
       {/if}
     </div>

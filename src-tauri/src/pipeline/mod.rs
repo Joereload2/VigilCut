@@ -4,6 +4,7 @@ pub mod detectors;
 pub mod engine;
 pub mod export;
 pub mod features;
+pub mod policy;
 pub mod silence;
 
 pub use engine::{

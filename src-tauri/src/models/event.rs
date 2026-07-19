@@ -68,3 +68,8 @@ impl Event {
 
 pub const TYPE_AUDIO_SILENCE: &str = "audio.silence";
 pub const TYPE_AUDIO_SPEECH: &str = "audio.speech";
+pub const TYPE_AUDIO_BREATH: &str = "audio.breath";
+pub const TYPE_SPEECH_FILLER: &str = "speech.filler";
+pub const TYPE_STRUCTURE_CHAPTER: &str = "structure.chapter";
+/// Prefer `short.candidate` (canonical detector id).
+pub const TYPE_STRUCTURE_SHORT: &str = "short.candidate";

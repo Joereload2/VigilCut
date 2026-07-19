@@ -58,7 +58,11 @@
         ✓
       </div>
       <h2 class="mt-3 text-center text-lg font-semibold text-white">Video exportado</h2>
-      <p class="mt-1 text-center text-sm text-surface-400">Listo para subir o editar en otra app.</p>
+      <p class="mt-1 text-center text-sm text-surface-400">
+        Junto al original: <span class="text-surface-200">.mp4</span>
+        + <span class="text-surface-200">.chapters.txt</span>
+        · meta en <span class="text-surface-200">*-meta/</span>
+      </p>
 
       <div class="mt-4 grid grid-cols-2 gap-2 rounded-xl bg-surface-950/80 p-3 text-center text-xs">
         <div>

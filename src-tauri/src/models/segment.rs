@@ -106,6 +106,13 @@ pub struct SilenceDetectionOptions {
     pub prefer_silero: bool,
     /// Auto-mark silences as Cut (user can still toggle)
     pub auto_cut_silence: bool,
+    /// Policy: min event score for auto-cut without human review (default 0.80)
+    #[serde(default = "default_auto_approve")]
+    pub auto_approve_min_score: f64,
+}
+
+fn default_auto_approve() -> f64 {
+    0.80
 }
 
 impl Default for SilenceDetectionOptions {
@@ -116,6 +123,7 @@ impl Default for SilenceDetectionOptions {
             threshold: 0.5,
             prefer_silero: true,
             auto_cut_silence: true,
+            auto_approve_min_score: 0.80,
         }
     }
 }

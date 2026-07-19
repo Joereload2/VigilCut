@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { projectStore } from "$lib/stores/project.svelte";
-  import { formatTime, type Segment } from "$lib/types";
+  import { formatTime } from "$lib/types";
 
   let settingsOpen = $state(false);
 
@@ -9,91 +9,89 @@
     void projectStore.refreshPresets();
   });
 
-  function rowClass(seg: Segment) {
-    const sel = projectStore.selectedSegmentId === seg.id;
-    if (seg.decision === "cut") {
-      return sel
-        ? "border-cut/60 bg-cut/15"
-        : "border-transparent hover:bg-cut/10";
-    }
-    if (seg.decision === "keep") {
-      return sel
-        ? "border-keep/60 bg-keep/15"
-        : "border-transparent hover:bg-keep/10";
-    }
-    return sel
-      ? "border-warning/50 bg-warning/10"
-      : "border-transparent hover:bg-surface-800";
-  }
-
-  function kindLabel(kind: string) {
-    if (kind === "silence") return "Silencio";
-    if (kind === "speech") return "Habla";
-    if (kind === "manual") return "Manual";
-    return kind;
-  }
+  const stats = $derived(projectStore.analysisRun?.stats);
+  const method = $derived(projectStore.analysisRun?.method ?? "—");
+  /** Only human-relevant rows — not the full 100+ tramo dump */
+  const reviewRows = $derived(
+    projectStore.segments.filter((s) => s.needsReview || s.decision === "pending"),
+  );
 </script>
 
 <div class="panel flex min-h-0 flex-1 flex-col overflow-hidden">
-  <!-- Header -->
-  <div class="flex items-center justify-between border-b border-surface-800 px-3 py-2.5">
-    <div>
-      <div class="text-sm font-semibold text-surface-100">Tramos</div>
-      <div class="text-[10px] text-surface-500">
-        Clic = ir · badge = decidir y seguir
-      </div>
-    </div>
-    <div class="text-right text-[10px] text-surface-400">
-      <div class="font-mono">
-        <span class="text-keep">{projectStore.keepCount}</span>
-        <span class="text-surface-600">/</span>
-        <span class="text-cut">{projectStore.cutCount}</span>
-      </div>
-      <div class="text-surface-500">
-        {projectStore.reviewPosition.current}/{projectStore.reviewPosition.total}
-      </div>
+  <div class="border-b border-surface-800 px-3 py-2.5">
+    <div class="text-sm font-semibold text-surface-100">Fábrica</div>
+    <div class="text-[10px] text-surface-500">
+      Stats del run · solo lo que aún pide humano
     </div>
   </div>
 
-  <!-- List -->
+  {#if stats}
+    <div class="grid grid-cols-2 gap-1.5 border-b border-surface-800 p-2 text-[10px]">
+      <div class="rounded-lg bg-surface-950/80 px-2 py-1.5">
+        <div class="text-surface-500">Auto-cortes</div>
+        <div class="font-mono text-sm font-semibold text-cut">{stats.autoCutCount}</div>
+      </div>
+      <div class="rounded-lg bg-surface-950/80 px-2 py-1.5">
+        <div class="text-surface-500">Excepciones</div>
+        <div class="font-mono text-sm font-semibold text-warning">
+          {stats.pendingExceptionCount}
+        </div>
+      </div>
+      <div class="rounded-lg bg-surface-950/80 px-2 py-1.5">
+        <div class="text-surface-500">Final</div>
+        <div class="font-mono text-sm text-keep">{formatTime(stats.outputDuration)}</div>
+      </div>
+      <div class="rounded-lg bg-surface-950/80 px-2 py-1.5">
+        <div class="text-surface-500">Recortado</div>
+        <div class="font-mono text-sm text-cut">−{formatTime(stats.autoRemovedDuration)}</div>
+      </div>
+      <div class="col-span-2 truncate rounded-lg bg-surface-950/80 px-2 py-1 text-surface-500">
+        motor: <span class="font-mono text-surface-300">{method}</span>
+      </div>
+    </div>
+  {/if}
+
   <div class="min-h-0 flex-1 overflow-y-auto p-1.5">
-    {#if projectStore.segments.length === 0}
-      <p class="p-4 text-center text-xs text-surface-500">
-        Abre un video: se detectarán silencios automáticamente.
+    {#if !projectStore.mediaPath}
+      <p class="p-3 text-center text-xs text-surface-500">Abre un video para arrancar la fábrica.</p>
+    {:else if reviewRows.length === 0}
+      <p class="p-3 text-center text-xs text-surface-500">
+        {projectStore.analysisRun
+          ? "Nada pendiente aquí. Usa Supervisión → Oír → Exportar."
+          : "Analizando…"}
       </p>
     {:else}
+      <div class="mb-1 px-1 text-[10px] font-medium uppercase tracking-wide text-warning/80">
+        Pendiente de humano ({reviewRows.length})
+      </div>
       <ul class="space-y-0.5">
-        {#each projectStore.segments as seg (seg.id)}
-          <li class="flex items-stretch gap-1 rounded-lg border px-1 py-1 {rowClass(seg)}">
+        {#each reviewRows as seg (seg.id)}
+          <li class="flex items-stretch gap-1 rounded-lg border border-warning/20 bg-warning/5 px-1 py-1">
             <button
               type="button"
               class="flex min-w-0 flex-1 items-center gap-2 px-1.5 py-1 text-left text-xs"
               onclick={() => projectStore.selectSegment(seg.id)}
             >
-              <span
-                class="h-2 w-2 shrink-0 rounded-full
-                  {seg.decision === 'cut'
-                  ? 'bg-cut'
-                  : seg.decision === 'keep'
-                    ? 'bg-keep'
-                    : 'bg-warning'}"
-              ></span>
+              <span class="h-2 w-2 shrink-0 rounded-full bg-warning"></span>
               <span class="w-11 shrink-0 font-mono text-surface-400">{formatTime(seg.start)}</span>
-              <span class="min-w-0 flex-1 truncate text-surface-200">{kindLabel(seg.kind)}</span>
+              <span class="min-w-0 flex-1 truncate text-surface-200">Revisar</span>
               <span class="shrink-0 font-mono text-surface-500"
                 >{formatTime(seg.end - seg.start)}</span
               >
             </button>
             <button
               type="button"
-              class="shrink-0 self-center rounded-md px-2 py-1 text-[10px] font-bold uppercase tracking-wide
-                {seg.decision === 'cut'
-                ? 'bg-cut/25 text-cut'
-                : 'bg-keep/25 text-keep'}"
-              title="Cambiar y pasar al siguiente (igual que K/X)"
-              onclick={() => projectStore.toggleAndAdvance(seg.id)}
+              class="shrink-0 self-center rounded-md bg-cut/20 px-2 py-1 text-[10px] font-bold text-cut"
+              onclick={() => projectStore.markAndAdvance(seg.id, "cut")}
             >
-              {seg.decision === "cut" ? "Cortar" : "Queda"}
+              Cortar
+            </button>
+            <button
+              type="button"
+              class="shrink-0 self-center rounded-md bg-keep/20 px-2 py-1 text-[10px] font-bold text-keep"
+              onclick={() => projectStore.markAndAdvance(seg.id, "keep")}
+            >
+              Queda
             </button>
           </li>
         {/each}
@@ -101,14 +99,13 @@
     {/if}
   </div>
 
-  <!-- Collapsible settings -->
   <div class="border-t border-surface-800">
     <button
       type="button"
       class="flex w-full items-center justify-between px-3 py-2 text-left text-xs text-surface-400 hover:bg-surface-800/50 hover:text-surface-200"
       onclick={() => (settingsOpen = !settingsOpen)}
     >
-      <span class="font-medium">Ajustes de detección</span>
+      <span class="font-medium">Policy / detección (avanzado)</span>
       <span class="text-surface-600">{settingsOpen ? "▾" : "▸"}</span>
     </button>
 
@@ -134,6 +131,21 @@
         {/if}
 
         <label class="block text-[11px] text-surface-400">
+          Umbral auto-corte (confianza)
+          <input
+            type="range"
+            min="0.55"
+            max="0.95"
+            step="0.05"
+            class="mt-1 w-full accent-vigil-500"
+            bind:value={projectStore.silenceOptions.autoApproveMinScore}
+          />
+          <span class="font-mono text-surface-500"
+            >{Math.round(projectStore.silenceOptions.autoApproveMinScore * 100)}%</span
+          >
+        </label>
+
+        <label class="block text-[11px] text-surface-400">
           Silencio mínimo (s)
           <input
             type="number"
@@ -157,25 +169,13 @@
           />
         </label>
 
-        <label class="block text-[11px] text-surface-400">
-          Sensibilidad
-          <input
-            type="range"
-            min="0.1"
-            max="0.9"
-            step="0.05"
-            class="mt-1 w-full accent-vigil-500"
-            bind:value={projectStore.silenceOptions.threshold}
-          />
-        </label>
-
         <label class="flex items-center gap-2 text-[11px] text-surface-300">
           <input
             type="checkbox"
             class="accent-vigil-500"
-            bind:checked={projectStore.silenceOptions.autoCutSilence}
+            bind:checked={projectStore.silenceOptions.preferSilero}
           />
-          Marcar silencios como cortar
+          Preferir Silero VAD
         </label>
 
         <button
@@ -184,7 +184,7 @@
           disabled={projectStore.busy || !projectStore.mediaPath}
           onclick={() => projectStore.reanalyze()}
         >
-          Volver a detectar
+          Re-analizar con policy actual
         </button>
       </div>
     {/if}

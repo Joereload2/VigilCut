@@ -124,6 +124,7 @@ pub fn builtin_presets() -> Vec<ProcessingPreset> {
                 threshold: 0.45,
                 prefer_silero: true,
                 auto_cut_silence: true,
+                auto_approve_min_score: 0.75,
             },
             audio: AudioEnhanceOptions {
                 enabled: true,
@@ -148,6 +149,7 @@ pub fn builtin_presets() -> Vec<ProcessingPreset> {
                 threshold: 0.5,
                 prefer_silero: true,
                 auto_cut_silence: true,
+                auto_approve_min_score: 0.80,
             },
             audio: AudioEnhanceOptions {
                 enabled: true,
@@ -183,6 +185,7 @@ pub fn builtin_presets() -> Vec<ProcessingPreset> {
                 threshold: 0.55,
                 prefer_silero: true,
                 auto_cut_silence: true,
+                auto_approve_min_score: 0.88,
             },
             audio: AudioEnhanceOptions {
                 enabled: false,
@@ -202,6 +205,7 @@ pub fn builtin_presets() -> Vec<ProcessingPreset> {
                 threshold: 0.5,
                 prefer_silero: true,
                 auto_cut_silence: false,
+                auto_approve_min_score: 0.95,
             },
             audio: AudioEnhanceOptions::default(),
             color: ColorOptions::default(),
