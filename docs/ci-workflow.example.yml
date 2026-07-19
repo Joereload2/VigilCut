@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Unit + Smoke + E2E (Ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Stage FFmpeg sidecars for tests
+        run: |
+          mkdir -p src-tauri/binaries
+          ln -sf "$(which ffmpeg)" src-tauri/binaries/ffmpeg
+          ln -sf "$(which ffprobe)" src-tauri/binaries/ffprobe
+          # Windows-named copies for path helpers that look for .exe only on Windows
+          cp "$(which ffmpeg)" src-tauri/binaries/ffmpeg.exe || true
+          cp "$(which ffprobe)" src-tauri/binaries/ffprobe.exe || true
+          ls -la src-tauri/binaries
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Unit tests
+        working-directory: src-tauri
+        run: cargo test --lib
+
+      - name: Smoke pipeline
+        working-directory: src-tauri
+        run: cargo test --test smoke_pipeline -- --nocapture
+
+      - name: Smoke clipping
+        working-directory: src-tauri
+        run: cargo test --test smoke_clipping -- --nocapture
+
+      - name: E2E factory
+        working-directory: src-tauri
+        run: cargo test --test e2e_factory -- --nocapture
+
+      - name: E2E clipping
+        working-directory: src-tauri
+        run: cargo test --test e2e_clipping -- --nocapture
+
+  frontend:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run build
