@@ -12,6 +12,7 @@
   import ExportSuccess from "$lib/components/ExportSuccess.svelte";
   import ClippingPanel from "$lib/components/ClippingPanel.svelte";
   import ModeNav from "$lib/components/ModeNav.svelte";
+  import ShortPlayer from "$lib/components/ShortPlayer.svelte";
   import { projectStore } from "$lib/stores/project.svelte";
   import type { FfmpegStatus } from "$lib/types";
   import * as api from "$lib/utils/tauri";
@@ -232,66 +233,73 @@
       </div>
     </div>
   {:else}
-    <ModeNav mode={workspaceTab} onMode={(m) => (workspaceTab = m)} />
+    <div class="flex min-h-0 flex-1 overflow-hidden">
+      <ModeNav mode={workspaceTab} onMode={(m) => (workspaceTab = m)} />
 
-    <main
-      class="grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-hidden p-2 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,340px)]"
-    >
-      <!-- VIDEO ALWAYS FIRST AND LARGE -->
-      <div class="flex min-h-0 min-w-0 flex-col gap-2">
-        <div class="flex min-h-[280px] flex-[2] flex-col overflow-hidden lg:min-h-[360px]">
-          <VideoPreview />
-        </div>
-
-        {#if workspaceTab === "silence"}
-          <ActionBar
-            onApply={() => exportVideo(false)}
-            onApplyAs={() => exportVideo(true)}
-            onListenResult={listenResult}
-          />
-          <details
-            class="max-h-[40%] shrink-0 overflow-hidden rounded-xl border border-surface-800 bg-surface-900/40 open:max-h-[50%]"
-          >
-            <summary
-              class="cursor-pointer select-none px-3 py-2 text-xs font-medium text-surface-400 hover:text-surface-200"
-            >
-              Supervisión silencios ({projectStore.pendingExceptionCount} excepciones) · timeline
-              ({projectStore.segments.length})
-            </summary>
-            <div class="max-h-64 space-y-2 overflow-y-auto border-t border-surface-800 p-2">
-              <ExceptionQueue />
-              <details class="rounded-lg border border-surface-800">
-                <summary class="cursor-pointer px-2 py-1 text-[10px] text-surface-500"
-                  >Timeline diagnóstico</summary
-                >
-                <Timeline />
-              </details>
+      {#if workspaceTab === "silence"}
+        <main
+          class="grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-hidden p-2 lg:grid-cols-[minmax(0,1.4fr)_minmax(260px,320px)]"
+        >
+          <div class="flex min-h-0 min-w-0 flex-col gap-2">
+            <div class="flex min-h-[300px] flex-1 flex-col overflow-hidden lg:min-h-[380px]">
+              <VideoPreview />
             </div>
-          </details>
-        {:else}
-          <div
-            class="shrink-0 rounded-xl border border-amber-800/30 bg-amber-950/20 px-3 py-2 text-[11px] text-amber-100/90"
-          >
-            <strong class="text-amber-200">Modo Shorts / clips 9:16</strong>
-            — a la derecha: <em>Encontrar clips</em>, aprueba con A, oye con ▶, exporta vertical.
-            El vídeo de la izquierda reproduce el momento seleccionado.
+            <ActionBar
+              onApply={() => exportVideo(false)}
+              onApplyAs={() => exportVideo(true)}
+              onListenResult={listenResult}
+            />
+            <details
+              class="max-h-[36%] shrink-0 overflow-hidden rounded-xl border border-surface-800 bg-surface-900/40"
+            >
+              <summary
+                class="cursor-pointer select-none px-3 py-2 text-xs font-medium text-surface-400 hover:text-surface-200"
+              >
+                Supervisión ({projectStore.pendingExceptionCount} excepciones) · timeline
+                ({projectStore.segments.length})
+              </summary>
+              <div class="max-h-56 space-y-2 overflow-y-auto border-t border-surface-800 p-2">
+                <ExceptionQueue />
+                <details class="rounded-lg border border-surface-800">
+                  <summary class="cursor-pointer px-2 py-1 text-[10px] text-surface-500"
+                    >Timeline diagnóstico</summary
+                  >
+                  <Timeline />
+                </details>
+              </div>
+            </details>
           </div>
-        {/if}
-      </div>
-
-      <aside class="flex min-h-[240px] flex-col gap-2 overflow-hidden lg:min-h-0">
-        {#if workspaceTab === "clips"}
-          <div class="min-h-0 flex-1 overflow-hidden">
-            <ClippingPanel />
-          </div>
-        {:else}
-          <div class="min-h-0 flex-1 space-y-2 overflow-y-auto">
+          <aside class="min-h-0 space-y-2 overflow-y-auto">
             <SidePanel />
             <BatchPanel />
+          </aside>
+        </main>
+      {:else}
+        <!-- SHORTS: ModeNav (left) | 9:16 live player | candidate list -->
+        <main
+          class="grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-hidden p-2 md:grid-cols-[minmax(0,1fr)_minmax(280px,400px)]"
+        >
+          <div
+            class="flex min-h-[420px] min-w-0 flex-col overflow-hidden rounded-2xl border border-amber-700/40 bg-gradient-to-b from-surface-900 via-surface-950 to-black"
+          >
+            <div
+              class="flex shrink-0 items-center justify-between gap-2 border-b border-amber-900/40 px-3 py-2"
+            >
+              <span class="text-xs font-semibold text-amber-100/95"
+                >Short seleccionado · vista 9:16 en vivo</span
+              >
+              <span class="text-[10px] text-surface-500">clic en candidato = play</span>
+            </div>
+            <div class="min-h-0 flex-1">
+              <ShortPlayer />
+            </div>
           </div>
-        {/if}
-      </aside>
-    </main>
+          <aside class="flex min-h-[300px] min-w-0 flex-col overflow-hidden">
+            <ClippingPanel />
+          </aside>
+        </main>
+      {/if}
+    </div>
   {/if}
 
   <StatusBar />

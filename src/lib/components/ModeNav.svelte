@@ -6,41 +6,49 @@
   let { mode, onMode }: Props = $props();
 </script>
 
-<nav
-  class="flex shrink-0 flex-wrap items-center gap-2 border-b border-surface-800 bg-surface-950/90 px-3 py-2"
-  aria-label="Modo de trabajo"
+<aside
+  class="flex w-[200px] shrink-0 flex-col gap-2 border-r border-surface-800 bg-surface-950/95 p-3"
+  aria-label="Navegación"
 >
-  <span class="mr-1 text-[10px] font-semibold uppercase tracking-wide text-surface-500"
-    >Qué quieres hacer</span
-  >
+  <div class="mb-1 px-1 text-[10px] font-bold uppercase tracking-wider text-surface-500">
+    VigilCut
+  </div>
 
   <button
     type="button"
-    class="flex items-center gap-2 rounded-xl border px-3 py-2 text-left transition
+    class="flex w-full flex-col items-start gap-0.5 rounded-xl border px-3 py-3 text-left transition
       {mode === 'silence'
-      ? 'border-vigil-500/60 bg-vigil-950/50 text-white shadow-md shadow-vigil-950/30'
-      : 'border-surface-700 bg-surface-900/60 text-surface-400 hover:border-surface-600 hover:text-surface-200'}"
+      ? 'border-vigil-500/70 bg-vigil-950/60 text-white'
+      : 'border-surface-800 bg-surface-900/40 text-surface-400 hover:border-surface-600 hover:text-surface-200'}"
     onclick={() => onMode("silence")}
   >
-    <span class="text-lg leading-none">✂</span>
-    <span>
-      <span class="block text-xs font-bold">Cortar silencios</span>
-      <span class="block text-[10px] opacity-70">Limpiar pausas · oír resultado · exportar</span>
-    </span>
+    <span class="text-base font-bold">✂ Silencios</span>
+    <span class="text-[10px] leading-snug opacity-75">Cortar pausas y exportar el vídeo largo</span>
   </button>
 
   <button
     type="button"
-    class="flex items-center gap-2 rounded-xl border px-3 py-2 text-left transition
+    class="flex w-full flex-col items-start gap-0.5 rounded-xl border px-3 py-3 text-left transition
       {mode === 'clips'
-      ? 'border-amber-500/50 bg-amber-950/40 text-white shadow-md shadow-amber-950/20'
-      : 'border-surface-700 bg-surface-900/60 text-surface-400 hover:border-surface-600 hover:text-surface-200'}"
+      ? 'border-amber-500/60 bg-amber-950/50 text-white'
+      : 'border-surface-800 bg-surface-900/40 text-surface-400 hover:border-surface-600 hover:text-surface-200'}"
     onclick={() => onMode("clips")}
   >
-    <span class="text-lg leading-none">📱</span>
-    <span>
-      <span class="block text-xs font-bold">Shorts / clips 9:16</span>
-      <span class="block text-[10px] opacity-70">Momentos fuertes · revisar · exportar vertical</span>
-    </span>
+    <span class="text-base font-bold">📱 Shorts 9:16</span>
+    <span class="text-[10px] leading-snug opacity-75">Clips virales · revisar · exportar vertical</span>
   </button>
-</nav>
+
+  <div class="mt-auto rounded-lg border border-surface-800/80 bg-surface-900/50 p-2 text-[9px] leading-relaxed text-surface-500">
+    {#if mode === "silence"}
+      1) Abre video<br />
+      2) Revisa excepciones<br />
+      3) ▶ Oír cortado<br />
+      4) Exportar
+    {:else}
+      1) Encontrar clips<br />
+      2) Selecciona uno<br />
+      3) Ver 9:16 al centro<br />
+      4) Aprobar · Export 9:16
+    {/if}
+  </div>
+</aside>

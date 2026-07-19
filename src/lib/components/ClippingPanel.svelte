@@ -10,7 +10,7 @@
     type FramingMode,
   } from "$lib/types";
   import * as api from "$lib/utils/tauri";
-  import VerticalClipPreview from "$lib/components/VerticalClipPreview.svelte";
+  import { clippingUi } from "$lib/stores/clipping.svelte";
 
   let options = $state<ClippingOptions>({ ...DEFAULT_CLIPPING_OPTIONS });
   let run = $state<ClippingRun | null>(null);
@@ -67,6 +67,11 @@
 
   const selected = $derived(visible.find((c) => c.id === selectedId) ?? visible[0] ?? null);
 
+  // Keep main 9:16 player in sync
+  $effect(() => {
+    clippingUi.select(selected);
+  });
+
   async function analyze() {
     if (!projectStore.mediaPath || projectStore.mediaPath.startsWith("demo://")) {
       error = "Abre un video real primero";
@@ -83,10 +88,12 @@
       options = { ...options, transcriptPath: options.transcriptPath ?? null };
       run = await api.runClipping(projectStore.mediaPath, options);
       filter = "review";
-      selectedId =
-        run.candidates.find((c) => c.status === "preselected")?.id ??
-        run.candidates.find((c) => c.isPrimaryVariant)?.id ??
+      const first =
+        run.candidates.find((c) => c.status === "preselected" && c.isPrimaryVariant) ??
+        run.candidates.find((c) => c.isPrimaryVariant) ??
         null;
+      selectedId = first?.id ?? null;
+      if (first) clippingUi.play(first);
       projectStore.statusMessage = `Clips: ${run.summary.preselected} preseleccionados / ${run.summary.candidatesFound} detectados`;
     } catch (e) {
       error = String(e);
@@ -135,12 +142,10 @@
   }
 
   function seekPlay(c: ClipCandidate) {
+    selectedId = c.id;
+    clippingUi.play(c);
     projectStore.previewMode = "original";
-    window.dispatchEvent(
-      new CustomEvent("vigilcut:play-from", {
-        detail: { t: c.start, end: c.end, play: true },
-      }),
-    );
+    projectStore.currentTime = c.start;
   }
 
   async function exportOne(c: ClipCandidate) {
@@ -430,13 +435,8 @@
           >
         </div>
 
-        <div class="mb-2 flex justify-center">
-          <!-- Follow playhead for live framing feedback while reviewing -->
-          <VerticalClipPreview framing={selected.framing} time={projectStore.currentTime} />
-        </div>
         <p class="mb-2 text-center text-[9px] text-surface-500">
-          {selected.framing.outputWidth}×{selected.framing.outputHeight} · {selected.framing.mode}
-          · t={formatTime(projectStore.currentTime)}
+          Preview grande a la izquierda · framing: {selected.framing.mode}
         </p>
 
         <label class="block text-[10px] text-surface-400">
@@ -539,9 +539,7 @@
               <button
                 type="button"
                 class="w-full text-left"
-                onclick={() => {
-                  selectedId = c.id;
-                }}
+                onclick={() => seekPlay(c)}
               >
                 <div class="flex items-start justify-between gap-2">
                   <div class="min-w-0">
