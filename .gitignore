@@ -23,6 +23,7 @@ src-tauri/binaries/
 .DS_Store
 Thumbs.db
 Desktop.ini
+*.lnk
 
 # Env & secrets
 .env
