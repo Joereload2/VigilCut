@@ -72,4 +72,27 @@ mod tests {
         assert!(filter.contains("1080"));
         assert!(filter.contains("1920"));
     }
+
+    #[test]
+    fn blur_and_fit_modes_build() {
+        let mut f = ClipFraming::default();
+        f.mode = FramingMode::BlurredBackground;
+        let b = compute_crop_filter(&f, 1280, 720);
+        assert!(b.contains("boxblur") || b.contains("overlay"));
+        f.mode = FramingMode::FitWithBars;
+        let p = compute_crop_filter(&f, 1280, 720);
+        assert!(p.contains("pad="));
+    }
+
+    #[test]
+    fn manual_center_stays_in_frame() {
+        let mut f = ClipFraming::default();
+        f.mode = FramingMode::Manual;
+        f.center_x = 0.9;
+        f.center_y = 0.1;
+        let filter = compute_crop_filter(&f, 1920, 1080);
+        assert!(filter.contains("crop="));
+        // crop x,y should be non-negative numbers in filter
+        assert!(!filter.contains("crop=-"));
+    }
 }

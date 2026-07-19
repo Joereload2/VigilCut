@@ -39,6 +39,13 @@
     }
   });
 
+  function variantCount(c: ClipCandidate): number {
+    if (!run) return 0;
+    return run.candidates.filter(
+      (x) => x.variantGroupId === c.variantGroupId && !x.isPrimaryVariant,
+    ).length;
+  }
+
   const selected = $derived(visible.find((c) => c.id === selectedId) ?? visible[0] ?? null);
 
   async function analyze() {
@@ -405,11 +412,12 @@
         </div>
 
         <div class="mb-2 flex justify-center">
-          <VerticalClipPreview framing={selected.framing} time={selected.start} />
+          <!-- Follow playhead for live framing feedback while reviewing -->
+          <VerticalClipPreview framing={selected.framing} time={projectStore.currentTime} />
         </div>
         <p class="mb-2 text-center text-[9px] text-surface-500">
           {selected.framing.outputWidth}×{selected.framing.outputHeight} · {selected.framing.mode}
-          · frame en {formatTime(selected.start)}
+          · t={formatTime(projectStore.currentTime)}
         </p>
 
         <label class="block text-[10px] text-surface-400">
@@ -521,6 +529,9 @@
                     <div class="truncate text-xs font-semibold text-surface-100">{c.title}</div>
                     <div class="mt-0.5 font-mono text-[10px] text-surface-500">
                       {formatTime(c.start)}–{formatTime(c.end)} · {formatTime(c.duration)}
+                      {#if variantCount(c) > 0}
+                        <span class="text-surface-600"> · +{variantCount(c)} var.</span>
+                      {/if}
                     </div>
                   </div>
                   <div class="text-right">

@@ -244,9 +244,16 @@ fn main() -> ExitCode {
                     c.status = ClipReviewStatus::Approved;
                 }
             }
-            // Probe dims via export default 1920x1080 if unknown — use 1920x1080 safe
-            let w = 1920u32;
-            let h = 1080u32;
+            let (w, h) = match rt.block_on(async {
+                use vigilcut_lib::ffmpeg::Ffmpeg;
+                Ffmpeg::new()?.probe(&media).await.map(|i| (i.width.max(2), i.height.max(2)))
+            }) {
+                Ok(dims) => dims,
+                Err(e) => {
+                    eprintln!("warn: probe failed ({e}), assuming 1920x1080");
+                    (1920, 1080)
+                }
+            };
             let results = match rt.block_on(export_approved_clips(
                 &media,
                 &mut run.candidates,

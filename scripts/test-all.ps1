@@ -24,8 +24,18 @@ cargo test --test smoke_pipeline -- --nocapture
 if ($LASTEXITCODE -ne 0) { Pop-Location; exit $LASTEXITCODE }
 
 Write-Host ""
+Write-Host "==> SMOKE clipping (SRT + sidecar)"
+cargo test --test smoke_clipping -- --nocapture
+if ($LASTEXITCODE -ne 0) { Pop-Location; exit $LASTEXITCODE }
+
+Write-Host ""
 Write-Host "==> E2E factory (export + artifacts + batch)"
 cargo test --test e2e_factory -- --nocapture
+if ($LASTEXITCODE -ne 0) { Pop-Location; exit $LASTEXITCODE }
+
+Write-Host ""
+Write-Host "==> E2E clipping (vertical export)"
+cargo test --test e2e_clipping -- --nocapture
 if ($LASTEXITCODE -ne 0) { Pop-Location; exit $LASTEXITCODE }
 Pop-Location
 

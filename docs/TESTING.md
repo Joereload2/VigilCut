@@ -5,9 +5,10 @@
 | Capa | Comando | Qué valida |
 |------|---------|------------|
 | **Unit** | `npm run test:unit` | Policy, EDL, export filter, chapters map, fillers, parse (sin media) |
-| **Smoke** | `npm run test:smoke` | FFmpeg real + `run_silence_analysis` sobre vídeo sintético (3s tono+silencio) |
-| **E2E fábrica** | `npm run test:e2e` | Analyze → export EDL → MP4 + `chapters.txt` + `*-meta/` + `process_one_file` |
-| **Todo** | `npm test` | Las tres capas en orden |
+| **Smoke** | `npm run test:smoke` | Silencios + clipping con SRT/sidecar sobre vídeo sintético |
+| **E2E fábrica** | `npm run test:e2e` | Export EDL longform + export clips 9:16 + batch |
+| **Todo** | `npm test` | Unit + smoke (pipeline+clipping) + e2e (factory+clipping) |
+| **CI** | GitHub Actions | `.github/workflows/ci.yml` en push/PR |
 
 ## Requisitos
 

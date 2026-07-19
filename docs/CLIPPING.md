@@ -56,5 +56,22 @@ Video → (SRT/VTT opcional | speech fallback) → unidades semánticas
 
 ## Tests
 
-- Unit: score, dedupe, framing, transcript parse
+- Unit: score, dedupe, framing modes, transcript parse
+- Smoke: `cargo test --test smoke_clipping` (SRT + sidecar)
 - E2E: `cargo test --test e2e_clipping`
+- CI: `.github/workflows/ci.yml`
+
+## CLI
+
+```text
+vigilcut-cli clips video.mp4 [outdir]
+```
+
+Aprueba preseleccionados (score≥55) y exporta 9:16 usando dimensiones reales del probe.
+
+## Fuera de alcance MVP (deliberado)
+
+- Face tracking en tiempo real (campo `trackingReady` reservado)
+- Scoring con LLM
+- E2E de clics en WebView/Tauri UI
+- Subtítulos quemados en el vertical

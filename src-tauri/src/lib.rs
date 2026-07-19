@@ -1,6 +1,6 @@
 mod commands;
 mod error;
-mod ffmpeg;
+pub mod ffmpeg;
 pub mod models;
 pub mod pipeline;
 mod state;
