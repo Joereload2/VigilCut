@@ -10,8 +10,10 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use vigilcut_lib::pipeline::batch_worker::{list_videos_in_dir, process_one_file, run_batch_job};
+use vigilcut_lib::pipeline::clipping::{export_approved_clips, run_clipping_analysis};
 use vigilcut_lib::pipeline::engine::run_silence_analysis;
 use vigilcut_lib::models::batch::BatchJob;
+use vigilcut_lib::models::clipping::{ClipReviewStatus, ClippingOptions};
 use vigilcut_lib::models::edl::PolicyConfig;
 use vigilcut_lib::models::preset::{ColorOptions, ExportOptions};
 
@@ -197,6 +199,79 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         }
+        "clips" => {
+            // Analyze + auto-approve preselected + export 9:16
+            let path = args.first().cloned().unwrap_or_default();
+            if path.is_empty() {
+                eprintln!("usage: vigilcut-cli clips <video.mp4> [outdir]");
+                return ExitCode::FAILURE;
+            }
+            let media = PathBuf::from(&path);
+            let out_dir = args
+                .get(1)
+                .map(PathBuf::from)
+                .unwrap_or_else(|| {
+                    let stem = media
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("video");
+                    media
+                        .parent()
+                        .unwrap_or_else(|| PathBuf::from(".").as_path())
+                        .join(format!("{stem}-clips"))
+                });
+            let opts = ClippingOptions {
+                prefer_whisper: true,
+                ..ClippingOptions::default()
+            };
+            let mut run = match rt.block_on(run_clipping_analysis(&media, opts)) {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            println!(
+                "candidates={} preselected={} best={:.0}",
+                run.summary.candidates_found, run.summary.preselected, run.summary.best_score
+            );
+            for c in run.candidates.iter_mut() {
+                if c.is_primary_variant
+                    && matches!(
+                        c.status,
+                        ClipReviewStatus::Preselected | ClipReviewStatus::Suggested
+                    )
+                    && c.score >= 55.0
+                {
+                    c.status = ClipReviewStatus::Approved;
+                }
+            }
+            // Probe dims via export default 1920x1080 if unknown — use 1920x1080 safe
+            let w = 1920u32;
+            let h = 1080u32;
+            let results = match rt.block_on(export_approved_clips(
+                &media,
+                &mut run.candidates,
+                &[],
+                &out_dir,
+                None,
+                w,
+                h,
+            )) {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("export error: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let ok = results.iter().filter(|r| r.ok).count();
+            println!("exported {ok}/{} → {}", results.len(), out_dir.display());
+            if ok == 0 {
+                ExitCode::FAILURE
+            } else {
+                ExitCode::SUCCESS
+            }
+        }
         "help" | "-h" | "--help" => {
             print_help();
             ExitCode::SUCCESS
@@ -241,6 +316,7 @@ VigilCut CLI v1.0 — factory engine (no UI)
   vigilcut-cli analyze <video.mp4> [--policy factory|youtube|podcast|gentle|shorts-first]
   vigilcut-cli export <video.mp4> [out.mp4]
   vigilcut-cli batch <inbox_dir> [outbox_dir] [--policy ...]
+  vigilcut-cli clips <video.mp4> [outdir]   # find + export vertical 9:16 candidates
 
   Policies: factory (default), youtube, podcast, gentle, shorts-first
 

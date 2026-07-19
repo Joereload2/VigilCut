@@ -28,8 +28,10 @@ Video → (SRT/VTT opcional | speech fallback) → unidades semánticas
 
 - `auto_center`: crop estático centrado (talking-head Y=0.42).
 - `blurred_background` / `fit_with_bars` preparados.
-- Preview de zona segura + centro en el panel (editor E).
+- Preview **real** 9:16 (canvas muestreando el frame del video + zona segura).
 - Ajuste manual del centro (←→↑↓) y modos de export.
+- Reproducción del clip con auto-pausa al final.
+- Export individual o por lote.
 - `tracking_ready: false` — contrato listo para face-track futuro.
 
 ## Revisión (atajos)

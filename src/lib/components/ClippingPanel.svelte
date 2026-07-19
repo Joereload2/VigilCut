@@ -10,6 +10,7 @@
     type FramingMode,
   } from "$lib/types";
   import * as api from "$lib/utils/tauri";
+  import VerticalClipPreview from "$lib/components/VerticalClipPreview.svelte";
 
   let options = $state<ClippingOptions>({ ...DEFAULT_CLIPPING_OPTIONS });
   let run = $state<ClippingRun | null>(null);
@@ -110,8 +111,47 @@
   function seekPlay(c: ClipCandidate) {
     projectStore.previewMode = "original";
     window.dispatchEvent(
-      new CustomEvent("vigilcut:play-from", { detail: { t: c.start, play: true } }),
+      new CustomEvent("vigilcut:play-from", {
+        detail: { t: c.start, end: c.end, play: true },
+      }),
     );
+  }
+
+  async function exportOne(c: ClipCandidate) {
+    if (!run || !projectStore.mediaPath || !api.isTauri()) return;
+    busy = true;
+    error = null;
+    try {
+      const parts = projectStore.mediaPath.split(/[/\\]/);
+      parts.pop();
+      const dir = parts.join(projectStore.mediaPath.includes("\\") ? "\\" : "/") || ".";
+      const stem =
+        projectStore.mediaPath.split(/[/\\]/).pop()?.replace(/\.[^.]+$/, "") ?? "video";
+      const sep = projectStore.mediaPath.includes("\\") ? "\\" : "/";
+      const outDir = `${dir}${sep}${stem}-clips`;
+      const slug = c.title
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/gi, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 40) || "clip";
+      const outPath = `${outDir}${sep}clips${sep}solo_${slug}.mp4`;
+      // Ensure approved for single export path via export_clips with id
+      if (c.status !== "approved" && c.status !== "preselected") {
+        await setStatus(c.id, "approved");
+      }
+      const res = await api.exportClips({
+        runId: run.id,
+        outputDir: outDir,
+        candidateIds: [c.id],
+      });
+      run = res.run;
+      projectStore.statusMessage = `Clip exportado → ${outDir}`;
+      void outPath;
+    } catch (e) {
+      error = String(e);
+    } finally {
+      busy = false;
+    }
   }
 
   async function applySpan(start: number, end: number) {
@@ -364,22 +404,12 @@
           >
         </div>
 
-        <!-- 9:16 framing preview (safe zone mock) -->
-        <div class="mx-auto mb-2 flex h-36 w-[81px] items-center justify-center rounded-md border border-vigil-700/50 bg-surface-900 shadow-inner">
-          <div class="relative h-[90%] w-[70%] overflow-hidden rounded-sm border border-dashed border-surface-600">
-            <div
-              class="absolute inset-x-0 top-[18%] h-[55%] border border-keep/40 bg-keep/10"
-              title="Zona segura rostro"
-            ></div>
-            <div
-              class="absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-vigil-400"
-              style="left: {selected.framing.centerX * 100}%; top: {selected.framing.centerY * 100}%"
-              title="Centro de recorte"
-            ></div>
-          </div>
+        <div class="mb-2 flex justify-center">
+          <VerticalClipPreview framing={selected.framing} time={selected.start} />
         </div>
         <p class="mb-2 text-center text-[9px] text-surface-500">
-          Preview 9:16 · {selected.framing.outputWidth}×{selected.framing.outputHeight} · {selected.framing.mode}
+          {selected.framing.outputWidth}×{selected.framing.outputHeight} · {selected.framing.mode}
+          · frame en {formatTime(selected.start)}
         </p>
 
         <label class="block text-[10px] text-surface-400">
@@ -523,6 +553,12 @@
                     selectedId = c.id;
                     showEditor = true;
                   }}>Editar</button
+                >
+                <button
+                  type="button"
+                  class="btn-ghost text-[10px] text-vigil-300"
+                  disabled={busy}
+                  onclick={() => exportOne(c)}>Export 9:16</button
                 >
               </div>
             </li>

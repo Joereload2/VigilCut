@@ -283,14 +283,19 @@
     return () => window.removeEventListener("vigilcut:listen-result", handler);
   });
 
-  // Clipping panel: jump to candidate start and play original
+  // Clipping panel: jump to candidate start (optional end → auto-pause)
+  let clipEndStop = $state<number | null>(null);
+
   $effect(() => {
     const handler = (ev: Event) => {
-      const t = (ev as CustomEvent<{ t?: number; play?: boolean }>).detail?.t;
+      const detail = (ev as CustomEvent<{ t?: number; end?: number; play?: boolean }>).detail;
+      const t = detail?.t;
       if (typeof t !== "number" || !Number.isFinite(t)) return;
       projectStore.previewMode = "original";
       setSourceTime(t);
-      const shouldPlay = (ev as CustomEvent<{ play?: boolean }>).detail?.play !== false;
+      clipEndStop =
+        typeof detail?.end === "number" && Number.isFinite(detail.end) ? detail.end : null;
+      const shouldPlay = detail?.play !== false;
       if (shouldPlay && videoEl && src) {
         void videoEl.play().catch(() => {
           /* autoplay policies */
@@ -299,6 +304,22 @@
     };
     window.addEventListener("vigilcut:play-from", handler);
     return () => window.removeEventListener("vigilcut:play-from", handler);
+  });
+
+  $effect(() => {
+    const v = videoEl;
+    if (!v) return;
+    const onTimeClip = () => {
+      if (clipEndStop == null) return;
+      if (v.currentTime >= clipEndStop - 0.05) {
+        v.pause();
+        setSourceTime(clipEndStop);
+        clipEndStop = null;
+        projectStore.statusMessage = "Fin del clip";
+      }
+    };
+    v.addEventListener("timeupdate", onTimeClip);
+    return () => v.removeEventListener("timeupdate", onTimeClip);
   });
 </script>
 
