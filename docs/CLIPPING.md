@@ -17,17 +17,31 @@ Video → (SRT/VTT opcional | speech fallback) → unidades semánticas
 | Commands | `commands/clipping.rs` |
 | UI | `ClippingPanel.svelte` (pestaña Clips) |
 
-## Transcripción
+## Transcripción (orden de resolución)
 
-1. Importar SRT/VTT (recomendado).
-2. Si no hay: bloques de habla del análisis de silencios (heurístico).
-3. Whisper CLI se puede enganchar vía `transcript_path` futuro / import.
+1. Ruta explícita (`transcriptPath` / botón + SRT).
+2. Sidecar `{video}.srt` o `.vtt` junto al archivo.
+3. Si `preferWhisper`: Whisper CLI en PATH (opcional).
+4. Fallback: bloques de habla del análisis de silencios (heurístico).
 
 ## Encuadre 9:16
 
 - `auto_center`: crop estático centrado (talking-head Y=0.42).
 - `blurred_background` / `fit_with_bars` preparados.
+- Preview de zona segura + centro en el panel (editor E).
+- Ajuste manual del centro (←→↑↓) y modos de export.
 - `tracking_ready: false` — contrato listo para face-track futuro.
+
+## Revisión (atajos)
+
+| Tecla | Acción |
+|-------|--------|
+| A | Aprobar |
+| R | Rechazar |
+| I | Inicio = playhead |
+| O | Final = playhead |
+| E / Enter | Abrir editor de límites / encuadre |
+| ↑↓ | Navegar candidatos |
 
 ## Export
 

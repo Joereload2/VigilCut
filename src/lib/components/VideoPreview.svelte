@@ -282,6 +282,24 @@
     window.addEventListener("vigilcut:listen-result", handler);
     return () => window.removeEventListener("vigilcut:listen-result", handler);
   });
+
+  // Clipping panel: jump to candidate start and play original
+  $effect(() => {
+    const handler = (ev: Event) => {
+      const t = (ev as CustomEvent<{ t?: number; play?: boolean }>).detail?.t;
+      if (typeof t !== "number" || !Number.isFinite(t)) return;
+      projectStore.previewMode = "original";
+      setSourceTime(t);
+      const shouldPlay = (ev as CustomEvent<{ play?: boolean }>).detail?.play !== false;
+      if (shouldPlay && videoEl && src) {
+        void videoEl.play().catch(() => {
+          /* autoplay policies */
+        });
+      }
+    };
+    window.addEventListener("vigilcut:play-from", handler);
+    return () => window.removeEventListener("vigilcut:play-from", handler);
+  });
 </script>
 
 <div class="panel flex min-h-0 flex-1 flex-col overflow-hidden">
