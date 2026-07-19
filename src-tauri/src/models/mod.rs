@@ -1,6 +1,7 @@
 pub mod analysis;
 pub mod artifacts;
 pub mod batch;
+pub mod clipping;
 pub mod edl;
 pub mod event;
 pub mod media;

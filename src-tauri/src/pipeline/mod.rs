@@ -1,5 +1,6 @@
 pub mod artifacts;
 pub mod batch_worker;
+pub mod clipping;
 pub mod detectors;
 pub mod engine;
 pub mod export;
