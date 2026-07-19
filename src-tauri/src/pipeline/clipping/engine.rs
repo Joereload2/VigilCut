@@ -15,6 +15,7 @@ use crate::pipeline::clipping::dedupe::dedupe_and_group;
 use crate::pipeline::clipping::framing::default_framing_for_media;
 use crate::pipeline::clipping::generate::generate_candidates;
 use crate::pipeline::clipping::preselect::apply_preselection;
+use crate::pipeline::clipping::titles::finalize_clip_titles;
 use crate::pipeline::clipping::transcript::{
     cues_from_speech_events, cues_to_semantic_units, load_transcript_cues,
 };
@@ -137,6 +138,8 @@ pub async fn run_clipping_analysis(
     apply_preselection(&mut candidates, &options);
     // Belt: never return discarded-below-floor leftovers (variants, etc.)
     candidates.retain(|c| c.score >= MIN_CLIP_SCORE);
+    // Readable names: transcript phrase or Clip 01, Clip 02…
+    finalize_clip_titles(&mut candidates);
 
     let preselected = candidates
         .iter()

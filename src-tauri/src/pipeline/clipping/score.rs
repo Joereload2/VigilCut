@@ -191,6 +191,15 @@ fn ends_complete(lower: &str) -> bool {
 }
 
 fn provisional_title(text: &str) -> String {
+    let lower = text.trim().to_lowercase();
+    // Speech-fallback placeholders get numbered later in finalize_clip_titles
+    if lower.is_empty()
+        || lower.contains("[habla")
+        || lower.contains("[segmento")
+        || text.chars().filter(|c| c.is_alphabetic()).count() < 3
+    {
+        return "Clip".into();
+    }
     let clean = text
         .trim()
         .trim_matches(|c: char| c == '"' || c == '\'' || c == '[' || c == ']');
@@ -202,7 +211,6 @@ fn provisional_title(text: &str) -> String {
     if clean.split_whitespace().count() > 8 {
         t.push('…');
     }
-    // Capitalize first
     let mut c = t.chars();
     match c.next() {
         None => "Clip".into(),

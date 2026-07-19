@@ -94,8 +94,41 @@
 
   const selected = $derived(visible.find((c) => c.id === selectedId) ?? visible[0] ?? null);
 
+  // Sync list selection → player (do not clobber live pan on same clip)
   $effect(() => {
-    clippingUi.select(selected);
+    const s = selected;
+    if (!s) {
+      clippingUi.select(null);
+      return;
+    }
+    const cur = clippingUi.selected;
+    if (!cur || cur.id !== s.id) {
+      clippingUi.select(s);
+      return;
+    }
+    // Same clip: refresh metadata; keep manual framing while dragging/saving
+    if (cur.framing.mode === "manual") {
+      clippingUi.select({ ...s, framing: cur.framing });
+    } else {
+      clippingUi.select(s);
+    }
+  });
+
+  // ShortPlayer pan → persist framing on the run
+  $effect(() => {
+    clippingUi.setFramingSaver(async (clipId, framing) => {
+      if (!run) return;
+      try {
+        const updated = await api.updateClipFraming(run.id, clipId, framing);
+        run = {
+          ...run,
+          candidates: run.candidates.map((c) => (c.id === clipId ? updated : c)),
+        };
+      } catch (e) {
+        console.warn("framing save", e);
+      }
+    });
+    return () => clippingUi.setFramingSaver(null);
   });
 
   /** One-shot: factory extracts clips; human only classifies & watches. */

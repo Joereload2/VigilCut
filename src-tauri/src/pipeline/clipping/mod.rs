@@ -9,6 +9,7 @@ mod framing;
 mod generate;
 mod preselect;
 mod score;
+mod titles;
 mod transcript;
 
 pub use engine::run_clipping_analysis;

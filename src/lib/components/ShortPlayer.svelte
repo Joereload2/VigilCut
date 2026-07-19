@@ -6,9 +6,15 @@
   import { clippingUi } from "$lib/stores/clipping.svelte";
 
   let videoEl = $state<HTMLVideoElement | null>(null);
+  let stageEl = $state<HTMLDivElement | null>(null);
   let ready = $state(false);
   let loadError = $state<string | null>(null);
   let playing = $state(false);
+
+  /** Drag-to-focus state */
+  let dragging = $state(false);
+  let dragMoved = $state(false);
+  let dragOrigin = $state<{ x: number; y: number; cx: number; cy: number } | null>(null);
 
   const clip = $derived(clippingUi.selected);
   const token = $derived(clippingUi.playToken);
@@ -34,7 +40,7 @@
   });
 
   const posX = $derived(((clip?.framing.centerX ?? 0.5) * 100).toFixed(1));
-  const posY = $derived(((clip?.framing.centerY ?? 0.45) * 100).toFixed(1));
+  const posY = $derived(((clip?.framing.centerY ?? 0.42) * 100).toFixed(1));
   const mode = $derived(clip?.framing.mode ?? "auto_center");
   const cover = $derived(mode !== "fit_with_bars");
 
@@ -51,7 +57,6 @@
     v.load();
   });
 
-  // Seek to clip window and play when selection / playToken changes
   $effect(() => {
     const v = videoEl;
     const c = clip;
@@ -176,6 +181,60 @@
     }
     void v.play().catch(() => {});
   }
+
+  function onPointerDown(e: PointerEvent) {
+    if (!clip || !cover) return;
+    // Only primary button
+    if (e.button !== 0) return;
+    const stage = stageEl;
+    if (!stage) return;
+    dragging = true;
+    dragMoved = false;
+    dragOrigin = {
+      x: e.clientX,
+      y: e.clientY,
+      cx: clip.framing.centerX ?? 0.5,
+      cy: clip.framing.centerY ?? 0.42,
+    };
+    stage.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  }
+
+  function onPointerMove(e: PointerEvent) {
+    if (!dragging || !dragOrigin || !stageEl) return;
+    const rect = stageEl.getBoundingClientRect();
+    const dx = e.clientX - dragOrigin.x;
+    const dy = e.clientY - dragOrigin.y;
+    if (Math.abs(dx) + Math.abs(dy) > 4) dragMoved = true;
+    // Drag video under the face zone: invert so drag right shows more left of source
+    const sens = 0.9;
+    const nx = dragOrigin.cx - (dx / Math.max(rect.width, 1)) * sens;
+    const ny = dragOrigin.cy - (dy / Math.max(rect.height, 1)) * sens;
+    clippingUi.panFraming(nx, ny);
+  }
+
+  function onPointerUp(e: PointerEvent) {
+    if (!dragging) return;
+    dragging = false;
+    const moved = dragMoved;
+    dragOrigin = null;
+    try {
+      stageEl?.releasePointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+    // Tap without drag → play/pause
+    if (!moved) {
+      void toggle();
+    } else {
+      projectStore.statusMessage = "Enfoque 9:16 ajustado · arrastra para panear";
+    }
+  }
+
+  function onFocusHandleDown(e: PointerEvent) {
+    e.stopPropagation();
+    onPointerDown(e);
+  }
 </script>
 
 <div class="flex h-full min-h-0 flex-col items-center justify-center gap-3 p-3">
@@ -196,28 +255,54 @@
     </div>
   {:else}
     <div class="relative flex min-h-0 w-full max-w-[min(100%,380px)] flex-1 flex-col items-center justify-center">
-      <!-- Phone-like 9:16 stage -->
       <div
-        class="relative w-full overflow-hidden rounded-[1.35rem] border-2 border-amber-500/50 bg-black shadow-2xl shadow-amber-950/40 ring-1 ring-black"
+        bind:this={stageEl}
+        class="relative w-full touch-none overflow-hidden rounded-[1.35rem] border-2 border-amber-500/50 bg-black shadow-2xl shadow-amber-950/40 ring-1 ring-black
+          {cover ? (dragging ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-pointer'}"
         style="aspect-ratio: 9 / 16; max-height: min(74vh, 680px);"
+        onpointerdown={onPointerDown}
+        onpointermove={onPointerMove}
+        onpointerup={onPointerUp}
+        onpointercancel={onPointerUp}
+        role="presentation"
       >
-        <!-- Live 9:16 crop: object-fit cover + framing position -->
         <!-- svelte-ignore a11y_media_has_caption -->
         <video
           bind:this={videoEl}
-          class="absolute inset-0 h-full w-full cursor-pointer
+          class="pointer-events-none absolute inset-0 h-full w-full
             {cover ? 'object-cover' : 'object-contain bg-black'}"
           style={cover ? `object-position: ${posX}% ${posY}%;` : undefined}
           playsinline
           preload="auto"
-          onclick={toggle}
         ></video>
 
-        <!-- Safe zone (face / title) -->
-        <div
-          class="pointer-events-none absolute left-[8%] right-[8%] top-[10%] h-[42%] rounded-xl border border-keep/40"
-          title="Zona segura (rostro / título)"
-        ></div>
+        {#if cover}
+          <!-- Face focus zone: interactive handle -->
+          <div
+            class="absolute left-[10%] right-[10%] top-[9%] h-[40%] rounded-xl border-2 border-keep/70 shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
+            style="box-shadow: inset 0 0 0 1px rgba(52,211,153,0.25);"
+          >
+            <div
+              class="absolute -top-2.5 left-1/2 -translate-x-1/2 rounded bg-keep/90 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-black"
+            >
+              Rostro aquí · arrastra
+            </div>
+            <!-- Crosshair at framing focus mapped into zone-ish center -->
+            <button
+              type="button"
+              class="absolute flex h-10 w-10 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-keep bg-black/35 text-keep shadow-lg"
+              style="left: {posX}%; top: {posY}%;"
+              aria-label="Arrastrar enfoque"
+              onpointerdown={onFocusHandleDown}
+            >
+              <span class="relative block h-5 w-5">
+                <span class="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-keep"></span>
+                <span class="absolute left-0 top-1/2 h-px w-full -translate-y-1/2 bg-keep"></span>
+                <span class="absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-keep"></span>
+              </span>
+            </button>
+          </div>
+        {/if}
 
         <div
           class="pointer-events-none absolute left-2 top-2 rounded-full bg-black/75 px-2.5 py-1 text-[10px] font-bold tracking-wide text-amber-200"
@@ -226,7 +311,7 @@
         </div>
 
         <div
-          class="pointer-events-none absolute bottom-2 left-2 right-2 rounded-lg bg-black/65 px-2 py-1.5 text-center"
+          class="pointer-events-none absolute bottom-2 left-2 right-2 rounded-lg bg-black/70 px-2 py-1.5 text-center"
         >
           <div class="truncate text-[11px] font-semibold text-white">{clip.title}</div>
           <div class="font-mono text-[10px] text-surface-300">
@@ -235,18 +320,15 @@
           </div>
         </div>
 
-        {#if !playing && ready}
-          <button
-            type="button"
-            class="absolute inset-0 flex items-center justify-center bg-black/30"
-            onclick={toggle}
-            aria-label="Reproducir short"
+        {#if !playing && ready && !dragging}
+          <div
+            class="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/20"
           >
             <span
-              class="flex h-16 w-16 items-center justify-center rounded-full bg-vigil-500 text-3xl text-white shadow-2xl ring-4 ring-white/20"
+              class="flex h-14 w-14 items-center justify-center rounded-full bg-vigil-500/90 text-2xl text-white shadow-2xl ring-4 ring-white/15"
               >▶</span
             >
-          </button>
+          </div>
         {/if}
 
         {#if !ready && !loadError}
@@ -265,9 +347,12 @@
         <button type="button" class="btn-primary text-xs" onclick={toggle}>
           {playing ? "Pausa" : "▶ Ver short"}
         </button>
-        <button type="button" class="btn-ghost text-xs" onclick={restart}>↺ Desde inicio</button>
+        <button type="button" class="btn-ghost text-xs" onclick={restart}>↺ Inicio</button>
+        <button type="button" class="btn-ghost text-xs" onclick={() => clippingUi.resetFraming()}
+          >Centrar rostro</button
+        >
         <span class="text-[10px] text-surface-500">
-          framing: {mode} · {posX}% / {posY}%
+          {cover ? "Arrastra para enfocar" : "modo fit"} · {posX}% / {posY}%
         </span>
       </div>
     </div>
