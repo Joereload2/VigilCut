@@ -6,6 +6,7 @@ pub mod pipeline;
 mod state;
 
 use commands::analyze::AnalysisCache;
+use commands::clipping::ClippingCache;
 use commands::watch::InboxWatchState;
 use state::AppState;
 use tauri::Manager;
@@ -26,6 +27,7 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .manage(AppState::default())
         .manage(AnalysisCache::default())
+        .manage(ClippingCache::default())
         .manage(InboxWatchState::default())
         .invoke_handler(tauri::generate_handler![
             // System
@@ -77,6 +79,15 @@ pub fn run() {
             commands::watch::stop_inbox_watch,
             commands::watch::get_inbox_watch_status,
             commands::watch::process_factory_inbox_now,
+            // Intelligent clipping
+            commands::clipping::run_clipping,
+            commands::clipping::get_clipping_run,
+            commands::clipping::update_clip_status,
+            commands::clipping::update_clip_span,
+            commands::clipping::update_clip_framing,
+            commands::clipping::bulk_clip_status,
+            commands::clipping::export_clips,
+            commands::clipping::export_single_clip,
             // Future-ready stubs
             commands::audio::enhance_audio_preview,
             commands::color::analyze_color_stats,

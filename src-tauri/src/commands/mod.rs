@@ -1,6 +1,7 @@
 pub mod analyze;
 pub mod audio;
 pub mod batch;
+pub mod clipping;
 pub mod color;
 pub mod export;
 pub mod factory;
