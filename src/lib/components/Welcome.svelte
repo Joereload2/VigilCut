@@ -4,8 +4,10 @@
 
   interface Props {
     onOpen: () => void;
+    onGoSilence?: () => void;
+    onGoClips?: () => void;
   }
-  let { onOpen }: Props = $props();
+  let { onOpen, onGoSilence, onGoClips }: Props = $props();
 
   let paths = $state<{ inbox: string; outbox: string } | null>(null);
 
@@ -38,37 +40,40 @@
   <div class="max-w-lg">
     <h1 class="text-2xl font-semibold tracking-tight text-white">VigilCut Factory</h1>
     <p class="mt-2 text-sm leading-relaxed text-surface-400">
-      Motor local: la IA corta silencios, propone capítulos y shorts. Tú solo supervisas
-      excepciones y exportas (o lanzas un lote completo).
+      La IA prepara el material. Tú supervisas y exportas.
     </p>
   </div>
 
-  <div class="flex flex-wrap items-center justify-center gap-3">
+  <div class="grid w-full max-w-xl grid-cols-1 gap-3 sm:grid-cols-2">
     <button
-      class="btn-primary px-8 py-3 text-base font-semibold shadow-lg shadow-vigil-950/40"
-      onclick={onOpen}
+      type="button"
+      class="rounded-2xl border border-vigil-600/40 bg-vigil-950/40 p-4 text-left transition hover:border-vigil-500 hover:bg-vigil-950/70"
+      onclick={() => (onGoSilence ? onGoSilence() : onOpen())}
     >
-      Abrir un video
+      <div class="text-2xl">✂</div>
+      <div class="mt-2 text-sm font-bold text-white">Cortar silencios</div>
+      <div class="mt-1 text-[11px] text-surface-400">
+        Limpia pausas, oye el resultado y exporta el vídeo largo.
+      </div>
+    </button>
+    <button
+      type="button"
+      class="rounded-2xl border border-amber-600/40 bg-amber-950/30 p-4 text-left transition hover:border-amber-500 hover:bg-amber-950/50"
+      onclick={() => (onGoClips ? onGoClips() : onOpen())}
+    >
+      <div class="text-2xl">📱</div>
+      <div class="mt-2 text-sm font-bold text-white">Shorts / clips 9:16</div>
+      <div class="mt-1 text-[11px] text-surface-400">
+        Encuentra momentos fuertes, revisa y exporta vertical.
+      </div>
     </button>
   </div>
 
-  <ol class="grid w-full max-w-xl grid-cols-1 gap-2 text-left sm:grid-cols-3">
-    {#each [
-      { n: "1", t: "Analizar", d: "Events + política auto-corte" },
-      { n: "2", t: "Excepciones", d: "Solo baja confianza" },
-      { n: "3", t: "Artefactos", d: "MP4 · capítulos · shorts · JSON" },
-    ] as step}
-      <li class="rounded-xl border border-surface-800 bg-surface-900/60 px-3 py-3">
-        <div class="text-[10px] font-bold text-vigil-400">PASO {step.n}</div>
-        <div class="mt-0.5 text-sm font-medium text-surface-100">{step.t}</div>
-        <div class="mt-0.5 text-[11px] text-surface-500">{step.d}</div>
-      </li>
-    {/each}
-  </ol>
+  <button type="button" class="btn-secondary text-xs" onclick={onOpen}>Solo abrir un video…</button>
 
   {#if paths}
     <div class="w-full max-w-xl rounded-xl border border-surface-800 bg-surface-900/50 p-3 text-left text-[11px]">
-      <div class="mb-2 font-semibold text-surface-300">Carpetas de fábrica</div>
+      <div class="mb-2 font-semibold text-surface-300">Lote (carpeta inbox)</div>
       <div class="space-y-1 font-mono text-surface-500">
         <div class="flex items-center justify-between gap-2">
           <span class="truncate" title={paths.inbox}>inbox: {paths.inbox}</span>
@@ -83,10 +88,6 @@
           >
         </div>
       </div>
-      <p class="mt-2 text-surface-600">
-        Deja crudos en inbox y usa el panel Lote, o:
-        <code class="text-surface-400">npm run cli -- batch inbox outbox</code>
-      </p>
     </div>
   {/if}
 </div>

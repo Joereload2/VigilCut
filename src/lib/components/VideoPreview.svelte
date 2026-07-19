@@ -21,10 +21,17 @@
     if (!p || p.startsWith("demo://")) return null;
     if (isTauri()) {
       try {
-        return convertFileSrc(p.replace(/\\/g, "/"));
+        // Keep native separators; convertFileSrc handles Windows paths
+        const url = convertFileSrc(p);
+        return url;
       } catch (e) {
-        console.error("convertFileSrc failed", e);
-        return null;
+        console.error("convertFileSrc failed", e, p);
+        try {
+          return convertFileSrc(p.replace(/\\/g, "/"));
+        } catch (e2) {
+          console.error("convertFileSrc fallback failed", e2);
+          return null;
+        }
       }
     }
     if (p.startsWith("blob:") || p.startsWith("http")) return p;
@@ -32,7 +39,9 @@
   });
 
   const canPreviewCut = $derived(
-    projectStore.segments.length > 0 && projectStore.keepCount > 0,
+    projectStore.localKeepRanges().length > 0 ||
+      (projectStore.segments.length > 0 && projectStore.keepCount > 0) ||
+      (projectStore.keepRanges?.length ?? 0) > 0,
   );
 
   $effect(() => {
@@ -362,22 +371,45 @@
     </div>
   </div>
 
-  <div class="relative flex min-h-0 flex-1 items-center justify-center bg-black">
+  <div
+    class="relative flex min-h-[240px] flex-1 items-center justify-center overflow-hidden bg-black lg:min-h-[320px]"
+  >
     {#if src}
       <!-- svelte-ignore a11y_media_has_caption -->
       <video
         bind:this={videoEl}
-        class="max-h-full max-w-full cursor-pointer outline-none"
+        class="h-full max-h-full w-full max-w-full cursor-pointer object-contain outline-none"
         playsinline
         preload="auto"
+        controls={false}
         onclick={togglePlay}
       ></video>
+
+      {#if !projectStore.isPlaying && ready}
+        <button
+          type="button"
+          class="pointer-events-auto absolute inset-0 flex items-center justify-center bg-black/20"
+          onclick={togglePlay}
+          aria-label="Reproducir"
+        >
+          <span
+            class="flex h-14 w-14 items-center justify-center rounded-full bg-vigil-600/90 text-2xl text-white shadow-xl"
+            >▶</span
+          >
+        </button>
+      {/if}
 
       {#if isEdited && canPreviewCut}
         <div
           class="pointer-events-none absolute left-3 top-3 rounded-full border border-vigil-600/50 bg-vigil-950/90 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-vigil-300"
         >
-          Resultado · sin cortes
+          Resultado · sin silencios cortados
+        </div>
+      {:else if ready}
+        <div
+          class="pointer-events-none absolute left-3 top-3 rounded-full border border-surface-600/50 bg-surface-950/80 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-surface-300"
+        >
+          Original
         </div>
       {/if}
 
@@ -393,11 +425,15 @@
           class="absolute inset-x-4 bottom-4 rounded-lg border border-cut/40 bg-surface-950/95 p-3 text-center text-xs text-cut"
         >
           {loadError}
+          <p class="mt-1 break-all text-[10px] text-surface-500">{projectStore.mediaPath}</p>
         </div>
       {/if}
     {:else}
       <div class="p-6 text-center text-sm text-surface-500">
         Abre un video para previsualizar el original y el resultado cortado.
+        {#if projectStore.mediaPath}
+          <p class="mt-2 text-xs text-cut">No se pudo crear URL de previsualización.</p>
+        {/if}
       </div>
     {/if}
   </div>

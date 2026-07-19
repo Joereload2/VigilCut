@@ -62,19 +62,30 @@ class ProjectStore {
 
   duration = $derived(this.media?.duration ?? this.segments.at(-1)?.end ?? 0);
 
+  /** Matches export: keep + pending (pending not cut yet). Prefer EDL estimate when fresh. */
   keptDuration = $derived(
-    this.segments.filter((s) => s.decision === "keep").reduce((a, s) => a + segmentDuration(s), 0),
+    this.estimate?.estimatedDuration != null && this.estimate.estimatedDuration > 0
+      ? this.estimate.estimatedDuration
+      : this.segments
+          .filter((s) => s.decision === "keep" || s.decision === "pending")
+          .reduce((a, s) => a + segmentDuration(s), 0),
   );
 
   cutDuration = $derived(
-    this.segments.filter((s) => s.decision === "cut").reduce((a, s) => a + segmentDuration(s), 0),
+    this.estimate?.cutDuration != null && this.estimate.cutDuration >= 0
+      ? this.estimate.cutDuration
+      : this.segments
+          .filter((s) => s.decision === "cut")
+          .reduce((a, s) => a + segmentDuration(s), 0),
   );
 
   selectedSegment = $derived(
     this.segments.find((s) => s.id === this.selectedSegmentId) ?? null,
   );
 
-  keepCount = $derived(this.segments.filter((s) => s.decision === "keep").length);
+  keepCount = $derived(
+    this.segments.filter((s) => s.decision === "keep" || s.decision === "pending").length,
+  );
   cutCount = $derived(this.segments.filter((s) => s.decision === "cut").length);
   silenceCount = $derived(this.segments.filter((s) => s.kind === "silence").length);
   autoCutCount = $derived(this.segments.filter((s) => s.autoApplied && s.decision === "cut").length);
@@ -477,11 +488,22 @@ class ProjectStore {
     }
   }
 
-  /** Keep ranges from current decisions (always fresh; do not trust async cache). */
+  /**
+   * Keep ranges for cut-preview playback.
+   * Prefer engine EDL ranges when user has not hand-edited tramos; else segment decisions
+   * (keep + pending = still in the video until human cuts).
+   */
   localKeepRanges(): [number, number][] {
-    return this.segments
-      .filter((s) => s.decision === "keep")
+    if (this.keepRanges.length > 0 && this.touchedIds.length === 0) {
+      return this.keepRanges.map(([s, e]) => [s, e] as [number, number]);
+    }
+    const fromSegs = this.segments
+      .filter((s) => s.decision === "keep" || s.decision === "pending")
       .map((s) => [s.start, s.end] as [number, number]);
+    if (fromSegs.length > 0) return fromSegs;
+    return this.keepRanges.length > 0
+      ? this.keepRanges.map(([s, e]) => [s, e] as [number, number])
+      : [];
   }
 
   /**
