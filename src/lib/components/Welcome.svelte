@@ -7,9 +7,10 @@
     onOpen: () => void;
     onGoSilence?: () => void;
     onGoClips?: () => void;
+    onGoVisual?: () => void;
     onOpenPath?: (path: string) => void;
   }
-  let { onOpen, onGoSilence, onGoClips, onOpenPath }: Props = $props();
+  let { onOpen, onGoSilence, onGoClips, onGoVisual, onOpenPath }: Props = $props();
 
   let paths = $state<{ inbox: string; outbox: string } | null>(null);
   let recent = $state<ProjectSummary[]>([]);
@@ -61,7 +62,7 @@
     </p>
   </div>
 
-  <div class="grid w-full max-w-xl grid-cols-1 gap-3 sm:grid-cols-2">
+  <div class="grid w-full max-w-2xl grid-cols-1 gap-3 sm:grid-cols-3">
     <button
       type="button"
       class="rounded-2xl border border-vigil-600/40 bg-vigil-950/40 p-4 text-left transition hover:border-vigil-500 hover:bg-vigil-950/70"
@@ -82,6 +83,17 @@
       <div class="mt-2 text-sm font-bold text-white">Shorts / clips 9:16</div>
       <div class="mt-1 text-[11px] text-surface-400">
         Encuentra momentos fuertes, revisa y exporta vertical.
+      </div>
+    </button>
+    <button
+      type="button"
+      class="rounded-2xl border border-sky-600/40 bg-sky-950/30 p-4 text-left transition hover:border-sky-500 hover:bg-sky-950/50"
+      onclick={() => (onGoVisual ? onGoVisual() : onOpen())}
+    >
+      <div class="text-2xl">🖼</div>
+      <div class="mt-2 text-sm font-bold text-white">Visual · B-roll</div>
+      <div class="mt-1 text-[11px] text-surface-400">
+        Transcripción, biblioteca de imágenes, sugerencias y overlay.
       </div>
     </button>
   </div>

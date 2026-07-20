@@ -278,6 +278,10 @@
           workspaceTab = "clips";
           void openFile();
         }}
+        onGoVisual={() => {
+          workspaceTab = "visual";
+          void openFile();
+        }}
         onOpenPath={(path) => {
           void projectStore.openMedia(path);
         }}
