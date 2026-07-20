@@ -1,33 +1,37 @@
 <script lang="ts">
   import { convertFileSrc } from "@tauri-apps/api/core";
   import { isTauri } from "$lib/utils/tauri";
-  import { formatTime } from "$lib/types";
+  import { formatTime, type ClipFraming } from "$lib/types";
   import { projectStore } from "$lib/stores/project.svelte";
   import { clippingUi } from "$lib/stores/clipping.svelte";
 
   let videoEl = $state<HTMLVideoElement | null>(null);
   let stageEl = $state<HTMLDivElement | null>(null);
+  let frameEl = $state<HTMLDivElement | null>(null);
   let ready = $state(false);
   let loadError = $state<string | null>(null);
   let playing = $state(false);
 
-  /** Local drag session (not only store — survives any re-render) */
-  let dragKind = $state<"none" | "frame" | "pan">("none");
+  /**
+   * LOCAL focus state — never rely on class-store reactivity for drag UI.
+   * Updated imperatively on video + frame DOM nodes every move.
+   */
+  let focusX = $state(0.5);
+  let focusY = $state(0.42);
+  let boundClipId = $state<string | null>(null);
+
+  let dragging = $state(false);
   let dragMoved = $state(false);
-  let dragStart = $state<{
-    px: number;
-    py: number;
-    fx: number;
-    fy: number;
-  } | null>(null);
+  let dragMode = $state<"frame" | "pan">("pan");
+  let originX = 0;
+  let originY = 0;
+  let originFx = 0.5;
+  let originFy = 0.42;
+  let activePointerId: number | null = null;
+  let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
   const clip = $derived(clippingUi.selected);
   const token = $derived(clippingUi.playToken);
-  // Live focus — always reactive, drives frame + video
-  const focusX = $derived(clippingUi.focusX);
-  const focusY = $derived(clippingUi.focusY);
-  const posX = $derived((focusX * 100).toFixed(1));
-  const posY = $derived((focusY * 100).toFixed(1));
 
   const src = $derived.by(() => {
     const p = projectStore.mediaPath;
@@ -47,6 +51,79 @@
     }
   });
 
+  function clamp(v: number, lo = 0.05, hi = 0.95) {
+    return Math.min(hi, Math.max(lo, v));
+  }
+
+  /** Paint focus on DOM immediately (works even if Svelte batch is delayed). */
+  function paintFocus(x: number, y: number) {
+    const px = `${(x * 100).toFixed(2)}%`;
+    const py = `${(y * 100).toFixed(2)}%`;
+    if (videoEl) {
+      videoEl.style.objectFit = "cover";
+      videoEl.style.objectPosition = `${px} ${py}`;
+    }
+    if (frameEl) {
+      frameEl.style.left = px;
+      frameEl.style.top = py;
+    }
+  }
+
+  function applyFocus(x: number, y: number, persist: boolean) {
+    const nx = clamp(x);
+    const ny = clamp(y);
+    focusX = nx;
+    focusY = ny;
+    paintFocus(nx, ny);
+    clippingUi.focusX = nx;
+    clippingUi.focusY = ny;
+
+    const c = clippingUi.selected;
+    if (c) {
+      const framing: ClipFraming = {
+        ...c.framing,
+        mode: "manual",
+        centerX: nx,
+        centerY: ny,
+      };
+      clippingUi.selected = { ...c, framing };
+    }
+
+    if (!persist) return;
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      const cur = clippingUi.selected;
+      if (!cur) return;
+      const framing: ClipFraming = {
+        ...cur.framing,
+        mode: "manual",
+        centerX: focusX,
+        centerY: focusY,
+      };
+      clippingUi.persistFraming?.(cur.id, framing);
+    }, 120);
+  }
+
+  // Sync focus when a different clip is selected
+  $effect(() => {
+    const c = clippingUi.selected;
+    const _t = token;
+    if (!c) {
+      boundClipId = null;
+      return;
+    }
+    if (c.id === boundClipId && dragging) return;
+    if (c.id !== boundClipId) {
+      boundClipId = c.id;
+      const x = clamp(c.framing?.centerX ?? 0.5);
+      const y = clamp(c.framing?.centerY ?? 0.42);
+      focusX = x;
+      focusY = y;
+      // paint after DOM binds
+      requestAnimationFrame(() => paintFocus(x, y));
+    }
+  });
+
   $effect(() => {
     const v = videoEl;
     const url = src;
@@ -60,6 +137,7 @@
     v.load();
   });
 
+  // Seek/play only when clip or playToken changes — NOT when focus pans
   $effect(() => {
     const v = videoEl;
     const c = clip;
@@ -102,6 +180,7 @@
     const onLoaded = () => {
       ready = true;
       loadError = null;
+      paintFocus(focusX, focusY);
     };
     const onErr = () => {
       loadError = "No se pudo cargar el video en el player 9:16";
@@ -121,17 +200,84 @@
     };
   });
 
-  // Apply object-position imperatively so it always sticks even if style binding lags
-  $effect(() => {
-    const v = videoEl;
-    if (!v) return;
-    const x = `${(clippingUi.focusX * 100).toFixed(2)}%`;
-    const y = `${(clippingUi.focusY * 100).toFixed(2)}%`;
-    v.style.objectFit = "cover";
-    v.style.objectPosition = `${x} ${y}`;
-  });
+  // Window-level drag listeners — reliable in Tauri WebView2
+  function onWinMove(e: PointerEvent) {
+    if (!dragging || !stageEl) return;
+    if (activePointerId !== null && e.pointerId !== activePointerId) return;
+    const r = stageEl.getBoundingClientRect();
+    if (r.width < 1 || r.height < 1) return;
 
-  async function toggle() {
+    const dx = e.clientX - originX;
+    const dy = e.clientY - originY;
+    if (Math.abs(dx) + Math.abs(dy) > 2) dragMoved = true;
+
+    if (dragMode === "frame") {
+      const x = (e.clientX - r.left) / r.width;
+      const y = (e.clientY - r.top) / r.height;
+      applyFocus(x, y, false);
+    } else {
+      applyFocus(originFx - dx / r.width, originFy - dy / r.height, false);
+    }
+  }
+
+  function onWinUp(e: PointerEvent) {
+    if (!dragging) return;
+    if (activePointerId !== null && e.pointerId !== activePointerId) return;
+    const wasMoved = dragMoved;
+    const mode = dragMode;
+    dragging = false;
+    activePointerId = null;
+    window.removeEventListener("pointermove", onWinMove);
+    window.removeEventListener("pointerup", onWinUp);
+    window.removeEventListener("pointercancel", onWinUp);
+    clippingUi.dragging = false;
+
+    applyFocus(focusX, focusY, true);
+
+    if (!wasMoved && mode === "pan") {
+      void togglePlay();
+    } else if (wasMoved) {
+      projectStore.statusMessage = `Enfoque ${Math.round(focusX * 100)}% · ${Math.round(focusY * 100)}%`;
+    }
+  }
+
+  function beginDrag(e: PointerEvent, mode: "frame" | "pan") {
+    if (!clip || e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    dragMode = mode;
+    dragging = true;
+    dragMoved = false;
+    originX = e.clientX;
+    originY = e.clientY;
+    originFx = focusX;
+    originFy = focusY;
+    activePointerId = e.pointerId;
+    clippingUi.dragging = true;
+
+    window.addEventListener("pointermove", onWinMove);
+    window.addEventListener("pointerup", onWinUp);
+    window.addEventListener("pointercancel", onWinUp);
+
+    try {
+      stageEl?.setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function onStageDown(e: PointerEvent) {
+    const t = e.target as HTMLElement | null;
+    if (t?.closest?.("[data-frame]")) {
+      beginDrag(e, "frame");
+      return;
+    }
+    if (t?.closest?.("[data-no-pan]")) return;
+    beginDrag(e, "pan");
+  }
+
+  async function togglePlay() {
     const v = videoEl;
     const c = clip;
     if (!v || !c) return;
@@ -145,8 +291,8 @@
       }
       try {
         await v.play();
-      } catch (e) {
-        loadError = String(e);
+      } catch (err) {
+        loadError = String(err);
       }
     } else {
       v.pause();
@@ -165,87 +311,12 @@
     void v.play().catch(() => {});
   }
 
-  function clientToFocus(clientX: number, clientY: number): { x: number; y: number } | null {
-    const stage = stageEl;
-    if (!stage) return null;
-    const r = stage.getBoundingClientRect();
-    if (r.width < 1 || r.height < 1) return null;
-    return {
-      x: (clientX - r.left) / r.width,
-      y: (clientY - r.top) / r.height,
-    };
+  function nudge(dx: number, dy: number) {
+    applyFocus(focusX + dx, focusY + dy, true);
   }
 
-  function startFrameDrag(e: PointerEvent) {
-    if (!clip || e.button !== 0) return;
-    e.preventDefault();
-    e.stopPropagation();
-    dragKind = "frame";
-    dragMoved = false;
-    dragStart = {
-      px: e.clientX,
-      py: e.clientY,
-      fx: clippingUi.focusX,
-      fy: clippingUi.focusY,
-    };
-    clippingUi.beginDrag();
-    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-  }
-
-  function startPanDrag(e: PointerEvent) {
-    if (!clip || e.button !== 0) return;
-    // Ignore if started on controls
-    const t = e.target as HTMLElement;
-    if (t.closest("[data-no-pan]")) return;
-    e.preventDefault();
-    dragKind = "pan";
-    dragMoved = false;
-    dragStart = {
-      px: e.clientX,
-      py: e.clientY,
-      fx: clippingUi.focusX,
-      fy: clippingUi.focusY,
-    };
-    clippingUi.beginDrag();
-    stageEl?.setPointerCapture(e.pointerId);
-  }
-
-  function onPointerMove(e: PointerEvent) {
-    if (dragKind === "none" || !dragStart || !stageEl) return;
-    const r = stageEl.getBoundingClientRect();
-    const dx = e.clientX - dragStart.px;
-    const dy = e.clientY - dragStart.py;
-    if (Math.abs(dx) + Math.abs(dy) > 3) dragMoved = true;
-
-    if (dragKind === "frame") {
-      // Frame follows pointer: focus = position under finger
-      const p = clientToFocus(e.clientX, e.clientY);
-      if (p) clippingUi.setFocus(p.x, p.y);
-    } else {
-      // Pan video under fixed zone: invert delta
-      const nx = dragStart.fx - dx / r.width;
-      const ny = dragStart.fy - dy / r.height;
-      clippingUi.setFocus(nx, ny);
-    }
-  }
-
-  function onPointerUp(e: PointerEvent) {
-    if (dragKind === "none") return;
-    const kind = dragKind;
-    const moved = dragMoved;
-    dragKind = "none";
-    dragStart = null;
-    clippingUi.endDrag();
-    try {
-      stageEl?.releasePointerCapture(e.pointerId);
-    } catch {
-      /* ignore */
-    }
-    if (!moved && kind === "pan") {
-      void toggle();
-    } else if (moved) {
-      projectStore.statusMessage = `Enfoque ${Math.round(clippingUi.focusX * 100)}% / ${Math.round(clippingUi.focusY * 100)}%`;
-    }
+  function center() {
+    applyFocus(0.5, 0.42, true);
   }
 </script>
 
@@ -266,16 +337,13 @@
     </div>
   {:else}
     <div class="relative flex min-h-0 w-full max-w-[min(100%,380px)] flex-1 flex-col items-center justify-center">
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
         bind:this={stageEl}
-        class="relative w-full touch-none select-none overflow-hidden rounded-[1.35rem] border-2 border-amber-500/50 bg-black shadow-2xl shadow-amber-950/40 ring-1 ring-black
-          {dragKind !== 'none' ? 'cursor-grabbing' : 'cursor-grab'}"
+        class="relative w-full touch-none select-none overflow-hidden rounded-[1.35rem] border-2 border-amber-500/50 bg-black shadow-2xl
+          {dragging ? 'cursor-grabbing' : 'cursor-grab'}"
         style="aspect-ratio: 9 / 16; max-height: min(74vh, 680px);"
-        onpointerdown={startPanDrag}
-        onpointermove={onPointerMove}
-        onpointerup={onPointerUp}
-        onpointercancel={onPointerUp}
-        role="presentation"
+        onpointerdown={onStageDown}
       >
         <!-- svelte-ignore a11y_media_has_caption -->
         <video
@@ -285,63 +353,67 @@
           preload="auto"
         ></video>
 
-        <!-- Movable green focus frame — center = crop focus point -->
+        <!-- Dark vignette (no pointer) -->
         <div
-          class="absolute z-20 cursor-move rounded-xl border-[2.5px] border-keep bg-keep/5 shadow-[0_0_0_9999px_rgba(0,0,0,0.28)] active:bg-keep/10"
-          style="left:{posX}%;top:{posY}%;width:72%;height:34%;transform:translate(-50%,-50%);"
-          data-no-pan
-          onpointerdown={startFrameDrag}
+          class="pointer-events-none absolute inset-0 z-[5]"
+          style="box-shadow: inset 0 0 0 1px rgba(0,0,0,0.2);"
+        ></div>
+
+        <!-- GREEN FRAME: movable focus reticle -->
+        <div
+          bind:this={frameEl}
+          data-frame
+          class="absolute z-20 box-border cursor-move rounded-xl border-[3px] border-emerald-400 bg-emerald-400/10
+            {dragging && dragMode === 'frame' ? 'border-emerald-300 bg-emerald-400/20' : ''}"
+          style="left:{(focusX * 100).toFixed(2)}%;top:{(focusY * 100).toFixed(2)}%;width:70%;height:32%;transform:translate(-50%,-50%);touch-action:none;"
           role="slider"
-          aria-label="Marco de enfoque 9:16"
-          aria-valuemin={0}
-          aria-valuemax={100}
+          aria-label="Marco de enfoque"
           aria-valuenow={Math.round(focusX * 100)}
           tabindex="0"
         >
           <div
-            class="pointer-events-none absolute -top-5 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-keep px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-black"
+            class="pointer-events-none absolute -top-6 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-emerald-400 px-2 py-0.5 text-[10px] font-bold text-black shadow"
           >
-            Arrastra el marco
+            ✥ Arrastra para enfocar
           </div>
-          <!-- Center crosshair -->
           <div class="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <span class="relative block h-6 w-6">
-              <span class="absolute left-1/2 top-0 h-full w-0.5 -translate-x-1/2 bg-keep"></span>
-              <span class="absolute left-0 top-1/2 h-0.5 w-full -translate-y-1/2 bg-keep"></span>
-              <span
-                class="absolute left-1/2 top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-keep bg-black/40"
-              ></span>
-            </span>
+            <div class="relative h-8 w-8">
+              <div class="absolute left-1/2 top-0 h-full w-[2px] -translate-x-1/2 bg-emerald-300"></div>
+              <div class="absolute left-0 top-1/2 h-[2px] w-full -translate-y-1/2 bg-emerald-300"></div>
+              <div
+                class="absolute left-1/2 top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-emerald-300 bg-black/50"
+              ></div>
+            </div>
           </div>
-          <!-- Corner grips -->
-          <span class="absolute -left-1 -top-1 h-3 w-3 rounded-sm border-l-2 border-t-2 border-keep"></span>
-          <span class="absolute -right-1 -top-1 h-3 w-3 rounded-sm border-r-2 border-t-2 border-keep"></span>
-          <span class="absolute -bottom-1 -left-1 h-3 w-3 rounded-sm border-b-2 border-l-2 border-keep"></span>
-          <span class="absolute -bottom-1 -right-1 h-3 w-3 rounded-sm border-b-2 border-r-2 border-keep"></span>
+          <span class="pointer-events-none absolute left-0 top-0 h-4 w-4 border-l-[3px] border-t-[3px] border-emerald-300"></span>
+          <span class="pointer-events-none absolute right-0 top-0 h-4 w-4 border-r-[3px] border-t-[3px] border-emerald-300"></span>
+          <span class="pointer-events-none absolute bottom-0 left-0 h-4 w-4 border-b-[3px] border-l-[3px] border-emerald-300"></span>
+          <span class="pointer-events-none absolute bottom-0 right-0 h-4 w-4 border-b-[3px] border-r-[3px] border-emerald-300"></span>
         </div>
 
         <div
-          class="pointer-events-none absolute left-2 top-2 z-30 rounded-full bg-black/75 px-2.5 py-1 text-[10px] font-bold tracking-wide text-amber-200"
+          class="pointer-events-none absolute left-2 top-2 z-30 rounded-full bg-black/80 px-2.5 py-1 text-[10px] font-bold text-amber-200"
         >
           9:16
         </div>
 
         <div
-          class="pointer-events-none absolute bottom-2 left-2 right-2 z-30 rounded-lg bg-black/70 px-2 py-1.5 text-center"
+          class="pointer-events-none absolute bottom-2 left-2 right-2 z-30 rounded-lg bg-black/75 px-2 py-1.5 text-center"
         >
           <div class="truncate text-[11px] font-semibold text-white">{clip.title}</div>
-          <div class="font-mono text-[10px] text-surface-300">
-            {formatTime(clip.start)}–{formatTime(clip.end)} · score {Math.round(clip.score)} · foco
-            {Math.round(focusX * 100)}/{Math.round(focusY * 100)}
+          <div class="font-mono text-[10px] text-emerald-300/90">
+            foco {Math.round(focusX * 100)}% · {Math.round(focusY * 100)}% · {formatTime(clip.start)}–{formatTime(
+              clip.end,
+            )}
           </div>
         </div>
 
-        {#if !playing && ready && dragKind === "none"}
+        {#if !playing && ready && !dragging}
           <div
-            class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black/15"
+            class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center"
           >
             <span
-              class="flex h-12 w-12 items-center justify-center rounded-full bg-vigil-500/85 text-xl text-white shadow-xl"
+              class="flex h-12 w-12 items-center justify-center rounded-full bg-vigil-500/80 text-xl text-white shadow-xl"
               >▶</span
             >
           </div>
@@ -360,40 +432,18 @@
       </div>
 
       <div class="mt-2 flex flex-wrap items-center justify-center gap-1.5" data-no-pan>
-        <button type="button" class="btn-primary text-xs" onclick={toggle}>
+        <button type="button" class="btn-primary text-xs" onclick={togglePlay}>
           {playing ? "Pausa" : "▶ Ver"}
         </button>
         <button type="button" class="btn-ghost text-xs" onclick={restart}>↺</button>
-        <button
-          type="button"
-          class="btn-ghost text-xs"
-          onclick={() => clippingUi.nudge(-0.06, 0)}
-          title="Mover foco izquierda">←</button
-        >
-        <button
-          type="button"
-          class="btn-ghost text-xs"
-          onclick={() => clippingUi.nudge(0.06, 0)}
-          title="Mover foco derecha">→</button
-        >
-        <button
-          type="button"
-          class="btn-ghost text-xs"
-          onclick={() => clippingUi.nudge(0, -0.06)}
-          title="Mover foco arriba">↑</button
-        >
-        <button
-          type="button"
-          class="btn-ghost text-xs"
-          onclick={() => clippingUi.nudge(0, 0.06)}
-          title="Mover foco abajo">↓</button
-        >
-        <button type="button" class="btn-ghost text-xs" onclick={() => clippingUi.resetFraming()}
-          >Centrar</button
-        >
+        <button type="button" class="btn-secondary text-xs px-2" onclick={() => nudge(-0.08, 0)}>←</button>
+        <button type="button" class="btn-secondary text-xs px-2" onclick={() => nudge(0.08, 0)}>→</button>
+        <button type="button" class="btn-secondary text-xs px-2" onclick={() => nudge(0, -0.08)}>↑</button>
+        <button type="button" class="btn-secondary text-xs px-2" onclick={() => nudge(0, 0.08)}>↓</button>
+        <button type="button" class="btn-ghost text-xs" onclick={center}>Centrar</button>
       </div>
-      <p class="text-center text-[10px] text-surface-500">
-        Arrastra el <span class="text-keep">marco verde</span> o el vídeo · flechas afinan
+      <p class="text-center text-[10px] text-surface-400">
+        Arrastra el marco verde · o usa las flechas · el vídeo se reencuadra al instante
       </p>
     </div>
   {/if}
