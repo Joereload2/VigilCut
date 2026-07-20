@@ -404,6 +404,15 @@ export async function visualImportImage(
   return invoke("visual_import_image", { path, title: title ?? null, tags, concepts });
 }
 
+export async function visualImportFolder(
+  path: string,
+  tags: string[] = [],
+  concepts: string[] = [],
+  recursive = false,
+): Promise<unknown> {
+  return invoke("visual_import_folder", { path, tags, concepts, recursive });
+}
+
 export async function visualSetSuggestionStatus(
   suggestionId: string,
   status: string,
@@ -413,6 +422,28 @@ export async function visualSetSuggestionStatus(
 
 export async function visualGetSession(): Promise<unknown> {
   return invoke("visual_get_session");
+}
+
+export async function visualExportTranscript(
+  outDir: string,
+  stem?: string | null,
+): Promise<unknown> {
+  return invoke("visual_export_transcript", { outDir, stem: stem ?? null });
+}
+
+export async function visualSavePlan(path?: string | null): Promise<string> {
+  return invoke("visual_save_plan", { path: path ?? null });
+}
+
+export async function visualListUsage(
+  assetId?: string | null,
+  limit = 50,
+): Promise<unknown> {
+  return invoke("visual_list_usage", { assetId: assetId ?? null, limit });
+}
+
+export async function visualScanMissing(): Promise<number> {
+  return invoke("visual_scan_missing");
 }
 
 export async function visualRenderPlan(

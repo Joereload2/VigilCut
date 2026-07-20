@@ -213,4 +213,87 @@ mod tests {
         assert_eq!(s[0].asset_id, "a1");
         assert!(s[0].match_reasons.iter().any(|r| r.starts_with("concept:")));
     }
+
+    #[test]
+    fn penalizes_unknown_license_and_usage() {
+        let mut a = asset("a1", &["inflacion"]);
+        a.license_status = LicenseStatus::Unknown;
+        a.times_used = 3;
+        let ev = SemanticEvent {
+            id: "e1".into(),
+            run_id: "r".into(),
+            kind: SemanticKind::Concept,
+            source_span: Span::new(0.0, 4.0),
+            output_span: Some(Span::new(0.0, 4.0)),
+            label: "inflacion".into(),
+            terms: vec!["inflacion".into()],
+            score: 0.9,
+            transcript_segment_ids: vec![],
+            method: "test".into(),
+            payload: serde_json::json!({}),
+        };
+        let (score, reasons) = score_pair(&ev, &a);
+        assert!(reasons.iter().any(|r| r.contains("license_unknown")));
+        assert!(reasons.iter().any(|r| r.contains("used_before")));
+        let clean = asset("a2", &["inflacion"]);
+        let (clean_score, _) = score_pair(&ev, &clean);
+        assert!(clean_score > score);
+    }
+
+    #[test]
+    fn respects_min_gap_and_no_asset_repeat() {
+        let assets = vec![asset("a1", &["economia"])];
+        let events = vec![
+            SemanticEvent {
+                id: "e1".into(),
+                run_id: "r".into(),
+                kind: SemanticKind::Concept,
+                source_span: Span::new(0.0, 3.0),
+                output_span: Some(Span::new(0.0, 3.0)),
+                label: "economia".into(),
+                terms: vec!["economia".into()],
+                score: 0.9,
+                transcript_segment_ids: vec![],
+                method: "t".into(),
+                payload: serde_json::json!({}),
+            },
+            SemanticEvent {
+                id: "e2".into(),
+                run_id: "r".into(),
+                kind: SemanticKind::Concept,
+                source_span: Span::new(5.0, 8.0),
+                output_span: Some(Span::new(5.0, 8.0)),
+                label: "economia".into(),
+                terms: vec!["economia".into()],
+                score: 0.85,
+                transcript_segment_ids: vec![],
+                method: "t".into(),
+                payload: serde_json::json!({}),
+            },
+        ];
+        let s = rank_suggestions(&events, &assets, 120.0, &MatchConfig::default());
+        // Only one asset, no same-video repeat → at most one suggestion
+        assert_eq!(s.len(), 1);
+    }
+
+    #[test]
+    fn skips_blocked_assets() {
+        let mut a = asset("a1", &["inflacion"]);
+        a.status = AssetStatus::Blocked;
+        let ev = SemanticEvent {
+            id: "e1".into(),
+            run_id: "r".into(),
+            kind: SemanticKind::Concept,
+            source_span: Span::new(0.0, 4.0),
+            output_span: Some(Span::new(0.0, 4.0)),
+            label: "inflacion".into(),
+            terms: vec!["inflacion".into()],
+            score: 0.9,
+            transcript_segment_ids: vec![],
+            method: "t".into(),
+            payload: serde_json::json!({}),
+        };
+        let s = rank_suggestions(&[ev], &[a], 60.0, &MatchConfig::default());
+        assert!(s.is_empty());
+    }
 }

@@ -59,6 +59,18 @@ pub struct MediaAsset {
     pub updated_at: String,
 }
 
+impl MediaAsset {
+    pub fn status_label(&self) -> &'static str {
+        match self.status {
+            AssetStatus::Active => "active",
+            AssetStatus::Archived => "archived",
+            AssetStatus::Blocked => "blocked",
+            AssetStatus::Missing => "missing",
+            AssetStatus::Invalid => "invalid",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SemanticKind {

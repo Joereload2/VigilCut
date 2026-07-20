@@ -1,6 +1,7 @@
 //! Local visual library: SQLite metadata + managed asset copies.
 
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use rusqlite::{params, Connection};
 use sha2::{Digest, Sha256};
@@ -9,8 +10,36 @@ use crate::error::{AppError, AppResult};
 use crate::models::visual::{AssetStatus, LicenseStatus, MediaAsset};
 use crate::state::AppState;
 
+/// Process-wide override for tests (preferred over env when set).
+static LIBRARY_ROOT_OVERRIDE: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+/// Serializes library tests that mutate the override.
+#[cfg(test)]
+static LIBRARY_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+/// Override library root (tests). Pass `None` to clear.
+pub fn set_library_root_override(path: Option<PathBuf>) {
+    if let Ok(mut g) = LIBRARY_ROOT_OVERRIDE.lock() {
+        *g = path;
+    }
+}
+
 pub fn library_root() -> AppResult<PathBuf> {
-    let root = AppState::app_data_dir()?.join("library");
+    let root = {
+        if let Ok(g) = LIBRARY_ROOT_OVERRIDE.lock() {
+            if let Some(p) = g.as_ref() {
+                p.clone()
+            } else if let Ok(p) = std::env::var("VIGILCUT_LIBRARY_ROOT") {
+                PathBuf::from(p)
+            } else {
+                AppState::app_data_dir()?.join("library")
+            }
+        } else if let Ok(p) = std::env::var("VIGILCUT_LIBRARY_ROOT") {
+            PathBuf::from(p)
+        } else {
+            AppState::app_data_dir()?.join("library")
+        }
+    };
     std::fs::create_dir_all(root.join("assets"))?;
     std::fs::create_dir_all(root.join("thumbs"))?;
     Ok(root)
@@ -428,4 +457,314 @@ pub fn list_active_assets() -> AppResult<Vec<MediaAsset>> {
         .into_iter()
         .filter(|a| matches!(a.status, AssetStatus::Active))
         .collect())
+}
+
+/// Import every jpg/png/webp under a folder (non-recursive by default).
+pub fn import_folder(
+    dir: &Path,
+    tags: Vec<String>,
+    concepts: Vec<String>,
+    recursive: bool,
+) -> AppResult<ImportFolderResult> {
+    import_folder_tracked(dir, tags, concepts, recursive)
+}
+
+/// Import folder with explicit duplicate detection.
+pub fn import_folder_tracked(
+    dir: &Path,
+    tags: Vec<String>,
+    concepts: Vec<String>,
+    recursive: bool,
+) -> AppResult<ImportFolderResult> {
+    if !dir.is_dir() {
+        return Err(AppError::NotFound(dir.display().to_string()));
+    }
+    let mut result = ImportFolderResult::default();
+    visit_images(dir, recursive, &mut |path| {
+        result.scanned += 1;
+        match import_image_detailed(path, None, tags.clone(), concepts.clone(), LicenseStatus::Owned)
+        {
+            Ok(ImportOutcome::New(a)) => {
+                result.imported += 1;
+                result.asset_ids.push(a.id);
+            }
+            Ok(ImportOutcome::Duplicate(a)) => {
+                result.duplicates += 1;
+                result.asset_ids.push(a.id);
+            }
+            Err(e) => {
+                result.failed += 1;
+                result.errors.push(format!("{}: {e}", path.display()));
+            }
+        }
+    })?;
+    Ok(result)
+}
+
+#[derive(Debug, Default, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportFolderResult {
+    pub scanned: u32,
+    pub imported: u32,
+    pub duplicates: u32,
+    pub failed: u32,
+    pub asset_ids: Vec<String>,
+    pub errors: Vec<String>,
+}
+
+#[derive(Debug)]
+pub enum ImportOutcome {
+    New(MediaAsset),
+    Duplicate(MediaAsset),
+}
+
+/// Same as import_image but reports whether the SHA already existed.
+pub fn import_image_detailed(
+    source: &Path,
+    title: Option<String>,
+    tags: Vec<String>,
+    concepts: Vec<String>,
+    license: LicenseStatus,
+) -> AppResult<ImportOutcome> {
+    if !source.is_file() {
+        return Err(AppError::NotFound(source.display().to_string()));
+    }
+    let ext = source
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_lowercase())
+        .unwrap_or_default();
+    if !["jpg", "jpeg", "png", "webp"].contains(&ext.as_str()) {
+        return Err(AppError::Invalid(format!(
+            "Formato no soportado: {ext}. Usa jpg/png/webp."
+        )));
+    }
+    let sha = sha256_file(source)?;
+    let conn = open_db()?;
+    if let Ok(existing) = conn.query_row(
+        "SELECT id FROM media_assets WHERE sha256 = ?1",
+        params![sha],
+        |r| r.get::<_, String>(0),
+    ) {
+        return Ok(ImportOutcome::Duplicate(get_asset(&conn, &existing)?));
+    }
+    // Reuse main path (will not re-hash miss since we checked)
+    drop(conn);
+    let asset = import_image(source, title, tags, concepts, license)?;
+    Ok(ImportOutcome::New(asset))
+}
+
+fn visit_images(dir: &Path, recursive: bool, f: &mut dyn FnMut(&Path)) -> AppResult<()> {
+    let entries = std::fs::read_dir(dir)?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if recursive {
+                visit_images(&path, true, f)?;
+            }
+            continue;
+        }
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|s| s.to_lowercase())
+            .unwrap_or_default();
+        if ["jpg", "jpeg", "png", "webp"].contains(&ext.as_str()) {
+            f(&path);
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetUsageRow {
+    pub id: String,
+    pub asset_id: String,
+    pub media_path: String,
+    pub run_id: Option<String>,
+    pub used_at: String,
+    pub output_start: Option<f64>,
+    pub output_end: Option<f64>,
+}
+
+pub fn list_usage(asset_id: Option<&str>, limit: usize) -> AppResult<Vec<AssetUsageRow>> {
+    let conn = open_db()?;
+    let limit = limit.clamp(1, 500) as i64;
+    let mut out = Vec::new();
+    if let Some(id) = asset_id {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, asset_id, media_path, run_id, used_at, output_start, output_end
+                 FROM asset_usage WHERE asset_id = ?1 ORDER BY used_at DESC LIMIT ?2",
+            )
+            .map_err(|e| AppError::Message(e.to_string()))?;
+        let rows = stmt
+            .query_map(params![id, limit], |r| {
+                Ok(AssetUsageRow {
+                    id: r.get(0)?,
+                    asset_id: r.get(1)?,
+                    media_path: r.get(2)?,
+                    run_id: r.get(3)?,
+                    used_at: r.get(4)?,
+                    output_start: r.get(5)?,
+                    output_end: r.get(6)?,
+                })
+            })
+            .map_err(|e| AppError::Message(e.to_string()))?;
+        for row in rows.flatten() {
+            out.push(row);
+        }
+    } else {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, asset_id, media_path, run_id, used_at, output_start, output_end
+                 FROM asset_usage ORDER BY used_at DESC LIMIT ?1",
+            )
+            .map_err(|e| AppError::Message(e.to_string()))?;
+        let rows = stmt
+            .query_map(params![limit], |r| {
+                Ok(AssetUsageRow {
+                    id: r.get(0)?,
+                    asset_id: r.get(1)?,
+                    media_path: r.get(2)?,
+                    run_id: r.get(3)?,
+                    used_at: r.get(4)?,
+                    output_start: r.get(5)?,
+                    output_end: r.get(6)?,
+                })
+            })
+            .map_err(|e| AppError::Message(e.to_string()))?;
+        for row in rows.flatten() {
+            out.push(row);
+        }
+    }
+    Ok(out)
+}
+
+/// Mark assets whose managed file is gone as `missing`. Does not delete rows.
+pub fn scan_missing_assets() -> AppResult<u32> {
+    let conn = open_db()?;
+    let mut stmt = conn
+        .prepare("SELECT id, managed_path, status FROM media_assets")
+        .map_err(|e| AppError::Message(e.to_string()))?;
+    let rows: Vec<(String, String, String)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .map_err(|e| AppError::Message(e.to_string()))?
+        .flatten()
+        .collect();
+    let now = chrono::Utc::now().to_rfc3339();
+    let mut n = 0u32;
+    for (id, path, st) in rows {
+        if st == "archived" || st == "blocked" {
+            continue;
+        }
+        if !Path::new(&path).is_file() {
+            conn.execute(
+                "UPDATE media_assets SET status = 'missing', updated_at = ?1 WHERE id = ?2",
+                params![now, id],
+            )
+            .map_err(|e| AppError::Message(e.to_string()))?;
+            n += 1;
+        }
+    }
+    Ok(n)
+}
+
+pub fn get_asset_by_id(id: &str) -> AppResult<MediaAsset> {
+    let conn = open_db()?;
+    get_asset(&conn, id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::{Rgb, RgbImage};
+
+    fn with_temp_library<F: FnOnce()>(f: F) {
+        let _serial = LIBRARY_TEST_LOCK.lock().unwrap();
+        let dir = std::env::temp_dir().join(format!("vc-lib-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        set_library_root_override(Some(dir.clone()));
+        f();
+        set_library_root_override(None);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    fn write_png(path: &Path, color: [u8; 3]) {
+        let img = RgbImage::from_fn(64, 48, |_, _| Rgb(color));
+        img.save(path).unwrap();
+    }
+
+    #[test]
+    fn import_dedupes_by_sha256() {
+        with_temp_library(|| {
+            let src_dir = library_root().unwrap().join("_src");
+            std::fs::create_dir_all(&src_dir).unwrap();
+            let p = src_dir.join("a.png");
+            write_png(&p, [10, 20, 30]);
+            let a1 = import_image_detailed(
+                &p,
+                Some("one".into()),
+                vec!["tag1".into()],
+                vec!["inflacion".into()],
+                LicenseStatus::Owned,
+            )
+            .unwrap();
+            assert!(matches!(a1, ImportOutcome::New(_)));
+            let a2 = import_image_detailed(
+                &p,
+                Some("two".into()),
+                vec![],
+                vec![],
+                LicenseStatus::Owned,
+            )
+            .unwrap();
+            assert!(matches!(a2, ImportOutcome::Duplicate(_)));
+            let list = list_assets(None, 50).unwrap();
+            assert_eq!(list.len(), 1);
+            // Original file still present
+            assert!(p.is_file());
+        });
+    }
+
+    #[test]
+    fn folder_import_and_usage() {
+        with_temp_library(|| {
+            let src = library_root().unwrap().join("_batch");
+            std::fs::create_dir_all(&src).unwrap();
+            write_png(&src.join("x.png"), [1, 2, 3]);
+            write_png(&src.join("y.png"), [4, 5, 6]);
+            let r = import_folder_tracked(
+                &src,
+                vec!["eco".into()],
+                vec!["economia".into()],
+                false,
+            )
+            .unwrap();
+            assert_eq!(r.scanned, 2);
+            assert_eq!(r.imported, 2);
+            assert_eq!(r.failed, 0);
+            let id = &r.asset_ids[0];
+            record_usage(id, "video.mp4", Some("run1"), 1.0, 5.0).unwrap();
+            let usage = list_usage(Some(id), 10).unwrap();
+            assert_eq!(usage.len(), 1);
+            let a = get_asset_by_id(id).unwrap();
+            assert_eq!(a.times_used, 1);
+        });
+    }
+
+    #[test]
+    fn scan_marks_missing() {
+        with_temp_library(|| {
+            let src = library_root().unwrap().join("z.png");
+            write_png(&src, [9, 9, 9]);
+            let a = import_image(&src, None, vec![], vec!["t".into()], LicenseStatus::Owned).unwrap();
+            std::fs::remove_file(&a.managed_path).unwrap();
+            let n = scan_missing_assets().unwrap();
+            assert_eq!(n, 1);
+            let a2 = get_asset_by_id(&a.id).unwrap();
+            assert!(matches!(a2.status, AssetStatus::Missing));
+        });
+    }
 }

@@ -166,4 +166,47 @@ mod tests {
         assert_eq!(p.len(), 1);
         assert!((p[0].duration() - 2.0).abs() < 1e-9);
     }
+
+    #[test]
+    fn invalid_and_zero_span() {
+        let m = map_cut_middle();
+        assert!(m.map_source_span(Span::new(5.0, 5.0)).is_empty());
+        assert!(m.map_source_span(Span::new(6.0, 4.0)).is_empty());
+    }
+
+    #[test]
+    fn exact_keep_boundary() {
+        let m = map_cut_middle();
+        // start of second keep
+        assert!((m.source_to_output(20.0).unwrap() - 10.0).abs() < 1e-6);
+        // end of first keep
+        assert!((m.source_to_output(10.0).unwrap() - 10.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn partial_removal_primary_span() {
+        let m = map_cut_middle();
+        // 8-15: only 8-10 survives in first keep
+        let p = m.primary_output_span(Span::new(8.0, 15.0)).unwrap();
+        assert!((p.start - 8.0).abs() < 1e-6);
+        assert!((p.end - 10.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn roundtrip_kept_points() {
+        let m = map_cut_middle();
+        for t in [0.0, 3.5, 9.9, 20.1, 29.0] {
+            let o = m.source_to_output(t).unwrap();
+            let back = m.output_to_source(o).unwrap();
+            assert!((back - t).abs() < 1e-6, "t={t} o={o} back={back}");
+        }
+    }
+
+    #[test]
+    fn skips_inverted_keep_entries() {
+        let m = TimeMap::from_keep_ranges(&[(5.0, 3.0), (0.0, 2.0)], 10.0);
+        assert!((m.output_duration - 2.0).abs() < 1e-9);
+        assert!(m.source_to_output(1.0).is_some());
+        assert!(m.source_to_output(4.0).is_none());
+    }
 }

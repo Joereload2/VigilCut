@@ -10,13 +10,15 @@
 |---|---|
 | Stack | Tauri 2 · Rust · Svelte 5 · TypeScript · Tailwind · FFmpeg |
 | Licencia | MIT |
-| Estado | **v1.1 fábrica** — engine + excepciones (modo seguro por defecto) + batch + clipping 9:16 + CLI |
+| Estado | **v1.1+ visual** — engine + excepciones + batch + clipping 9:16 + biblioteca visual local + CLI |
 
 Documentación:
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — mapa técnico  
 - [docs/ARCHITECTURAL_REVIEW.md](docs/ARCHITECTURAL_REVIEW.md) — mandato CTO / visión 5 años  
 - [docs/HARDENING_1_1.md](docs/HARDENING_1_1.md) — endurecimiento 1.1 (seguridad, modos, tests)  
+- [docs/VISUAL_LIBRARY_DESIGN.md](docs/VISUAL_LIBRARY_DESIGN.md) — diseño enriquecimiento visual  
+- [docs/VISUAL_LIBRARY_IMPLEMENTATION_REPORT.md](docs/VISUAL_LIBRARY_IMPLEMENTATION_REPORT.md) — reporte implementación  
 - [docs/ROADMAP.md](docs/ROADMAP.md) — roadmap  
 - [docs/BACKLOG_NEXT.md](docs/BACKLOG_NEXT.md) — backlog post-MVP  
 
@@ -36,7 +38,8 @@ Documentación:
    - `*.shorts.json` + carpeta `*-shorts/short-01.mp4` … (clips reales)
 6. **Batch** + **watch inbox** (auto-procesa crudos)  
 7. **CLI** sin UI para automatización  
-8. Cache de audio 16 kHz + detectores breath / chapters / shorts
+8. Cache de audio 16 kHz + detectores breath / chapters / shorts  
+9. **Modo Visual** — transcripción canónica, biblioteca local de imágenes, sugerencias supervisadas, VisualPlan ≠ EDL, overlay FFmpeg
 
 ---
 
@@ -72,9 +75,11 @@ npm run cli -- analyze .\clip.mp4
 npm run cli -- export .\clip.mp4
 npm run cli -- batch .\inbox .\outbox
 # opc. --aggressive en export/batch para forzar cortes dudosos
+npm run cli -- visual import .\imagenes --concepts inflacion,economia
+npm run cli -- visual transcript .\clip.mp4 .\out
 ```
 
-Carpetas de app: `%APPDATA%\VigilCut\inbox` y `outbox`.
+Carpetas de app: `%APPDATA%\VigilCut\inbox`, `outbox` y `library` (metadatos SQLite + copias administradas).
 
 ---
 

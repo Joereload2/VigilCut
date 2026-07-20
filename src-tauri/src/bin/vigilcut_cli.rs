@@ -288,6 +288,155 @@ fn main() -> ExitCode {
                 ExitCode::SUCCESS
             }
         }
+        "visual" => {
+            // Headless visual library / transcript helpers
+            let sub = args.first().cloned().unwrap_or_default();
+            match sub.as_str() {
+                "import" => {
+                    let path = args.get(1).cloned().unwrap_or_default();
+                    if path.is_empty() {
+                        eprintln!(
+                            "usage: vigilcut-cli visual import <image|folder> [--concepts a,b] [--recursive]"
+                        );
+                        return ExitCode::FAILURE;
+                    }
+                    let concepts = arg_csv(&args, "--concepts");
+                    let tags = arg_csv(&args, "--tags");
+                    let recursive = args.iter().any(|a| a == "--recursive");
+                    let p = PathBuf::from(&path);
+                    if p.is_dir() {
+                        match vigilcut_lib::pipeline::visual::library::import_folder(
+                            &p,
+                            tags,
+                            concepts,
+                            recursive,
+                        ) {
+                            Ok(r) => {
+                                println!(
+                                    "folder scanned={} imported={} duplicates={} failed={}",
+                                    r.scanned, r.imported, r.duplicates, r.failed
+                                );
+                                for e in r.errors.iter().take(5) {
+                                    eprintln!("  warn: {e}");
+                                }
+                                ExitCode::SUCCESS
+                            }
+                            Err(e) => {
+                                eprintln!("error: {e}");
+                                ExitCode::FAILURE
+                            }
+                        }
+                    } else {
+                        match vigilcut_lib::pipeline::visual::import_library_image(
+                            &p,
+                            None,
+                            tags,
+                            concepts,
+                        ) {
+                            Ok(a) => {
+                                println!("imported id={} sha256={}", a.id, a.sha256);
+                                ExitCode::SUCCESS
+                            }
+                            Err(e) => {
+                                eprintln!("error: {e}");
+                                ExitCode::FAILURE
+                            }
+                        }
+                    }
+                }
+                "list" => {
+                    let q = args.get(1).cloned();
+                    match vigilcut_lib::pipeline::visual::library::list_assets(
+                        q.as_deref(),
+                        100,
+                    ) {
+                        Ok(list) => {
+                            println!("{} assets", list.len());
+                            for a in list {
+                                println!(
+                                    "  {}  {}  concepts=[{}]  used={}  {}",
+                                    a.id,
+                                    a.title,
+                                    a.concepts.join(","),
+                                    a.times_used,
+                                    a.status_label()
+                                );
+                            }
+                            ExitCode::SUCCESS
+                        }
+                        Err(e) => {
+                            eprintln!("error: {e}");
+                            ExitCode::FAILURE
+                        }
+                    }
+                }
+                "transcript" => {
+                    let media = args.get(1).cloned().unwrap_or_default();
+                    let out = args.get(2).cloned().unwrap_or_else(|| ".".into());
+                    if media.is_empty() {
+                        eprintln!(
+                            "usage: vigilcut-cli visual transcript <video.mp4> [outdir] [--srt path] [--whisper]"
+                        );
+                        return ExitCode::FAILURE;
+                    }
+                    let media_p = PathBuf::from(&media);
+                    let srt = arg_value(&args, "--srt").map(PathBuf::from);
+                    let whisper = args.iter().any(|a| a == "--whisper");
+                    let tr = match rt.block_on(
+                        vigilcut_lib::pipeline::transcript_engine::build_transcript(
+                            &media_p,
+                            srt.as_deref(),
+                            whisper,
+                            None,
+                        ),
+                    ) {
+                        Ok(t) => t,
+                        Err(e) => {
+                            eprintln!("error: {e}");
+                            return ExitCode::FAILURE;
+                        }
+                    };
+                    let stem = media_p
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("media");
+                    match vigilcut_lib::pipeline::transcript_engine::write_transcript_artifacts(
+                        &tr,
+                        PathBuf::from(&out).as_path(),
+                        stem,
+                    ) {
+                        Ok(arts) => {
+                            println!("status={:?} segments={}", tr.status, tr.segments.len());
+                            for (k, p) in arts {
+                                println!("  {k} → {p}");
+                            }
+                            ExitCode::SUCCESS
+                        }
+                        Err(e) => {
+                            eprintln!("error: {e}");
+                            ExitCode::FAILURE
+                        }
+                    }
+                }
+                "scan-missing" => match vigilcut_lib::pipeline::visual::library::scan_missing_assets()
+                {
+                    Ok(n) => {
+                        println!("marked_missing={n}");
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: {e}");
+                        ExitCode::FAILURE
+                    }
+                },
+                _ => {
+                    eprintln!(
+                        "usage: vigilcut-cli visual <import|list|transcript|scan-missing> ..."
+                    );
+                    ExitCode::FAILURE
+                }
+            }
+        }
         "help" | "-h" | "--help" => {
             print_help();
             ExitCode::SUCCESS
@@ -298,6 +447,31 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+fn arg_value(args: &[String], flag: &str) -> Option<String> {
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == flag {
+            return args.get(i + 1).cloned();
+        }
+        if let Some(rest) = args[i].strip_prefix(&format!("{flag}=")) {
+            return Some(rest.to_string());
+        }
+        i += 1;
+    }
+    None
+}
+
+fn arg_csv(args: &[String], flag: &str) -> Vec<String> {
+    arg_value(args, flag)
+        .map(|s| {
+            s.split(',')
+                .map(|x| x.trim().to_string())
+                .filter(|x| !x.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn policy_from_args(args: &[String]) -> PolicyConfig {
@@ -327,18 +501,25 @@ fn policy_from_args(args: &[String]) -> PolicyConfig {
 fn print_help() {
     eprintln!(
         "\
-VigilCut CLI v1.0 — factory engine (no UI)
+VigilCut CLI v1.1 — factory engine (no UI)
 
   vigilcut-cli analyze <video.mp4> [--policy factory|youtube|podcast|gentle|shorts-first]
   vigilcut-cli export <video.mp4> [out.mp4]
   vigilcut-cli batch <inbox_dir> [outbox_dir] [--policy ...]
   vigilcut-cli clips <video.mp4> [outdir]   # find + export vertical 9:16 candidates
 
+  Visual library (local, no cloud):
+  vigilcut-cli visual import <image|folder> [--concepts a,b] [--tags t] [--recursive]
+  vigilcut-cli visual list [query]
+  vigilcut-cli visual transcript <video.mp4> [outdir] [--srt path] [--whisper]
+  vigilcut-cli visual scan-missing
+
   Policies: factory (default), youtube, podcast, gentle, shorts-first
 
 Factory dirs (desktop app):
   %APPDATA%/VigilCut/inbox
   %APPDATA%/VigilCut/outbox
+  %APPDATA%/VigilCut/library
 "
     );
 }

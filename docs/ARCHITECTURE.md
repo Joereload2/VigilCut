@@ -29,9 +29,24 @@ CLI (no UI):
 cargo run --bin vigilcut-cli -- analyze video.mp4
 cargo run --bin vigilcut-cli -- batch ./inbox ./outbox
 cargo run --bin vigilcut-cli -- export video.mp4
+cargo run --bin vigilcut-cli -- visual import ./images --concepts topic
+cargo run --bin vigilcut-cli -- visual transcript video.mp4 ./out
 ```
 
-App data: `%APPDATA%/VigilCut/inbox` and `outbox`.
+App data: `%APPDATA%/VigilCut/inbox`, `outbox`, and `library` (visual assets).
+
+### Visual enrichment (local)
+
+```
+Transcript (canonical) → SemanticEvent[] → match library → VisualSuggestion[]
+  → human accept/reject → VisualPlan (placements on OUTPUT timeline)
+  → FFmpeg overlay on already-cut longform (EDL unchanged)
+```
+
+- **EDL** = what survives of the source  
+- **VisualPlan** = stills overlaid on the cut output  
+- Original media is never modified; library stores managed copies only  
+- Design: [VISUAL_LIBRARY_DESIGN.md](./VISUAL_LIBRARY_DESIGN.md)
 
 ---
 
@@ -52,10 +67,10 @@ App data: `%APPDATA%/VigilCut/inbox` and `outbox`.
 
 ```
 src-tauri/src/
-  commands/     # Tauri IPC surface
+  commands/     # Tauri IPC surface (incl. visual_*)
   ffmpeg/       # Sidecar resolve + probe + filters
-  pipeline/     # silence → segments, export filter graphs
-  models/       # Serializable domain types
+  pipeline/     # silence, export, time_map, transcript, semantic, visual/*
+  models/       # Domain types (transcript, visual, edl, …)
   state.rs      # App data dirs, in-memory project/batch maps
 
 src/lib/

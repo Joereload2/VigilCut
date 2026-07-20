@@ -4,21 +4,20 @@ pub mod library;
 pub mod match_rank;
 pub mod render;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use crate::error::{AppError, AppResult};
 use crate::models::edl::Edl;
 use crate::models::transcript::Transcript;
 use crate::models::visual::{
-    edl_fingerprint, SuggestionStatus, VisualPlan, VisualPlacement, VisualSuggestion,
+    edl_fingerprint, LicenseStatus, SuggestionStatus, VisualPlan, VisualPlacement, VisualSuggestion,
 };
 use crate::pipeline::semantic::extract_semantic_events;
 use crate::pipeline::time_map::TimeMap;
 use crate::pipeline::transcript_engine::{build_transcript, write_transcript_artifacts};
 use crate::pipeline::visual::library::{import_image, list_active_assets};
 use crate::pipeline::visual::match_rank::{rank_suggestions, MatchConfig};
-use crate::models::visual::LicenseStatus;
 
 /// In-memory session state for visual runs (also persisted as JSON under cache).
 #[derive(Default)]
@@ -27,6 +26,7 @@ pub struct VisualSession {
     pub suggestions: Vec<VisualSuggestion>,
     pub plan: Option<VisualPlan>,
     pub edl_fp: Option<String>,
+    pub plan_path: Option<PathBuf>,
 }
 
 impl VisualSession {
@@ -36,6 +36,32 @@ impl VisualSession {
 }
 
 pub type VisualState = Mutex<VisualSession>;
+
+fn visual_plans_dir() -> AppResult<PathBuf> {
+    let d = crate::state::AppState::cache_dir()?.join("visual_plans");
+    std::fs::create_dir_all(&d)?;
+    Ok(d)
+}
+
+/// Persist VisualPlan JSON under cache (and optional explicit path).
+pub fn save_visual_plan(plan: &VisualPlan, extra_path: Option<&Path>) -> AppResult<PathBuf> {
+    let primary = visual_plans_dir()?.join(format!("{}.visual-plan.json", plan.id));
+    let json = serde_json::to_string_pretty(plan)?;
+    std::fs::write(&primary, &json)?;
+    if let Some(p) = extra_path {
+        if let Some(parent) = p.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(p, &json)?;
+        return Ok(p.to_path_buf());
+    }
+    Ok(primary)
+}
+
+pub fn load_visual_plan(path: &Path) -> AppResult<VisualPlan> {
+    let raw = std::fs::read_to_string(path)?;
+    Ok(serde_json::from_str(&raw)?)
+}
 
 pub async fn run_visual_enrichment(
     media_path: &Path,
@@ -63,7 +89,11 @@ pub async fn run_visual_enrichment(
         &MatchConfig::default(),
     );
 
-    let mut plan = VisualPlan::new(&run_id, media_path.to_string_lossy(), edl_fingerprint(&edl.keep_ranges()));
+    let mut plan = VisualPlan::new(
+        &run_id,
+        media_path.to_string_lossy(),
+        edl_fingerprint(&edl.keep_ranges()),
+    );
     if assets.is_empty() {
         plan.warnings
             .push("Biblioteca vacía: importa imágenes y asigna conceptos/tags.".into());
@@ -81,6 +111,7 @@ pub async fn run_visual_enrichment(
         .and_then(|s| s.to_str())
         .unwrap_or("media");
     let arts = write_transcript_artifacts(&tr, &cache, stem)?;
+    let plan_path = save_visual_plan(&plan, None)?;
 
     {
         let mut g = state.lock().map_err(|e| AppError::Message(e.to_string()))?;
@@ -88,6 +119,7 @@ pub async fn run_visual_enrichment(
         g.suggestions = suggestions.clone();
         g.plan = Some(plan.clone());
         g.edl_fp = Some(edl_fingerprint(&edl.keep_ranges()));
+        g.plan_path = Some(plan_path.clone());
     }
 
     Ok(serde_json::json!({
@@ -95,6 +127,7 @@ pub async fn run_visual_enrichment(
         "semanticEvents": semantics,
         "suggestions": suggestions,
         "plan": plan,
+        "planPath": plan_path.to_string_lossy(),
         "transcriptArtifacts": arts,
         "timeMap": {
             "sourceDuration": time_map.source_duration,
@@ -137,7 +170,12 @@ pub fn set_suggestion_status(
     }
     plan.updated_at = chrono::Utc::now().to_rfc3339();
     plan.version += 1;
-    Ok(plan.clone())
+    let plan_out = plan.clone();
+    // Persist after human decision
+    if let Ok(p) = save_visual_plan(&plan_out, None) {
+        g.plan_path = Some(p);
+    }
+    Ok(plan_out)
 }
 
 pub fn invalidate_if_edl_changed(state: &VisualState, edl: &Edl) -> AppResult<bool> {
@@ -153,6 +191,7 @@ pub fn invalidate_if_edl_changed(state: &VisualState, edl: &Edl) -> AppResult<bo
         plan.placements.clear();
         plan.version += 1;
         plan.updated_at = chrono::Utc::now().to_rfc3339();
+        let _ = save_visual_plan(plan, None);
     }
     g.suggestions.clear();
     g.edl_fp = Some(fp);
@@ -166,4 +205,18 @@ pub fn import_library_image(
     concepts: Vec<String>,
 ) -> AppResult<crate::models::visual::MediaAsset> {
     import_image(path, title, tags, concepts, LicenseStatus::Owned)
+}
+
+/// Export session transcript projections to a user-chosen directory.
+pub fn export_session_transcript(
+    state: &VisualState,
+    out_dir: &Path,
+    stem: &str,
+) -> AppResult<Vec<(String, String)>> {
+    let g = state.lock().map_err(|e| AppError::Message(e.to_string()))?;
+    let tr = g
+        .transcript
+        .as_ref()
+        .ok_or_else(|| AppError::Invalid("No hay transcripción en sesión. Genera sugerencias primero.".into()))?;
+    write_transcript_artifacts(tr, out_dir, stem)
 }

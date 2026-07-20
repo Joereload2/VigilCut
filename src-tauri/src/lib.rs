@@ -106,10 +106,16 @@ pub fn run() {
             commands::visual::visual_run_enrichment,
             commands::visual::visual_list_assets,
             commands::visual::visual_import_image,
+            commands::visual::visual_import_folder,
             commands::visual::visual_update_asset,
+            commands::visual::visual_list_usage,
+            commands::visual::visual_scan_missing,
             commands::visual::visual_set_suggestion_status,
             commands::visual::visual_get_session,
             commands::visual::visual_check_edl,
+            commands::visual::visual_export_transcript,
+            commands::visual::visual_save_plan,
+            commands::visual::visual_load_plan,
             commands::visual::visual_render_plan,
         ])
         .setup(|app| {

@@ -7,9 +7,11 @@
 - Source↔output TimeMap from EDL (unit tests)
 - Deterministic semantic events (keywords / concepts)
 - SQLite image library (import, hash dedupe, thumbs, usage)
-- Explainable suggestions + accept/reject → VisualPlan
-- FFmpeg overlay render of accepted placements (atomic)
-- UI mode **Visual** (`VisualPanel`)
+- Folder bulk import + usage history + missing-file scan
+- Explainable suggestions + accept/reject → VisualPlan (persisted JSON)
+- FFmpeg overlay render of accepted placements (atomic) + visual-manifest
+- UI mode **Visual** (`VisualPanel`): import folder, export transcript, source/output times
+- CLI: `visual import|list|transcript|scan-missing`
 - Design: `docs/VISUAL_LIBRARY_DESIGN.md` · Report: `docs/VISUAL_LIBRARY_IMPLEMENTATION_REPORT.md`
 
 ## 1.1.0 — 2026-07-20 (hardening)

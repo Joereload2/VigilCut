@@ -1,6 +1,5 @@
 //! Deterministic semantic event extraction from a transcript (no LLM).
 
-use crate::models::event::Span;
 use crate::models::transcript::Transcript;
 use crate::models::visual::{SemanticEvent, SemanticKind};
 use crate::pipeline::time_map::TimeMap;
@@ -149,6 +148,7 @@ const CONCEPT_SEED: &[(&str, &[&str])] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::event::Span;
     use crate::models::transcript::{Transcript, TranscriptSegment, TranscriptStatus};
 
     #[test]

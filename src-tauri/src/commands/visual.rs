@@ -8,14 +8,15 @@ use tauri::State;
 use crate::commands::analyze::AnalysisCache;
 use crate::error::{AppError, AppResult};
 use crate::models::edl::Edl;
-use crate::models::visual::{SuggestionStatus, VisualPlan};
-use crate::pipeline::visual::{
-    import_library_image, invalidate_if_edl_changed, run_visual_enrichment, set_suggestion_status,
-    VisualSession,
+use crate::models::visual::{AssetStatus, LicenseStatus, SuggestionStatus, VisualPlan};
+use crate::pipeline::visual::library::{
+    import_folder, list_assets, list_usage, scan_missing_assets, update_asset_meta,
 };
-use crate::pipeline::visual::library::{list_assets, update_asset_meta};
 use crate::pipeline::visual::render::render_visual_plan;
-use crate::models::visual::{AssetStatus, LicenseStatus};
+use crate::pipeline::visual::{
+    export_session_transcript, import_library_image, invalidate_if_edl_changed, load_visual_plan,
+    run_visual_enrichment, save_visual_plan, set_suggestion_status, VisualSession,
+};
 
 pub type VisualSessionState = Mutex<VisualSession>;
 
@@ -88,6 +89,22 @@ pub fn visual_import_image(
 }
 
 #[tauri::command]
+pub fn visual_import_folder(
+    path: String,
+    tags: Option<Vec<String>>,
+    concepts: Option<Vec<String>>,
+    recursive: Option<bool>,
+) -> AppResult<serde_json::Value> {
+    let r = import_folder(
+        PathBuf::from(&path).as_path(),
+        tags.unwrap_or_default(),
+        concepts.unwrap_or_default(),
+        recursive.unwrap_or(false),
+    )?;
+    Ok(serde_json::to_value(r)?)
+}
+
+#[tauri::command]
 pub fn visual_update_asset(
     id: String,
     title: Option<String>,
@@ -108,10 +125,25 @@ pub fn visual_update_asset(
         "active" => Some(AssetStatus::Active),
         "archived" => Some(AssetStatus::Archived),
         "blocked" => Some(AssetStatus::Blocked),
+        "missing" => Some(AssetStatus::Missing),
         _ => None,
     });
     let a = update_asset_meta(&id, title, tags, concepts, lic, st)?;
     Ok(serde_json::to_value(a)?)
+}
+
+#[tauri::command]
+pub fn visual_list_usage(
+    asset_id: Option<String>,
+    limit: Option<usize>,
+) -> AppResult<serde_json::Value> {
+    let rows = list_usage(asset_id.as_deref(), limit.unwrap_or(50))?;
+    Ok(serde_json::to_value(rows)?)
+}
+
+#[tauri::command]
+pub fn visual_scan_missing() -> AppResult<u32> {
+    scan_missing_assets()
 }
 
 #[tauri::command]
@@ -138,6 +170,7 @@ pub fn visual_get_session(visual: State<'_, VisualSessionState>) -> AppResult<se
         "suggestions": g.suggestions,
         "plan": g.plan,
         "edlFingerprint": g.edl_fp,
+        "planPath": g.plan_path.as_ref().map(|p| p.to_string_lossy().into_owned()),
     }))
 }
 
@@ -153,6 +186,46 @@ pub fn visual_check_edl(
 }
 
 #[tauri::command]
+pub fn visual_export_transcript(
+    out_dir: String,
+    stem: Option<String>,
+    visual: State<'_, VisualSessionState>,
+) -> AppResult<serde_json::Value> {
+    let stem = stem.unwrap_or_else(|| "transcript".into());
+    let arts = export_session_transcript(&visual, PathBuf::from(&out_dir).as_path(), &stem)?;
+    Ok(serde_json::json!({ "artifacts": arts }))
+}
+
+#[tauri::command]
+pub fn visual_save_plan(
+    path: Option<String>,
+    visual: State<'_, VisualSessionState>,
+) -> AppResult<String> {
+    let plan = {
+        let g = visual.lock().map_err(|e| AppError::Message(e.to_string()))?;
+        g.plan
+            .clone()
+            .ok_or_else(|| AppError::Invalid("No hay VisualPlan en sesión.".into()))?
+    };
+    let extra = path.as_ref().map(PathBuf::from);
+    let p = save_visual_plan(&plan, extra.as_deref())?;
+    Ok(p.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+pub fn visual_load_plan(
+    path: String,
+    visual: State<'_, VisualSessionState>,
+) -> AppResult<VisualPlan> {
+    let plan = load_visual_plan(PathBuf::from(&path).as_path())?;
+    let mut g = visual.lock().map_err(|e| AppError::Message(e.to_string()))?;
+    g.plan = Some(plan.clone());
+    g.edl_fp = Some(plan.edl_fingerprint.clone());
+    g.plan_path = Some(PathBuf::from(&path));
+    Ok(plan)
+}
+
+#[tauri::command]
 pub async fn visual_render_plan(
     cut_video_path: String,
     output_path: String,
@@ -163,7 +236,11 @@ pub async fn visual_render_plan(
         let g = visual.lock().map_err(|e| AppError::Message(e.to_string()))?;
         g.plan
             .clone()
-            .ok_or_else(|| AppError::Invalid("No hay VisualPlan. Genera sugerencias y acepta alguna.".into()))?
+            .ok_or_else(|| {
+                AppError::Invalid(
+                    "No hay VisualPlan. Genera sugerencias y acepta alguna.".into(),
+                )
+            })?
     };
     let out = render_visual_plan(
         PathBuf::from(&cut_video_path).as_path(),

@@ -128,5 +128,39 @@ pub async fn render_visual_plan(
         );
     }
 
+    // Manifest next to output (traceable, reproducible)
+    let manifest_path = final_out.with_extension("visual-manifest.json");
+    let manifest = serde_json::json!({
+        "kind": "visual_render_manifest",
+        "version": 1,
+        "cutVideo": cut_video.to_string_lossy(),
+        "output": final_out.to_string_lossy(),
+        "sourceMedia": media_path_for_usage,
+        "planId": plan.id,
+        "runId": plan.run_id,
+        "edlFingerprint": plan.edl_fingerprint,
+        "planVersion": plan.version,
+        "placements": active.iter().map(|p| serde_json::json!({
+            "id": p.id,
+            "assetId": p.asset_id,
+            "outputStart": p.output_start,
+            "outputEnd": p.output_end,
+            "mode": p.mode,
+            "provenance": p.provenance,
+        })).collect::<Vec<_>>(),
+        "renderedAt": chrono::Utc::now().to_rfc3339(),
+        "note": "Overlays applied on cut timeline. Original media was not modified.",
+    });
+    let _ = std::fs::write(
+        &manifest_path,
+        serde_json::to_string_pretty(&manifest).unwrap_or_default(),
+    );
+    // Also persist the full plan beside the output
+    let plan_beside = final_out.with_extension("visual-plan.json");
+    let _ = std::fs::write(
+        &plan_beside,
+        serde_json::to_string_pretty(plan).unwrap_or_default(),
+    );
+
     Ok(final_out)
 }
