@@ -1,27 +1,15 @@
 @echo off
-REM Launch latest VigilCut. Prefer debug (dev builds with newest features),
-REM then release. Kills stale instances so you don't keep an old v1.0.0 UI.
-
 set "ROOT=%~dp0"
 cd /d "%ROOT%"
-
+echo Cerrando VigilCut antiguos...
 taskkill /IM vigilcut.exe /F >nul 2>&1
-
-set "DEBUG_EXE=%ROOT%src-tauri\target\debug\vigilcut.exe"
-set "RELEASE_EXE=%ROOT%src-tauri\target\release\vigilcut.exe"
-
-if exist "%DEBUG_EXE%" (
-  echo Opening debug build (newest features)...
-  start "" "%DEBUG_EXE%"
-  exit /b 0
+timeout /t 1 /nobreak >nul
+set "EXE=%ROOT%src-tauri\target\debug\vigilcut.exe"
+if not exist "%EXE%" set "EXE=%ROOT%src-tauri\target\release\vigilcut.exe"
+if not exist "%EXE%" (
+  echo No hay ejecutable. Ejecuta: npm run dev:win
+  pause
+  exit /b 1
 )
-
-if exist "%RELEASE_EXE%" (
-  echo Opening release build...
-  start "" "%RELEASE_EXE%"
-  exit /b 0
-)
-
-echo No built exe found. Run: npm run dev:win
-echo Or: npm run tauri:build
-pause
+echo Abriendo: %EXE%
+start "" "%EXE%"
