@@ -2,50 +2,83 @@
   import { projectStore } from "$lib/stores/project.svelte";
   import * as api from "$lib/utils/tauri";
 
+  type Seg = {
+    id?: string;
+    text: string;
+    span: { start: number; end: number };
+  };
+
+  type SemanticEv = {
+    id: string;
+    label: string;
+    terms?: string[];
+    score: number;
+    kind?: string;
+    sourceSpan?: { start: number; end: number };
+    outputSpan?: { start: number; end: number } | null;
+  };
+
+  type Suggestion = {
+    id: string;
+    assetId: string;
+    matchScore: number;
+    matchReasons: string[];
+    status: string;
+    assetTitle?: string;
+    outputSpan: { start: number; end: number };
+    sourceSpan: { start: number; end: number };
+  };
+
+  type Asset = {
+    id: string;
+    title: string;
+    concepts: string[];
+    tags: string[];
+    thumbnailPath?: string;
+    timesUsed?: number;
+    licenseStatus?: string;
+    status?: string;
+  };
+
+  const STOP = new Set([
+    "el","la","los","las","un","una","unos","unas","de","del","al","a","en","y","o",
+    "que","se","es","son","por","para","con","sin","como","más","muy","ya","lo","su",
+    "sus","me","te","nos","les","le","mi","tu","si","no","esto","esta","ese","esa",
+    "hay","fue","ser","está","están","porque","cuando","donde","qué","cuál","the","and",
+    "of","to","is","are","in","on","for","with","that","this","it","was","be","as","at",
+  ]);
+
   let busy = $state(false);
   let error = $state<string | null>(null);
   let session = $state<{
     transcript?: {
-      segments?: { text: string; span: { start: number; end: number } }[];
+      segments?: Seg[];
       status?: string;
       warnings?: string[];
       engine?: string;
     };
-    suggestions?: {
-      id: string;
-      assetId: string;
-      matchScore: number;
-      matchReasons: string[];
-      status: string;
-      assetTitle?: string;
-      outputSpan: { start: number; end: number };
-      sourceSpan: { start: number; end: number };
-    }[];
+    semanticEvents?: SemanticEv[];
+    suggestions?: Suggestion[];
     plan?: { placements?: unknown[]; warnings?: string[]; version?: number };
     planPath?: string;
     timeMap?: { sourceDuration: number; outputDuration: number };
   } | null>(null);
-  let assets = $state<
-    {
-      id: string;
-      title: string;
-      concepts: string[];
-      tags: string[];
-      thumbnailPath?: string;
-      timesUsed?: number;
-      licenseStatus?: string;
-      status?: string;
-    }[]
-  >([]);
+  let assets = $state<Asset[]>([]);
   let preferWhisper = $state(false);
   let showSourceTime = $state(false);
   let transcriptQuery = $state("");
   let lastMessage = $state("");
   let lastArtifacts = $state<string[]>([]);
+  let explicitSrt = $state<string | null>(null);
+
+  /** User-selected keyword from transcript / chips */
+  let selectedWord = $state<string | null>(null);
+  let selectedSeg = $state<Seg | null>(null);
+  let manualKeyword = $state("");
 
   async function refreshAssets() {
     try {
-      assets = (await api.visualListAssets(null, 50)) as typeof assets;
+      assets = (await api.visualListAssets(null, 80)) as Asset[];
     } catch (e) {
       console.warn(e);
     }
@@ -59,16 +92,17 @@
     busy = true;
     error = null;
     projectStore.busy = true;
-    projectStore.statusMessage = "Generando transcripción y sugerencias visuales…";
+    projectStore.statusMessage = "Generando transcripción y conceptos…";
     try {
       const res = (await api.visualRunEnrichment(
         projectStore.mediaPath,
         projectStore.analysisRun?.id ?? null,
-        null,
+        explicitSrt,
         preferWhisper,
       )) as {
         transcript: NonNullable<typeof session>["transcript"];
-        suggestions: NonNullable<typeof session>["suggestions"];
+        semanticEvents?: SemanticEv[];
+        suggestions: Suggestion[];
         plan: NonNullable<typeof session>["plan"];
         planPath?: string;
         timeMap?: { sourceDuration: number; outputDuration: number };
@@ -76,13 +110,15 @@
       };
       session = {
         transcript: res.transcript,
+        semanticEvents: res.semanticEvents ?? [],
         suggestions: res.suggestions,
         plan: res.plan,
         planPath: res.planPath,
         timeMap: res.timeMap,
       };
       lastArtifacts = (res.transcriptArtifacts || []).map(([, p]) => p);
-      lastMessage = `Sugerencias: ${res.suggestions?.length ?? 0} · plan v${res.plan?.version ?? 1}`;
+      const kw = keywordList.length;
+      lastMessage = `Texto listo · ${res.transcript?.segments?.length ?? 0} frases · ${kw} palabras clave · ${res.suggestions?.length ?? 0} sugerencias`;
       if (res.plan?.warnings?.length) {
         lastMessage += ` · ${res.plan.warnings[0]}`;
       }
@@ -96,16 +132,60 @@
     }
   }
 
-  function promptConcepts(defaultValue = "inflacion,economia"): string[] {
-    return (
-      prompt("Conceptos (separados por coma)", defaultValue)
-        ?.split(",")
-        .map((s) => s.trim())
-        .filter(Boolean) ?? []
-    );
+  async function pickSrt() {
+    if (!api.isTauri()) return;
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const p = await open({
+        multiple: false,
+        filters: [{ name: "Subtítulos", extensions: ["srt", "vtt"] }],
+        title: "Importar transcripción SRT/VTT",
+      });
+      if (typeof p !== "string") return;
+      explicitSrt = p;
+      lastMessage = `SRT seleccionado: ${p.split(/[/\\]/).pop()}`;
+      await runEnrichment();
+    } catch (e) {
+      error = String(e);
+    }
   }
 
-  async function importImage() {
+  function selectWord(word: string, seg?: Seg | null) {
+    const w = word.trim().toLowerCase();
+    if (w.length < 2) return;
+    selectedWord = w;
+    selectedSeg = seg ?? null;
+    manualKeyword = w;
+  }
+
+  async function importImageForSelection() {
+    const concept = (selectedWord || manualKeyword).trim().toLowerCase();
+    if (!concept) {
+      error = "Selecciona una palabra del texto o escribe un concepto";
+      return;
+    }
+    if (!api.isTauri()) return;
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const p = await open({
+        multiple: false,
+        filters: [{ name: "Imagen", extensions: ["jpg", "jpeg", "png", "webp"] }],
+        title: `Imagen para: ${concept}`,
+      });
+      if (typeof p !== "string") return;
+      await api.visualImportImage(p, concept, [concept], [concept]);
+      await refreshAssets();
+      lastMessage = `Imagen ligada al concepto «${concept}» (original intacto)`;
+      // Re-rank if we already have transcript
+      if (session?.transcript?.segments?.length) {
+        await runEnrichment();
+      }
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  async function importImageGeneric() {
     if (!api.isTauri()) return;
     try {
       const { open } = await import("@tauri-apps/plugin-dialog");
@@ -114,10 +194,16 @@
         filters: [{ name: "Imagen", extensions: ["jpg", "jpeg", "png", "webp"] }],
       });
       if (typeof p !== "string") return;
-      const concepts = promptConcepts();
-      await api.visualImportImage(p, null, concepts, concepts);
+      const def = selectedWord || "concepto";
+      const raw = prompt("Conceptos (coma). Primera = principal", def) ?? def;
+      const concepts = raw
+        .split(",")
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean);
+      await api.visualImportImage(p, concepts[0] ?? null, concepts, concepts);
       await refreshAssets();
-      lastMessage = "Imagen importada a la biblioteca local (original intacto)";
+      lastMessage = `Imagen importada · ${concepts.join(", ")}`;
+      if (session?.transcript?.segments?.length) await runEnrichment();
     } catch (e) {
       error = String(e);
     }
@@ -129,7 +215,12 @@
       const { open } = await import("@tauri-apps/plugin-dialog");
       const p = await open({ directory: true, multiple: false });
       if (typeof p !== "string") return;
-      const concepts = promptConcepts();
+      const def = selectedWord || "general";
+      const raw = prompt("Conceptos para toda la carpeta (coma)", def) ?? def;
+      const concepts = raw
+        .split(",")
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean);
       const res = (await api.visualImportFolder(p, concepts, concepts, false)) as {
         scanned: number;
         imported: number;
@@ -137,20 +228,25 @@
         failed: number;
       };
       await refreshAssets();
-      lastMessage = `Carpeta: ${res.imported} nuevas · ${res.duplicates} duplicados · ${res.failed} fallos (de ${res.scanned})`;
+      lastMessage = `Carpeta: ${res.imported} nuevas · ${res.duplicates} dup · ${res.failed} fallos`;
+      if (session?.transcript?.segments?.length) await runEnrichment();
     } catch (e) {
       error = String(e);
     }
   }
 
   async function exportTranscript() {
-    if (!api.isTauri() || !session?.transcript) {
-      error = "Genera la transcripción primero";
+    if (!api.isTauri() || !session?.transcript?.segments?.length) {
+      error = "Carga o genera la transcripción primero";
       return;
     }
     try {
       const { open } = await import("@tauri-apps/plugin-dialog");
-      const dir = await open({ directory: true, multiple: false, title: "Carpeta para TXT/SRT/JSON" });
+      const dir = await open({
+        directory: true,
+        multiple: false,
+        title: "Carpeta para TXT/SRT/JSON",
+      });
       if (typeof dir !== "string") return;
       const stem =
         projectStore.mediaPath?.split(/[/\\]/).pop()?.replace(/\.[^.]+$/, "") || "transcript";
@@ -178,7 +274,7 @@
       }
       lastMessage =
         status === "accepted"
-          ? "Placement añadido al VisualPlan (no al EDL de cortes)"
+          ? "Imagen aceptada en el VisualPlan"
           : status === "rejected"
             ? "Sugerencia rechazada"
             : `Estado: ${status}`;
@@ -212,7 +308,7 @@
     busy = true;
     try {
       const path = await api.visualRenderPlan(cut, out, projectStore.mediaPath);
-      lastMessage = `Render visual → ${path} (+ manifiesto)`;
+      lastMessage = `Render visual → ${path}`;
       projectStore.statusMessage = lastMessage;
       projectStore.recordExportSuccess(path, projectStore.keptDuration);
       await refreshAssets();
@@ -223,47 +319,119 @@
     }
   }
 
+  /** Tokenize a segment into display tokens (words + separators). */
+  function tokenizeDisplay(text: string): { t: string; word: boolean }[] {
+    const out: { t: string; word: boolean }[] = [];
+    const re = /([A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9]+)|([^A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9]+)/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      if (m[1]) out.push({ t: m[1], word: true });
+      else if (m[2]) out.push({ t: m[2], word: false });
+    }
+    return out;
+  }
+
+  function isKeywordCandidate(w: string): boolean {
+    const l = w.toLowerCase();
+    if (l.length < 4) return false;
+    if (STOP.has(l)) return false;
+    if (/^\d+$/.test(l)) return false;
+    return true;
+  }
+
+  /** Keywords from engine + local freq on transcript */
+  const keywordList = $derived.by(() => {
+    const map = new Map<string, { word: string; score: number; count: number }>();
+    for (const ev of session?.semanticEvents || []) {
+      const label = (ev.label || "").toLowerCase();
+      if (!label || label.length < 3) continue;
+      const prev = map.get(label);
+      const sc = ev.score ?? 0.5;
+      if (!prev || sc > prev.score) {
+        map.set(label, { word: label, score: sc, count: (prev?.count ?? 0) + 1 });
+      } else {
+        prev.count += 1;
+      }
+      for (const t of ev.terms || []) {
+        const tl = t.toLowerCase();
+        if (tl.length < 4 || STOP.has(tl)) continue;
+        if (!map.has(tl)) map.set(tl, { word: tl, score: sc * 0.85, count: 1 });
+      }
+    }
+    for (const seg of session?.transcript?.segments || []) {
+      for (const tok of tokenizeDisplay(seg.text)) {
+        if (!tok.word) continue;
+        const l = tok.t.toLowerCase();
+        if (!isKeywordCandidate(l)) continue;
+        const prev = map.get(l);
+        if (prev) prev.count += 1;
+        else map.set(l, { word: l, score: 0.4, count: 1 });
+      }
+    }
+    return [...map.values()]
+      .sort((a, b) => b.score - a.score || b.count - a.count)
+      .slice(0, 36);
+  });
+
+  const keywordSet = $derived(new Set(keywordList.map((k) => k.word)));
+
   const filteredSegments = $derived.by(() => {
     const segs = session?.transcript?.segments || [];
     const q = transcriptQuery.trim().toLowerCase();
-    if (!q) return segs.slice(0, 40);
-    return segs.filter((s) => s.text.toLowerCase().includes(q)).slice(0, 40);
+    if (!q) return segs;
+    return segs.filter((s) => s.text.toLowerCase().includes(q));
   });
 
   const acceptedCount = $derived(
     session?.suggestions?.filter((s) => s.status === "accepted").length ?? 0,
   );
 
+  const hasText = $derived((session?.transcript?.segments?.length ?? 0) > 0);
+
+  const assetsForSelected = $derived.by(() => {
+    const c = (selectedWord || "").toLowerCase();
+    if (!c) return [] as Asset[];
+    return assets.filter(
+      (a) =>
+        (a.concepts || []).some((x) => x.toLowerCase().includes(c) || c.includes(x.toLowerCase())) ||
+        (a.tags || []).some((x) => x.toLowerCase().includes(c) || c.includes(x.toLowerCase())) ||
+        (a.title || "").toLowerCase().includes(c),
+    );
+  });
+
   $effect(() => {
     void refreshAssets();
   });
 </script>
 
-<div class="panel flex min-h-0 flex-col overflow-hidden border-amber-800/30">
-  <div class="border-b border-surface-800 px-3 py-2.5">
-    <div class="text-sm font-semibold text-surface-100">Visual · Biblioteca</div>
+<div class="panel flex min-h-0 flex-col overflow-hidden border-sky-800/30">
+  <div class="border-b border-surface-800 px-3 py-2">
+    <div class="text-sm font-semibold text-surface-100">Visual · Texto e imágenes</div>
     <div class="text-[10px] text-surface-500">
-      Transcripción → conceptos → imágenes → supervisión humana → VisualPlan → render
+      1) Carga el texto · 2) Pulsa una palabra · 3) Añade imagen · 4) Acepta sugerencias · 5) Render
     </div>
     <div class="mt-2 flex flex-wrap gap-1.5">
       <button type="button" class="btn-primary text-xs" disabled={busy} onclick={runEnrichment}>
-        {busy ? "…" : "Generar sugerencias"}
+        {busy ? "…" : "Cargar texto / sugerencias"}
       </button>
-      <button type="button" class="btn-secondary text-xs" onclick={importImage}>+ Imagen</button>
-      <button type="button" class="btn-secondary text-xs" onclick={importFolder}>+ Carpeta</button>
+      <button type="button" class="btn-secondary text-xs" disabled={busy} onclick={pickSrt}
+        >Importar SRT…</button
+      >
+      <button type="button" class="btn-secondary text-xs" onclick={importImageGeneric}>+ Imagen</button>
+      <button type="button" class="btn-ghost text-xs" onclick={importFolder}>+ Carpeta</button>
       <button
         type="button"
         class="btn-ghost text-xs"
-        disabled={busy || !session?.transcript}
-        onclick={exportTranscript}>Exportar TXT/SRT/JSON</button
+        disabled={!hasText}
+        onclick={exportTranscript}>Exportar TXT/SRT</button
       >
       <button type="button" class="btn-ghost text-xs" disabled={busy} onclick={renderPlan}
         >Render plan</button
       >
     </div>
-    <label class="mt-2 flex items-center gap-2 text-[10px] text-surface-400">
+    <label class="mt-1.5 flex items-center gap-2 text-[10px] text-surface-400">
       <input type="checkbox" class="accent-vigil-500" bind:checked={preferWhisper} />
-      Whisper si no hay SRT (lento; el corte de silencios no lo necesita)
+      Usar Whisper si no hay SRT (lento)
     </label>
   </div>
 
@@ -274,31 +442,207 @@
     <div class="border-b border-surface-800 px-3 py-1 text-[10px] text-surface-400">{lastMessage}</div>
   {/if}
 
+  <!-- Sticky selection bar -->
+  <div
+    class="flex flex-wrap items-center gap-2 border-b border-sky-900/40 bg-sky-950/30 px-3 py-2"
+  >
+    <span class="text-[10px] font-semibold uppercase tracking-wide text-sky-300/90">Selección</span>
+    {#if selectedWord}
+      <span
+        class="rounded-full border border-sky-500/50 bg-sky-900/50 px-2.5 py-0.5 text-xs font-semibold text-sky-100"
+      >
+        {selectedWord}
+      </span>
+      {#if selectedSeg}
+        <span class="font-mono text-[9px] text-surface-500">
+          {selectedSeg.span.start.toFixed(1)}–{selectedSeg.span.end.toFixed(1)}s
+        </span>
+      {/if}
+    {:else}
+      <span class="text-[10px] text-surface-500">Pulsa una palabra del texto o un chip abajo</span>
+    {/if}
+    <input
+      type="text"
+      class="min-w-[7rem] flex-1 rounded border border-surface-700 bg-surface-950 px-2 py-1 text-[11px] text-surface-100"
+      placeholder="O escribe un concepto…"
+      bind:value={manualKeyword}
+      onkeydown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          if (manualKeyword.trim()) selectWord(manualKeyword.trim());
+        }
+      }}
+    />
+    <button
+      type="button"
+      class="btn-primary text-xs"
+      disabled={!(selectedWord || manualKeyword.trim())}
+      onclick={importImageForSelection}
+    >
+      Añadir imagen
+    </button>
+  </div>
+
   <div class="min-h-0 flex-1 space-y-3 overflow-y-auto p-2">
+    <!-- TRANSCRIPT FIRST -->
+    <section>
+      <div class="mb-1 flex items-center justify-between gap-2">
+        <div class="text-[11px] font-semibold text-surface-300">
+          Lo que se dice
+          {#if hasText}
+            <span class="font-normal text-surface-500"
+              >({session?.transcript?.segments?.length} frases)</span
+            >
+          {/if}
+        </div>
+        <label class="flex items-center gap-1 text-[9px] text-surface-500">
+          <input type="checkbox" class="accent-vigil-500" bind:checked={showSourceTime} />
+          tiempos fuente
+        </label>
+      </div>
+
+      {#if !session}
+        <div
+          class="rounded-xl border border-dashed border-surface-700 bg-surface-950/60 px-3 py-4 text-center"
+        >
+          <p class="text-[11px] text-surface-400">
+            Pulsa <strong class="text-surface-200">Cargar texto</strong> o
+            <strong class="text-surface-200">Importar SRT</strong> para ver las palabras del video.
+          </p>
+          <p class="mt-1 text-[10px] text-surface-600">
+            Luego toca una palabra clave y usa «Añadir imagen».
+          </p>
+        </div>
+      {:else if !hasText}
+        <div class="rounded-xl border border-amber-800/40 bg-amber-950/20 px-3 py-3">
+          <p class="text-[11px] text-amber-200/90">
+            Sin texto todavía. Importa un <strong>.srt</strong> del video o marca Whisper y vuelve a
+            cargar.
+          </p>
+          <div class="mt-2 flex flex-wrap gap-1.5">
+            <button type="button" class="btn-secondary text-[10px]" onclick={pickSrt}
+              >Importar SRT…</button
+            >
+            <button
+              type="button"
+              class="btn-ghost text-[10px]"
+              onclick={() => {
+                preferWhisper = true;
+                void runEnrichment();
+              }}>Cargar con Whisper</button
+            >
+          </div>
+          {#if session.transcript?.warnings?.[0]}
+            <p class="mt-2 text-[9px] text-surface-500">{session.transcript.warnings[0]}</p>
+          {/if}
+        </div>
+      {:else}
+        {#if session.timeMap}
+          <p class="mb-1 text-[9px] text-surface-500">
+            {session.transcript?.engine || "texto"} · fuente
+            {session.timeMap.sourceDuration.toFixed(0)}s → salida
+            {session.timeMap.outputDuration.toFixed(0)}s
+          </p>
+        {/if}
+        <input
+          type="search"
+          class="mb-1.5 w-full rounded border border-surface-800 bg-surface-950 px-2 py-1 text-[10px] text-surface-200"
+          placeholder="Buscar en el texto…"
+          bind:value={transcriptQuery}
+        />
+        <div
+          class="max-h-52 space-y-2 overflow-y-auto rounded-xl border border-surface-800 bg-surface-950/90 p-2"
+        >
+          {#each filteredSegments as seg, i (seg.id ?? i)}
+            <div
+              class="rounded-lg px-1.5 py-1 text-[11px] leading-relaxed
+                {selectedSeg === seg ? 'bg-sky-950/50 ring-1 ring-sky-700/50' : ''}"
+            >
+              <div class="mb-0.5 font-mono text-[9px] text-surface-600">
+                {seg.span.start.toFixed(1)}–{seg.span.end.toFixed(1)}s
+                {#if showSourceTime}<span class="text-surface-700"> fuente</span>{/if}
+              </div>
+              <p class="text-surface-200">
+                {#each tokenizeDisplay(seg.text) as tok}
+                  {#if tok.word}
+                    {@const low = tok.t.toLowerCase()}
+                    {@const isKw = keywordSet.has(low) || isKeywordCandidate(low)}
+                    <button
+                      type="button"
+                      class="rounded px-0.5 transition
+                        {selectedWord === low
+                        ? 'bg-sky-500 text-white'
+                        : isKw
+                          ? 'bg-sky-900/40 text-sky-100 hover:bg-sky-700/50'
+                          : 'text-surface-300 hover:bg-surface-800 hover:text-white'}"
+                      title={isKw
+                        ? `Palabra clave — clic para añadir imagen a «${low}»`
+                        : `Clic para usar «${low}» como concepto`}
+                      onclick={() => selectWord(tok.t, seg)}
+                    >{tok.t}</button
+                    >
+                  {:else}<span class="text-surface-400">{tok.t}</span>{/if}
+                {/each}
+              </p>
+            </div>
+          {/each}
+        </div>
+      {/if}
+    </section>
+
+    <!-- KEYWORD CHIPS -->
+    {#if keywordList.length > 0}
+      <section>
+        <div class="mb-1 text-[11px] font-semibold text-surface-300">
+          Palabras clave ({keywordList.length})
+        </div>
+        <p class="mb-1.5 text-[9px] text-surface-500">
+          Destacadas del texto. Clic = seleccionar · luego «Añadir imagen».
+        </p>
+        <div class="flex flex-wrap gap-1">
+          {#each keywordList as k (k.word)}
+            <button
+              type="button"
+              class="rounded-full border px-2 py-0.5 text-[10px] font-medium transition
+                {selectedWord === k.word
+                ? 'border-sky-400 bg-sky-600 text-white'
+                : 'border-surface-700 bg-surface-900 text-surface-300 hover:border-sky-600 hover:text-sky-100'}"
+              onclick={() => selectWord(k.word)}
+              title={`score ${Math.round(k.score * 100)} · ${k.count}×`}
+            >
+              {k.word}
+            </button>
+          {/each}
+        </div>
+      </section>
+    {/if}
+
+    <!-- LIBRARY filtered by selection -->
     <section>
       <div class="mb-1 text-[11px] font-semibold text-surface-300">
-        Biblioteca ({assets.length})
+        Biblioteca
+        {#if selectedWord && assetsForSelected.length}
+          <span class="font-normal text-sky-400/90"
+            >· {assetsForSelected.length} para «{selectedWord}»</span
+          >
+        {:else}
+          <span class="font-normal text-surface-500">({assets.length})</span>
+        {/if}
       </div>
       {#if assets.length === 0}
         <p class="text-[10px] text-surface-500">
-          Importa JPG/PNG con conceptos (ej. inflación, alimentos). No se descarga de Internet.
-          Los originales no se modifican.
+          Aún no hay imágenes. Selecciona una palabra y pulsa <strong>Añadir imagen</strong>. No se
+          descarga de Internet; el original no se modifica.
         </p>
       {:else}
+        {@const list = selectedWord && assetsForSelected.length ? assetsForSelected : assets}
         <ul class="space-y-1">
-          {#each assets.slice(0, 12) as a (a.id)}
+          {#each list.slice(0, 10) as a (a.id)}
             <li class="rounded-lg border border-surface-800 bg-surface-950/50 px-2 py-1.5 text-[10px]">
-              <div class="flex items-center justify-between gap-2">
-                <div class="font-medium text-surface-200">{a.title}</div>
-                {#if a.licenseStatus === "unknown"}
-                  <span class="text-[9px] text-amber-400">lic. ?</span>
-                {/if}
-              </div>
+              <div class="font-medium text-surface-200">{a.title}</div>
               <div class="text-surface-500">
                 {(a.concepts || []).join(", ") || (a.tags || []).join(", ") || "—"}
-                {#if a.timesUsed}
-                  · usada {a.timesUsed}×
-                {/if}
+                {#if a.timesUsed}· {a.timesUsed}×{/if}
               </div>
             </li>
           {/each}
@@ -306,57 +650,7 @@
       {/if}
     </section>
 
-    {#if session?.transcript}
-      <section>
-        <div class="mb-1 flex items-center justify-between gap-2">
-          <div class="text-[11px] font-semibold text-surface-300">Transcripción</div>
-          <label class="flex items-center gap-1 text-[9px] text-surface-500">
-            <input type="checkbox" class="accent-vigil-500" bind:checked={showSourceTime} />
-            tiempos fuente
-          </label>
-        </div>
-        <p class="mb-1 text-[9px] text-surface-500">
-          Estado: {session.transcript.status}
-          {#if session.transcript.engine}
-            · {session.transcript.engine}
-          {/if}
-          {#if session.timeMap}
-            · fuente {session.timeMap.sourceDuration.toFixed(0)}s → salida
-            {session.timeMap.outputDuration.toFixed(0)}s
-          {/if}
-        </p>
-        {#if session.transcript.warnings?.length}
-          <p class="mb-1 text-[9px] text-amber-400/90">{session.transcript.warnings[0]}</p>
-        {/if}
-        <input
-          type="search"
-          class="mb-1 w-full rounded border border-surface-800 bg-surface-950 px-2 py-1 text-[10px] text-surface-200"
-          placeholder="Buscar en transcripción…"
-          bind:value={transcriptQuery}
-        />
-        <div class="max-h-36 space-y-1 overflow-y-auto rounded-lg bg-surface-950/80 p-2 text-[10px]">
-          {#each filteredSegments as seg}
-            <div>
-              <span class="font-mono text-surface-500"
-                >{seg.span.start.toFixed(1)}–{seg.span.end.toFixed(1)}s
-                {#if showSourceTime}
-                  <span class="text-surface-600">(fuente)</span>
-                {/if}</span
-              >
-              {seg.text}
-            </div>
-          {:else}
-            <p class="text-surface-500">Vacía — importa .srt o activa Whisper.</p>
-          {/each}
-        </div>
-        {#if lastArtifacts.length}
-          <p class="mt-1 truncate text-[9px] text-surface-600" title={lastArtifacts.join("\n")}>
-            Artefactos: {lastArtifacts.length} archivo(s)
-          </p>
-        {/if}
-      </section>
-    {/if}
-
+    <!-- SUGGESTIONS -->
     <section>
       <div class="mb-1 text-[11px] font-semibold text-surface-300">
         Sugerencias ({session?.suggestions?.length ?? 0})
@@ -366,8 +660,8 @@
       </div>
       {#if !session?.suggestions?.length}
         <p class="text-[10px] text-surface-500">
-          1) Analiza en Silencios · 2) Importa imágenes con conceptos · 3) Generar sugerencias · 4)
-          Acepta/rechaza · 5) Exporta corte · 6) Render plan
+          Cuando haya texto + imágenes con el mismo concepto, aparecerán aquí para aceptar o
+          rechazar.
         </p>
       {:else}
         <ul class="space-y-2">
@@ -383,14 +677,11 @@
               <div class="font-semibold text-surface-100">
                 {s.assetTitle || s.assetId}
                 <span class="font-mono text-surface-500">
-                  · out {s.outputSpan.start.toFixed(1)}–{s.outputSpan.end.toFixed(1)}s
-                  · src {s.sourceSpan.start.toFixed(1)}–{s.sourceSpan.end.toFixed(1)}s · score
+                  · {s.outputSpan.start.toFixed(1)}–{s.outputSpan.end.toFixed(1)}s · score
                   {Math.round(s.matchScore * 100)}
                 </span>
               </div>
-              <div class="mt-0.5 text-surface-500" title="Razones heurísticas, no probabilidad">
-                {(s.matchReasons || []).join(" · ")}
-              </div>
+              <div class="mt-0.5 text-surface-500">{(s.matchReasons || []).join(" · ")}</div>
               <div class="mt-1.5 flex gap-1">
                 <button
                   type="button"
@@ -404,13 +695,6 @@
                   disabled={s.status === "rejected"}
                   onclick={() => setStatus(s.id, "rejected")}>Rechazar</button
                 >
-                {#if s.status === "accepted" || s.status === "rejected"}
-                  <button
-                    type="button"
-                    class="btn-ghost text-[10px] text-surface-400"
-                    onclick={() => setStatus(s.id, "suggested")}>Deshacer</button
-                  >
-                {/if}
               </div>
             </li>
           {/each}
@@ -419,17 +703,11 @@
     </section>
 
     {#if session?.plan}
-      <section class="rounded-lg border border-surface-800 bg-surface-950/40 p-2 text-[10px] text-surface-400">
-        <div class="font-semibold text-surface-300">VisualPlan (separado del EDL)</div>
-        <div>
-          Placements: {session.plan.placements?.length ?? 0} · v{session.plan.version ?? 1}
-        </div>
-        {#if session.plan.warnings?.length}
-          <div class="mt-0.5 text-amber-400/90">{session.plan.warnings.join(" · ")}</div>
-        {/if}
-        <p class="mt-1 text-[9px] text-surface-600">
-          El EDL decide qué del original permanece. El plan decide qué imagen va sobre la salida.
-        </p>
+      <section
+        class="rounded-lg border border-surface-800 bg-surface-950/40 p-2 text-[10px] text-surface-400"
+      >
+        <div class="font-semibold text-surface-300">VisualPlan · v{session.plan.version ?? 1}</div>
+        <div>Placements: {session.plan.placements?.length ?? 0}</div>
       </section>
     {/if}
   </div>
