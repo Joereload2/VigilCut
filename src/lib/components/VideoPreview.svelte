@@ -403,13 +403,16 @@
         <div
           class="pointer-events-none absolute left-3 top-3 rounded-full border border-vigil-600/50 bg-vigil-950/90 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-vigil-300"
         >
-          Resultado · sin silencios cortados
+          Resultado · pausas fuera
+          {#if projectStore.autoCutCount > 0}
+            · {projectStore.autoCutCount} cortes
+          {/if}
         </div>
       {:else if ready}
         <div
           class="pointer-events-none absolute left-3 top-3 rounded-full border border-surface-600/50 bg-surface-950/80 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-surface-300"
         >
-          Original
+          Original (con silencios)
         </div>
       {/if}
 
