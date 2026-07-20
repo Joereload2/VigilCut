@@ -208,7 +208,9 @@
       }
       projectStore.busy = true;
       projectStore.error = null;
+      projectStore.clearProgress();
       projectStore.statusMessage = "Exportando video…";
+      projectStore.progressPercent = 5;
       // EDL-first: prefer keepRanges from engine; segments only as override surface
       const result = await api.exportVideo({
         mediaPath: projectStore.mediaPath,
@@ -220,6 +222,7 @@
         segments: projectStore.segments,
         exportOptions: projectStore.project?.preset.export,
         colorOptions: projectStore.project?.preset.color,
+        audioOptions: projectStore.project?.preset.audio,
         hasAudio: projectStore.media?.hasAudio ?? true,
       });
       // Multi-artifact factory pack (chapters, shorts, events, edl, manifest)
@@ -232,10 +235,26 @@
       }
       projectStore.recordExportSuccess(result.outputPath, result.duration);
     } catch (e) {
-      projectStore.error = String(e);
-      projectStore.statusMessage = "Error al exportar";
+      const msg = String(e);
+      if (msg.toLowerCase().includes("cancel")) {
+        projectStore.statusMessage = "Exportación cancelada";
+        projectStore.error = null;
+      } else {
+        projectStore.error = msg;
+        projectStore.statusMessage = "Error al exportar";
+      }
     } finally {
       projectStore.busy = false;
+      projectStore.clearProgress();
+    }
+  }
+
+  async function cancelBusyJob() {
+    try {
+      await api.cancelJob();
+      projectStore.statusMessage = "Cancelando…";
+    } catch (e) {
+      console.warn(e);
     }
   }
 </script>
@@ -387,6 +406,13 @@
               · {projectStore.progressStage}{/if}
           </div>
         {/if}
+        <button
+          type="button"
+          class="btn-ghost mt-3 w-full text-xs text-cut hover:bg-cut/10"
+          onclick={cancelBusyJob}
+        >
+          Cancelar
+        </button>
       </div>
     </div>
   {/if}

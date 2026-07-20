@@ -3,6 +3,7 @@ use tauri::State;
 
 use crate::error::AppResult;
 use crate::ffmpeg::Ffmpeg;
+use crate::job_control::JobControl;
 use crate::state::AppState;
 
 #[derive(Serialize)]
@@ -83,4 +84,11 @@ pub fn get_workspace_paths(_state: State<'_, AppState>) -> AppResult<WorkspacePa
         cache: AppState::cache_dir()?.to_string_lossy().into_owned(),
         models: AppState::models_dir()?.to_string_lossy().into_owned(),
     })
+}
+
+/// Cancel the current long job (analysis / clipping / export encode).
+#[tauri::command]
+pub fn cancel_job(jobs: State<'_, JobControl>) -> AppResult<()> {
+    jobs.request_cancel();
+    Ok(())
 }

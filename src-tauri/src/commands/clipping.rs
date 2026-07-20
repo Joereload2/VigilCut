@@ -10,6 +10,7 @@ use tauri::{AppHandle, State};
 use crate::commands::analyze::AnalysisCache;
 use crate::error::{AppError, AppResult};
 use crate::ffmpeg::Ffmpeg;
+use crate::job_control::JobControl;
 use crate::models::clipping::{
     ClipCandidate, ClipExportResult, ClipFraming, ClipReviewStatus, ClippingOptions, ClippingRun,
 };
@@ -59,12 +60,14 @@ where
 #[tauri::command]
 pub async fn run_clipping(
     app: AppHandle,
+    jobs: State<'_, JobControl>,
     media_path: String,
     options: Option<ClippingOptions>,
     analysis_run_id: Option<String>,
     cache: State<'_, ClippingCache>,
     analysis_cache: State<'_, AnalysisCache>,
 ) -> AppResult<ClippingRun> {
+    jobs.begin();
     let opts = options.unwrap_or_default();
     let reused = analysis_run_id.as_ref().and_then(|id| {
         analysis_cache
@@ -82,7 +85,11 @@ pub async fn run_clipping(
         reused.as_ref(),
         &mut on_prog,
     )
-    .await?;
+    .await;
+    if jobs.is_cancelled() {
+        return Err(AppError::Cancelled);
+    }
+    let run = run?;
     put_run(&cache, run)
 }
 

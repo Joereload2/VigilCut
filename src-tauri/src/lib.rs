@@ -1,6 +1,7 @@
 mod commands;
 mod error;
 pub mod ffmpeg;
+mod job_control;
 pub mod models;
 pub mod pipeline;
 mod state;
@@ -8,6 +9,7 @@ mod state;
 use commands::analyze::AnalysisCache;
 use commands::clipping::ClippingCache;
 use commands::watch::InboxWatchState;
+use job_control::JobControl;
 use state::AppState;
 use tauri::Manager;
 
@@ -29,11 +31,13 @@ pub fn run() {
         .manage(AnalysisCache::default())
         .manage(ClippingCache::default())
         .manage(InboxWatchState::default())
+        .manage(JobControl::default())
         .invoke_handler(tauri::generate_handler![
             // System
             commands::system::get_app_info,
             commands::system::check_ffmpeg,
             commands::system::get_workspace_paths,
+            commands::system::cancel_job,
             // Media
             commands::media::probe_media,
             commands::media::extract_waveform,

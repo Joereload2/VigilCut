@@ -2,8 +2,9 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{AppError, AppResult};
 use crate::ffmpeg::Ffmpeg;
+use crate::job_control::JobControl;
 use crate::models::edl::Edl;
-use crate::models::preset::{ColorOptions, ExportOptions};
+use crate::models::preset::{AudioEnhanceOptions, ColorOptions, ExportOptions};
 use crate::models::segment::{Segment, SegmentDecision};
 
 #[derive(Debug, Clone)]
@@ -86,11 +87,37 @@ pub fn resolve_keep_ranges(
     ))
 }
 
+/// Build audio enhance chain after aselect/asetpts (comma-separated FFmpeg filters).
+pub fn audio_enhance_filters(audio: &AudioEnhanceOptions) -> Vec<String> {
+    if !audio.enabled {
+        return Vec::new();
+    }
+    let mut filters = Vec::new();
+    if let Some(hz) = audio.highpass_hz {
+        filters.push(format!("highpass=f={hz}"));
+    }
+    if audio.denoise {
+        let nr = (audio.denoise_strength * 20.0).clamp(1.0, 30.0);
+        filters.push(format!("afftdn=nr={nr:.1}"));
+    }
+    if audio.compress {
+        filters.push("acompressor=threshold=-18dB:ratio=3:attack=20:release=250".into());
+    }
+    if audio.normalize {
+        filters.push(format!(
+            "loudnorm=I={}:TP=-1.5:LRA=11",
+            audio.target_lufs
+        ));
+    }
+    filters
+}
+
 /// Build a single-pass select/aselect filter (stable with dozens of cuts).
 pub fn build_export_filter(
     keep: &[(f64, f64)],
     has_audio: bool,
     color: &ColorOptions,
+    audio: Option<&AudioEnhanceOptions>,
 ) -> AppResult<String> {
     if keep.is_empty() {
         return Err(AppError::Invalid(
@@ -127,9 +154,15 @@ pub fn build_export_filter(
     }
 
     if has_audio {
-        parts.push(format!(
-            "[0:a]aselect='{expr}',asetpts=N/SR/TB[aout]"
-        ));
+        let mut chain = format!("[0:a]aselect='{expr}',asetpts=N/SR/TB");
+        if let Some(a) = audio {
+            for f in audio_enhance_filters(a) {
+                chain.push(',');
+                chain.push_str(&f);
+            }
+        }
+        chain.push_str("[aout]");
+        parts.push(chain);
     }
 
     Ok(parts.join(";"))
@@ -144,6 +177,23 @@ pub async fn export_keep_ranges(
     color: &ColorOptions,
     has_audio: bool,
 ) -> AppResult<PathBuf> {
+    export_keep_ranges_with_audio(input, output, keep, export_opts, color, None, has_audio, None)
+        .await
+}
+
+pub async fn export_keep_ranges_with_audio(
+    input: &Path,
+    output: &Path,
+    keep: &[(f64, f64)],
+    export_opts: &ExportOptions,
+    color: &ColorOptions,
+    audio: Option<&AudioEnhanceOptions>,
+    has_audio: bool,
+    job: Option<&JobControl>,
+) -> AppResult<PathBuf> {
+    if let Some(j) = job {
+        j.check()?;
+    }
     let ffmpeg = Ffmpeg::new()?;
     let keep = merge_keep_ranges(keep.to_vec());
     let estimated: f64 = keep.iter().map(|(s, e)| e - s).sum();
@@ -177,11 +227,14 @@ pub async fn export_keep_ranges(
             args.extend(["-c".into(), "copy".into()]);
         }
         args.push(output.to_string_lossy().into_owned());
-        ffmpeg.run_expecting(&args, Some(output)).await?;
+        ffmpeg
+            .run_expecting_tracked(&args, Some(output), job)
+            .await?;
         return Ok(output.to_path_buf());
     }
 
-    let filter = build_export_filter(&keep, has_audio, color)?;
+    // When audio enhance is on, always re-encode audio (cannot stream-copy).
+    let filter = build_export_filter(&keep, has_audio, color, audio)?;
     let mut args = vec![
         "-y".into(),
         "-i".into(),
@@ -218,13 +271,16 @@ pub async fn export_keep_ranges(
     args.push(output.to_string_lossy().into_owned());
 
     tracing::info!(
-        "Exporting {} keep ranges (~{:.1}s) -> {}",
+        "Exporting {} keep ranges (~{:.1}s) -> {} (audio_enhance={})",
         keep.len(),
         estimated,
-        output.display()
+        output.display(),
+        audio.map(|a| a.enabled).unwrap_or(false)
     );
 
-    ffmpeg.run_expecting(&args, Some(output)).await?;
+    ffmpeg
+        .run_expecting_tracked(&args, Some(output), job)
+        .await?;
     if !output.exists() {
         return Err(AppError::Ffmpeg(format!(
             "Export finished but file missing: {}",
@@ -332,10 +388,35 @@ mod tests {
 
     #[test]
     fn filter_escapes_commas() {
-        let f = build_export_filter(&[(1.0, 2.0), (5.0, 6.0)], true, &ColorOptions::default())
+        let f = build_export_filter(
+            &[(1.0, 2.0), (5.0, 6.0)],
+            true,
+            &ColorOptions::default(),
+            None,
+        )
             .unwrap();
         assert!(f.contains("between(t\\,"));
         assert!(f.contains("[vout]"));
+        assert!(f.contains("[aout]"));
+    }
+
+    #[test]
+    fn audio_enhance_appended_to_chain() {
+        let mut audio = AudioEnhanceOptions::default();
+        audio.enabled = true;
+        audio.denoise = true;
+        audio.normalize = true;
+        audio.highpass_hz = Some(80);
+        let f = build_export_filter(
+            &[(0.0, 5.0)],
+            true,
+            &ColorOptions::default(),
+            Some(&audio),
+        )
+        .unwrap();
+        assert!(f.contains("highpass=f=80"));
+        assert!(f.contains("afftdn="));
+        assert!(f.contains("loudnorm="));
         assert!(f.contains("[aout]"));
     }
 

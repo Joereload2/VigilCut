@@ -269,8 +269,14 @@ class ProjectStore {
         this.focusReviewStart();
       }
     } catch (e) {
-      this.error = String(e);
-      this.statusMessage = "Error al abrir";
+      const msg = String(e);
+      if (msg.toLowerCase().includes("cancel")) {
+        this.statusMessage = "Análisis cancelado";
+        this.error = null;
+      } else {
+        this.error = msg;
+        this.statusMessage = "Error al abrir";
+      }
     } finally {
       this.busy = false;
       this.clearProgress();
@@ -300,7 +306,13 @@ class ProjectStore {
       }
       this.focusReviewStart();
     } catch (e) {
-      this.error = String(e);
+      const msg = String(e);
+      if (msg.toLowerCase().includes("cancel")) {
+        this.statusMessage = "Análisis cancelado";
+        this.error = null;
+      } else {
+        this.error = msg;
+      }
     } finally {
       this.busy = false;
       this.clearProgress();

@@ -4,6 +4,7 @@ use std::sync::Mutex;
 use tauri::{AppHandle, State};
 
 use crate::error::{AppError, AppResult};
+use crate::job_control::JobControl;
 use crate::models::analysis::{AnalysisRun, ResolveExceptionRequest};
 use crate::models::edl::PolicyConfig;
 use crate::models::progress;
@@ -65,11 +66,13 @@ fn put_run(cache: &AnalysisCache, run: AnalysisRun) -> AppResult<AnalysisRun> {
 #[tauri::command]
 pub async fn run_analysis(
     app: AppHandle,
+    jobs: State<'_, JobControl>,
     path: String,
     options: Option<SilenceDetectionOptions>,
     policy: Option<PolicyConfig>,
     cache: State<'_, AnalysisCache>,
 ) -> AppResult<AnalysisRun> {
+    jobs.begin();
     let pol = policy.unwrap_or_else(|| {
         options
             .as_ref()
@@ -85,7 +88,11 @@ pub async fn run_analysis(
         &pol,
         &mut on_prog,
     )
-    .await?;
+    .await;
+    if jobs.is_cancelled() {
+        return Err(AppError::Cancelled);
+    }
+    let run = run?;
     put_run(&cache, run)
 }
 

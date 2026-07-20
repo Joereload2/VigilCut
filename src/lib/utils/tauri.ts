@@ -263,6 +263,7 @@ export async function exportVideo(params: {
   keepRanges?: [number, number][];
   exportOptions?: ExportOptions;
   colorOptions?: ColorOptions;
+  audioOptions?: import("$lib/types").AudioEnhanceOptions;
   hasAudio?: boolean;
 }): Promise<{ outputPath: string; duration: number; keepCount: number }> {
   return invoke("export_video", {
@@ -272,8 +273,14 @@ export async function exportVideo(params: {
     keepRanges: params.keepRanges ?? null,
     exportOptions: params.exportOptions ?? null,
     colorOptions: params.colorOptions ?? null,
+    audioOptions: params.audioOptions ?? null,
     hasAudio: params.hasAudio ?? null,
   });
+}
+
+export async function cancelJob(): Promise<void> {
+  if (!isTauri()) return;
+  return invoke("cancel_job");
 }
 
 export async function listPresets(): Promise<ProcessingPreset[]> {
