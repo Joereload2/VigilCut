@@ -94,8 +94,9 @@
 
   const selected = $derived(visible.find((c) => c.id === selectedId) ?? visible[0] ?? null);
 
-  // Sync list selection → player (do not clobber live pan on same clip)
+  // Sync list selection → player (never while user is dragging the frame)
   $effect(() => {
+    if (clippingUi.dragging) return;
     const s = selected;
     if (!s) {
       clippingUi.select(null);
@@ -106,18 +107,25 @@
       clippingUi.select(s);
       return;
     }
-    // Same clip: refresh metadata; keep manual framing while dragging/saving
-    if (cur.framing.mode === "manual") {
-      clippingUi.select({ ...s, framing: cur.framing });
+    // Same clip: keep live focus — only refresh non-framing fields
+    if (cur.framing.mode === "manual" || clippingUi.focusX !== 0.5 || clippingUi.focusY !== 0.42) {
+      clippingUi.mergeSelected(s);
     } else {
       clippingUi.select(s);
     }
   });
 
-  // ShortPlayer pan → persist framing on the run
+  // ShortPlayer → persist framing + optimistic run update
   $effect(() => {
     clippingUi.setFramingSaver(async (clipId, framing) => {
       if (!run) return;
+      // Optimistic so list / re-sync don't wipe the frame
+      run = {
+        ...run,
+        candidates: run.candidates.map((c) =>
+          c.id === clipId ? { ...c, framing: { ...framing } } : c,
+        ),
+      };
       try {
         const updated = await api.updateClipFraming(run.id, clipId, framing);
         run = {
