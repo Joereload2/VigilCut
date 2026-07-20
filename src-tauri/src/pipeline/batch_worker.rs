@@ -3,18 +3,19 @@ use std::path::{Path, PathBuf};
 use crate::error::AppResult;
 use crate::models::batch::{BatchFileResult, BatchJob, BatchStatus};
 use crate::models::edl::PolicyConfig;
+use crate::models::exception_mode::ExceptionHandlingMode;
 use crate::models::preset::{ColorOptions, ExportOptions};
 use crate::models::segment::{Segment, SegmentDecision};
 use crate::pipeline::artifacts::write_run_artifacts;
 use crate::pipeline::engine::{accept_all_exceptions, run_silence_analysis};
 use crate::pipeline::export::export_from_edl;
 
-/// Process one media file: analyze → force exceptions (factory) → export + artifacts.
+/// Process one media file according to exception handling mode.
 pub async fn process_one_file(
     media_path: &Path,
     output_dir: &Path,
     policy: &PolicyConfig,
-    auto_accept_exceptions: bool,
+    mode: ExceptionHandlingMode,
     export_opts: &ExportOptions,
     color: &ColorOptions,
 ) -> BatchFileResult {
@@ -25,16 +26,7 @@ pub async fn process_one_file(
         .unwrap_or("output");
     let out_path = output_dir.join(format!("{stem}-editado.mp4"));
 
-    match run_one(
-        media_path,
-        &out_path,
-        policy,
-        auto_accept_exceptions,
-        export_opts,
-        color,
-    )
-    .await
-    {
+    match run_one(media_path, &out_path, policy, mode, export_opts, color).await {
         Ok(r) => r,
         Err(e) => BatchFileResult {
             media_path: path_str,
@@ -46,15 +38,31 @@ pub async fn process_one_file(
             source_duration: 0.0,
             output_duration: 0.0,
             error: Some(e.to_string()),
+            exception_mode: mode.as_str().into(),
+            needs_review: false,
+            conservative_export: false,
         },
     }
+}
+
+/// Legacy signature used by older call sites — maps bool to mode.
+pub async fn process_one_file_legacy(
+    media_path: &Path,
+    output_dir: &Path,
+    policy: &PolicyConfig,
+    auto_accept_exceptions: bool,
+    export_opts: &ExportOptions,
+    color: &ColorOptions,
+) -> BatchFileResult {
+    let mode = ExceptionHandlingMode::from_auto_accept(auto_accept_exceptions);
+    process_one_file(media_path, output_dir, policy, mode, export_opts, color).await
 }
 
 async fn run_one(
     media_path: &Path,
     out_path: &Path,
     policy: &PolicyConfig,
-    auto_accept_exceptions: bool,
+    mode: ExceptionHandlingMode,
     export_opts: &ExportOptions,
     color: &ColorOptions,
 ) -> AppResult<BatchFileResult> {
@@ -63,10 +71,40 @@ async fn run_one(
     let auto_cuts = run.stats.auto_cut_count;
     let pending_before = run.stats.pending_exception_count;
 
-    let mut exceptions_forced = 0;
-    if auto_accept_exceptions && pending_before > 0 {
-        run = accept_all_exceptions(run);
-        exceptions_forced = pending_before;
+    let mut exceptions_forced = 0usize;
+    let mut conservative_export = false;
+
+    match mode {
+        ExceptionHandlingMode::Safe => {
+            // Keep pending as keep (EDL already does this via effective_removes).
+            conservative_export = pending_before > 0;
+        }
+        ExceptionHandlingMode::Supervised => {
+            if pending_before > 0 {
+                return Ok(BatchFileResult {
+                    media_path: path_str,
+                    ok: false,
+                    output_path: None,
+                    auto_cuts,
+                    exceptions_pending: pending_before,
+                    exceptions_forced: 0,
+                    source_duration: run.duration,
+                    output_duration: 0.0,
+                    error: Some(format!(
+                        "Requiere revisión: {pending_before} excepción(es) pendiente(s). Modo supervisado no exporta hasta resolver."
+                    )),
+                    exception_mode: mode.as_str().into(),
+                    needs_review: true,
+                    conservative_export: false,
+                });
+            }
+        }
+        ExceptionHandlingMode::Aggressive => {
+            if pending_before > 0 {
+                run = accept_all_exceptions(run);
+                exceptions_forced = pending_before;
+            }
+        }
     }
 
     let has_audio = true;
@@ -75,8 +113,8 @@ async fn run_one(
         std::fs::create_dir_all(parent)?;
     }
 
-    // Factory path: EDL is the export source of truth (not Segment UI state).
-    export_from_edl(
+    // EDL is the export source of truth.
+    let final_path = export_from_edl(
         media_path,
         out_path,
         &run.edl,
@@ -88,13 +126,18 @@ async fn run_one(
 
     let artifacts = write_run_artifacts(
         &run,
-        out_path,
+        &final_path,
         media_path,
-        true, // export real short clips
+        true,
         serde_json::json!({
             "autoCuts": auto_cuts,
             "exceptionsForced": exceptions_forced,
+            "exceptionsPending": run.stats.pending_exception_count,
+            "exceptionMode": mode.as_str(),
+            "conservativeExport": conservative_export,
             "factory": true,
+            "engineVersion": env!("CARGO_PKG_VERSION"),
+            "originalUnmodified": true,
         }),
     )
     .await?;
@@ -103,13 +146,16 @@ async fn run_one(
     Ok(BatchFileResult {
         media_path: path_str,
         ok: true,
-        output_path: Some(out_path.to_string_lossy().into_owned()),
+        output_path: Some(final_path.to_string_lossy().into_owned()),
         auto_cuts,
         exceptions_pending: run.stats.pending_exception_count,
         exceptions_forced,
         source_duration: run.duration,
         output_duration: run.edl.output_duration,
         error: None,
+        exception_mode: mode.as_str().into(),
+        needs_review: false,
+        conservative_export,
     })
 }
 
@@ -148,6 +194,8 @@ pub async fn run_batch_job(mut job: BatchJob, policy: PolicyConfig) -> BatchJob 
     let color = ColorOptions::default();
     let out_dir = PathBuf::from(&job.output_dir);
     let _ = std::fs::create_dir_all(&out_dir);
+    let mode = job.effective_mode();
+    let mut needs_review_count = 0usize;
 
     for (i, path_str) in job.media_paths.clone().iter().enumerate() {
         job.current_file = Some(path_str.clone());
@@ -159,13 +207,19 @@ pub async fn run_batch_job(mut job: BatchJob, policy: PolicyConfig) -> BatchJob 
             &path,
             &out_dir,
             &policy,
-            job.auto_accept_exceptions,
+            mode,
             &export_opts,
             &color,
         )
         .await;
 
-        if result.ok {
+        if result.needs_review {
+            needs_review_count += 1;
+            job.failed += 1;
+            if let Some(err) = &result.error {
+                job.errors.push(format!("{path_str}: {err}"));
+            }
+        } else if result.ok {
             job.completed += 1;
         } else {
             job.failed += 1;
@@ -179,7 +233,11 @@ pub async fn run_batch_job(mut job: BatchJob, policy: PolicyConfig) -> BatchJob 
     }
 
     job.current_file = None;
-    job.status = if job.failed == 0 && job.completed > 0 {
+    job.status = if needs_review_count > 0 && job.completed == 0 {
+        BatchStatus::NeedsReview
+    } else if needs_review_count > 0 {
+        BatchStatus::NeedsReview
+    } else if job.failed == 0 && job.completed > 0 {
         BatchStatus::Completed
     } else if job.completed == 0 {
         BatchStatus::Failed

@@ -1,10 +1,10 @@
 [package]
 name = "vigilcut"
-version = "1.0.0"
+version = "1.1.0"
 description = "VigilCut Factory — local AI content post-production engine"
 authors = ["VigilCut Contributors"]
 license = "MIT"
-repository = "https://github.com/vigilcut/vigilcut"
+repository = "https://github.com/Joereload2/VigilCut"
 edition = "2021"
 rust-version = "1.77"
 default-run = "vigilcut"

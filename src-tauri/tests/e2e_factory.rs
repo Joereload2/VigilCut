@@ -131,7 +131,7 @@ async fn e2e_batch_process_one_file() {
             min_silence_duration: 0.3,
             ..PolicyConfig::default()
         },
-        true,
+        vigilcut_lib::models::exception_mode::ExceptionHandlingMode::Safe,
         &ExportOptions {
             crf: 28,
             preset: "ultrafast".into(),

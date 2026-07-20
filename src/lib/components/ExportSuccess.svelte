@@ -58,6 +58,9 @@
         ✓
       </div>
       <h2 class="mt-3 text-center text-lg font-semibold text-white">Video exportado</h2>
+      <p class="mt-1 text-center text-sm text-keep/90">
+        Tu video original no fue modificado.
+      </p>
       <p class="mt-1 text-center text-sm text-surface-400">
         Junto al original: <span class="text-surface-200">.mp4</span>
         + <span class="text-surface-200">.chapters.txt</span>

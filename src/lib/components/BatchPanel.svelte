@@ -38,6 +38,8 @@
   let watchMsg = $state("");
   let packs = $state<{ id: string; name: string }[]>([]);
   let policyId = $state("factory");
+  /** safe = default (keep doubts); supervised = no export if pending; aggressive = force-cut */
+  let exceptionMode = $state<"safe" | "supervised" | "aggressive">("safe");
 
   onMount(() => {
     if (!api.isTauri()) return;
@@ -106,10 +108,18 @@
       });
       if (!out || typeof out !== "string") return;
 
-      const started = await api.queueBatchJob(paths, out, true, policyId);
+      if (exceptionMode === "aggressive") {
+        const { ask } = await import("@tauri-apps/plugin-dialog");
+        const ok = await ask(
+          "Modo AGRESIVO: las dudas de la IA se cortarán automáticamente. Puede eliminar material dudoso. ¿Continuar?",
+          { title: "Confirmar modo agresivo", kind: "warning" },
+        );
+        if (!ok) return;
+      }
+      const started = await api.queueBatchJob(paths, out, exceptionMode, policyId);
       job = started as BatchJob;
       panelOpen = true;
-      projectStore.statusMessage = `Lote ${paths.length} archivos en curso…`;
+      projectStore.statusMessage = `Lote ${paths.length} archivos · modo ${exceptionMode}…`;
     } catch (e) {
       projectStore.error = String(e);
     }
@@ -125,10 +135,18 @@
         title: "Carpeta inbox (vídeos crudos)",
       });
       if (!inbox || typeof inbox !== "string") return;
-      const started = await api.queueInboxBatch(inbox, null, true);
+      if (exceptionMode === "aggressive") {
+        const { ask } = await import("@tauri-apps/plugin-dialog");
+        const ok = await ask(
+          "Modo AGRESIVO en inbox: se cortarán excepciones dudosas. ¿Continuar?",
+          { title: "Confirmar modo agresivo", kind: "warning" },
+        );
+        if (!ok) return;
+      }
+      const started = await api.queueInboxBatch(inbox, null, exceptionMode);
       job = started as BatchJob;
       panelOpen = true;
-      projectStore.statusMessage = `Inbox → outbox · lote en curso`;
+      projectStore.statusMessage = `Inbox → outbox · modo ${exceptionMode}`;
     } catch (e) {
       projectStore.error = String(e);
     }
@@ -145,13 +163,33 @@
   >
     <div>
       <div class="text-sm font-semibold text-surface-100">Fábrica · Lote</div>
-      <div class="text-[10px] text-surface-500">Inbox → análisis → export (auto-excepciones)</div>
+      <div class="text-[10px] text-surface-500">Inbox → análisis → export · modo seguro por defecto</div>
     </div>
     <span class="text-surface-500">{panelOpen ? "▾" : "▸"}</span>
   </button>
 
   {#if panelOpen}
     <div class="space-y-2 border-t border-surface-800 p-3">
+      <label class="block text-[11px] text-surface-400">
+        Cómo tratar dudas (excepciones)
+        <select
+          class="mt-1 w-full rounded-lg border border-surface-700 bg-surface-900 px-2 py-1.5 text-xs text-surface-100"
+          bind:value={exceptionMode}
+        >
+          <option value="safe">Seguro — conserva material dudoso (recomendado)</option>
+          <option value="supervised">Supervisado — no exporta si hay dudas</option>
+          <option value="aggressive">Agresivo — corta dudas (pide confirmación)</option>
+        </select>
+      </label>
+      {#if exceptionMode === "aggressive"}
+        <p class="rounded-lg border border-warning/40 bg-warning/10 px-2 py-1.5 text-[10px] text-warning">
+          Puede eliminar contenido dudoso. Solo para lotes en los que confías en el umbral.
+        </p>
+      {:else if exceptionMode === "safe"}
+        <p class="text-[10px] text-surface-500">
+          Los cortes claros se aplican; las dudas se mantienen en el vídeo exportado.
+        </p>
+      {/if}
       <div class="flex flex-wrap gap-2">
         <button type="button" class="btn-primary text-xs" onclick={pickFilesAndRun}>
           Procesar archivos…

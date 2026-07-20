@@ -76,13 +76,25 @@
         </div>
 
         {#if stats}
+          <div
+            class="rounded-xl border px-3 py-2 text-[11px]
+              {pending > 0
+              ? 'border-warning/40 bg-warning/10 text-warning'
+              : 'border-keep/30 bg-keep/10 text-keep'}"
+          >
+            {#if pending > 0}
+              <strong>Requiere revisión</strong> · {pending} duda(s). El resto ya se cortó solo.
+            {:else}
+              <strong>Listo para oír y exportar</strong> · sin dudas pendientes.
+            {/if}
+          </div>
           <div class="grid grid-cols-2 gap-2 text-[11px]">
             <div class="rounded-xl border border-surface-800 bg-surface-950/80 p-2.5">
-              <div class="text-surface-500">Auto-cortes</div>
+              <div class="text-surface-500">Cortes automáticos</div>
               <div class="font-mono text-lg font-bold text-cut">{stats.autoCutCount}</div>
             </div>
             <div class="rounded-xl border border-surface-800 bg-surface-950/80 p-2.5">
-              <div class="text-surface-500">Excepciones</div>
+              <div class="text-surface-500">Dudas por revisar</div>
               <div
                 class="font-mono text-lg font-bold {pending > 0 ? 'text-warning' : 'text-keep'}"
               >
@@ -102,8 +114,9 @@
               </div>
             </div>
           </div>
-          <p class="font-mono text-[10px] text-surface-500">
-            motor: {projectStore.analysisRun?.method ?? "—"}
+          <p class="text-[10px] text-surface-500">
+            Score = estimación operativa (no probabilidad científica). · motor:
+            <span class="font-mono text-surface-400">{projectStore.analysisRun?.method ?? "—"}</span>
           </p>
         {:else}
           <p class="text-xs text-surface-500">Abre o re-detecta un video para ver stats.</p>
@@ -113,7 +126,8 @@
           <div class="text-[11px] font-semibold text-surface-300">Siguiente paso</div>
           {#if pending > 0}
             <p class="text-[11px] text-warning">
-              Hay {pending} excepción(es). Ábrelas en <strong>Supervisar</strong>.
+              Hay {pending} duda(s). Revisa en <strong>Supervisar</strong>, o exporta en modo
+              seguro (se conservan).
             </p>
             <button
               type="button"

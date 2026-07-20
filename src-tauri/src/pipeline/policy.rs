@@ -48,7 +48,7 @@ impl EventPolicy for SilencePolicy {
                     ev.span,
                     vec![ev.id.clone()],
                     format!(
-                        "Auto-cut silence ({:.0}% conf, {:.2}s)",
+                        "Auto-cut silence (score heurístico {:.0}, {:.2}s)",
                         ev.score * 100.0,
                         ev.span.duration()
                     ),
@@ -61,7 +61,7 @@ impl EventPolicy for SilencePolicy {
                     ev.span,
                     ev.score,
                     format!(
-                        "Silencio dudoso ({:.0}% < {:.0}% umbral). ¿Cortar?",
+                        "Silencio dudoso (score {:.0} < umbral {:.0}). ¿Cortar? (estimación operativa, no probabilidad científica)",
                         ev.score * 100.0,
                         config.auto_approve_min_score * 100.0
                     ),

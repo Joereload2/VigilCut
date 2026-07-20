@@ -89,17 +89,19 @@ export async function resolveAllExceptions(
   return invoke("resolve_all_exceptions", { runId, accept });
 }
 
+/** exceptionMode: "safe" | "supervised" | "aggressive" — default safe */
 export async function queueBatchJob(
   mediaPaths: string[],
   outputDir: string,
-  autoAcceptExceptions = true,
+  exceptionMode: "safe" | "supervised" | "aggressive" = "safe",
   policyPackId = "factory",
 ): Promise<unknown> {
   return invoke("queue_batch_job", {
     mediaPaths,
     outputDir,
     presetId: policyPackId,
-    autoAcceptExceptions,
+    autoAcceptExceptions: exceptionMode === "aggressive",
+    exceptionMode,
     options: null,
   });
 }
@@ -116,12 +118,13 @@ export async function listBatchJobs(): Promise<unknown[]> {
 export async function queueInboxBatch(
   inboxDir: string,
   outputDir: string | null = null,
-  autoAcceptExceptions = true,
+  exceptionMode: "safe" | "supervised" | "aggressive" = "safe",
 ): Promise<unknown> {
   return invoke("queue_inbox_batch", {
     inboxDir,
     outputDir,
-    autoAcceptExceptions,
+    autoAcceptExceptions: exceptionMode === "aggressive",
+    exceptionMode,
   });
 }
 

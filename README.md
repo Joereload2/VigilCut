@@ -10,13 +10,15 @@
 |---|---|
 | Stack | Tauri 2 · Rust · Svelte 5 · TypeScript · Tailwind · FFmpeg |
 | Licencia | MIT |
-| Estado | **v1 fábrica** — silence engine + excepciones + batch + multi-artefacto + CLI |
+| Estado | **v1.1 fábrica** — engine + excepciones (modo seguro por defecto) + batch + clipping 9:16 + CLI |
 
 Documentación:
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — mapa técnico  
 - [docs/ARCHITECTURAL_REVIEW.md](docs/ARCHITECTURAL_REVIEW.md) — mandato CTO / visión 5 años  
+- [docs/HARDENING_1_1.md](docs/HARDENING_1_1.md) — endurecimiento 1.1 (seguridad, modos, tests)  
 - [docs/ROADMAP.md](docs/ROADMAP.md) — roadmap  
+- [docs/BACKLOG_NEXT.md](docs/BACKLOG_NEXT.md) — backlog post-MVP  
 
 ---
 
@@ -57,15 +59,19 @@ npm run dev:win
 3. **Oír video cortado**  
 4. **Exportar** → carpeta con pack de artefactos  
 
-### Lote fábrica (cero clics por tramo)
+### Lote fábrica
 
-- UI: panel **Fábrica · Lote** → archivos o carpeta inbox  
+- UI: pestaña **Lote** → archivos o inbox  
+- **Modo Seguro (default):** cortes claros automáticos; dudas **conservadas** en el export  
+- **Supervisado:** no exporta si hay dudas  
+- **Agresivo:** corta dudas (pide confirmación en UI; CLI `--aggressive`)  
 - CLI:
 
 ```powershell
 npm run cli -- analyze .\clip.mp4
 npm run cli -- export .\clip.mp4
 npm run cli -- batch .\inbox .\outbox
+# opc. --aggressive en export/batch para forzar cortes dudosos
 ```
 
 Carpetas de app: `%APPDATA%\VigilCut\inbox` y `outbox`.

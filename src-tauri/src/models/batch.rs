@@ -2,11 +2,15 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::exception_mode::ExceptionHandlingMode;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BatchStatus {
     Queued,
     Running,
+    /// One or more files need human review before final export (Supervised mode).
+    NeedsReview,
     Completed,
     Failed,
     Cancelled,
@@ -24,6 +28,15 @@ pub struct BatchFileResult {
     pub source_duration: f64,
     pub output_duration: f64,
     pub error: Option<String>,
+    /// safe | supervised | aggressive
+    #[serde(default)]
+    pub exception_mode: String,
+    /// true if export skipped because supervised + pending exceptions
+    #[serde(default)]
+    pub needs_review: bool,
+    /// true if pending exceptions were kept (conservative export)
+    #[serde(default)]
+    pub conservative_export: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,8 +53,11 @@ pub struct BatchJob {
     pub failed: usize,
     pub errors: Vec<String>,
     pub results: Vec<BatchFileResult>,
-    /// Factory mode: unresolved exceptions are auto-accepted as cuts
+    /// Legacy flag — prefer `exception_mode`. If present without mode, maps via from_auto_accept.
+    #[serde(default)]
     pub auto_accept_exceptions: bool,
+    #[serde(default)]
+    pub exception_mode: ExceptionHandlingMode,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -51,7 +67,7 @@ impl BatchJob {
         media_paths: Vec<String>,
         preset_id: String,
         output_dir: String,
-        auto_accept_exceptions: bool,
+        exception_mode: ExceptionHandlingMode,
     ) -> Self {
         let now = Utc::now();
         Self {
@@ -66,9 +82,23 @@ impl BatchJob {
             failed: 0,
             errors: Vec::new(),
             results: Vec::new(),
-            auto_accept_exceptions,
+            auto_accept_exceptions: exception_mode.is_aggressive(),
+            exception_mode,
             created_at: now,
             updated_at: now,
+        }
+    }
+
+    /// Resolve effective mode (legacy boolean + new enum).
+    pub fn effective_mode(&self) -> ExceptionHandlingMode {
+        // Prefer explicit non-default mode, else map legacy flag for old clients
+        if self.exception_mode != ExceptionHandlingMode::Safe {
+            return self.exception_mode;
+        }
+        if self.auto_accept_exceptions {
+            ExceptionHandlingMode::Aggressive
+        } else {
+            ExceptionHandlingMode::Safe
         }
     }
 

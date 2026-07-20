@@ -110,7 +110,12 @@ fn main() -> ExitCode {
                 .collect();
             println!("batch {} files → {outbox}", paths.len());
             let policy = policy_from_args(&args);
-            let job = BatchJob::new(paths, "cli".into(), outbox, true);
+            let mode = if args.iter().any(|a| a == "--aggressive") {
+                vigilcut_lib::models::exception_mode::ExceptionHandlingMode::Aggressive
+            } else {
+                vigilcut_lib::models::exception_mode::ExceptionHandlingMode::Safe
+            };
+            let job = BatchJob::new(paths, "cli".into(), outbox, mode);
             let done = rt.block_on(run_batch_job(job, policy));
             println!(
                 "done: {} ok, {} failed, status={:?}",
@@ -168,11 +173,17 @@ fn main() -> ExitCode {
                     None,
                 ),
             };
+            // CLI export defaults to Safe (keep pending exceptions). Use --aggressive to force-cut.
+            let mode = if args.iter().any(|a| a == "--aggressive") {
+                vigilcut_lib::models::exception_mode::ExceptionHandlingMode::Aggressive
+            } else {
+                vigilcut_lib::models::exception_mode::ExceptionHandlingMode::Safe
+            };
             let result = rt.block_on(process_one_file(
                 &media,
                 &out_dir,
                 &policy,
-                true,
+                mode,
                 &ExportOptions::default(),
                 &ColorOptions::default(),
             ));

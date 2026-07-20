@@ -105,11 +105,12 @@ pub fn start_inbox_watch(app: AppHandle, state: State<'_, InboxWatchState>) -> A
                     serde_json::json!({ "path": key }),
                 );
 
+                // Inbox watch defaults to Safe — never force-cut exceptions silently.
                 let result = process_one_file(
                     &path,
                     &outbox,
                     &policy,
-                    true,
+                    crate::models::exception_mode::ExceptionHandlingMode::Safe,
                     &export_opts,
                     &color,
                 )
@@ -167,7 +168,7 @@ pub async fn process_factory_inbox_now(app: AppHandle) -> AppResult<BatchJob> {
         paths,
         "factory-inbox".into(),
         outbox.to_string_lossy().into_owned(),
-        true,
+        crate::models::exception_mode::ExceptionHandlingMode::Safe,
     );
     let job_id = job.id.clone();
     {

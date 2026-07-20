@@ -191,9 +191,19 @@ pub async fn export_keep_ranges_with_audio(
     has_audio: bool,
     job: Option<&JobControl>,
 ) -> AppResult<PathBuf> {
+    use crate::pipeline::safe_paths::{
+        cleanup_temp, finalize_atomic, temp_export_path, unique_output_path,
+        validate_export_output, validate_export_request,
+    };
+
     if let Some(j) = job {
         j.check()?;
     }
+
+    // Never write over the original; avoid silent overwrites of existing destinations.
+    let final_out = unique_output_path(output);
+    validate_export_request(input, &final_out)?;
+
     let ffmpeg = Ffmpeg::new()?;
     let keep = merge_keep_ranges(keep.to_vec());
     let estimated: f64 = keep.iter().map(|(s, e)| e - s).sum();
@@ -204,13 +214,51 @@ pub async fn export_keep_ranges_with_audio(
         ));
     }
 
-    if !export_opts.apply_cuts {
-        let mut args = vec![
-            "-y".into(),
-            "-i".into(),
-            input.to_string_lossy().into_owned(),
-        ];
-        if export_opts.reencode {
+    let temp_out = temp_export_path(&final_out);
+
+    let run_result = async {
+        if !export_opts.apply_cuts {
+            let mut args = vec![
+                "-y".into(),
+                "-i".into(),
+                input.to_string_lossy().into_owned(),
+            ];
+            if export_opts.reencode {
+                args.extend([
+                    "-c:v".into(),
+                    export_opts.video_codec.clone(),
+                    "-crf".into(),
+                    export_opts.crf.to_string(),
+                    "-preset".into(),
+                    export_opts.preset.clone(),
+                    "-c:a".into(),
+                    export_opts.audio_codec.clone(),
+                    "-b:a".into(),
+                    format!("{}k", export_opts.audio_bitrate_k),
+                ]);
+            } else {
+                args.extend(["-c".into(), "copy".into()]);
+            }
+            args.push(temp_out.to_string_lossy().into_owned());
+            ffmpeg
+                .run_expecting_tracked(&args, Some(&temp_out), job)
+                .await?;
+        } else {
+            let filter = build_export_filter(&keep, has_audio, color, audio)?;
+            let mut args = vec![
+                "-y".into(),
+                "-i".into(),
+                input.to_string_lossy().into_owned(),
+                "-filter_complex".into(),
+                filter,
+                "-map".into(),
+                "[vout]".into(),
+            ];
+
+            if has_audio {
+                args.extend(["-map".into(), "[aout]".into()]);
+            }
+
             args.extend([
                 "-c:v".into(),
                 export_opts.video_codec.clone(),
@@ -218,76 +266,52 @@ pub async fn export_keep_ranges_with_audio(
                 export_opts.crf.to_string(),
                 "-preset".into(),
                 export_opts.preset.clone(),
-                "-c:a".into(),
-                export_opts.audio_codec.clone(),
-                "-b:a".into(),
-                format!("{}k", export_opts.audio_bitrate_k),
             ]);
-        } else {
-            args.extend(["-c".into(), "copy".into()]);
+
+            if has_audio {
+                args.extend([
+                    "-c:a".into(),
+                    export_opts.audio_codec.clone(),
+                    "-b:a".into(),
+                    format!("{}k", export_opts.audio_bitrate_k),
+                ]);
+            }
+
+            args.extend(["-movflags".into(), "+faststart".into()]);
+            args.push(temp_out.to_string_lossy().into_owned());
+
+            tracing::info!(
+                "Exporting {} keep ranges (~{:.1}s) -> temp {} (audio_enhance={})",
+                keep.len(),
+                estimated,
+                temp_out.display(),
+                audio.map(|a| a.enabled).unwrap_or(false)
+            );
+
+            ffmpeg
+                .run_expecting_tracked(&args, Some(&temp_out), job)
+                .await?;
         }
-        args.push(output.to_string_lossy().into_owned());
-        ffmpeg
-            .run_expecting_tracked(&args, Some(output), job)
-            .await?;
-        return Ok(output.to_path_buf());
+
+        validate_export_output(&temp_out, estimated)?;
+        finalize_atomic(&temp_out, &final_out)?;
+        Ok::<PathBuf, AppError>(final_out.clone())
     }
+    .await;
 
-    // When audio enhance is on, always re-encode audio (cannot stream-copy).
-    let filter = build_export_filter(&keep, has_audio, color, audio)?;
-    let mut args = vec![
-        "-y".into(),
-        "-i".into(),
-        input.to_string_lossy().into_owned(),
-        "-filter_complex".into(),
-        filter,
-        "-map".into(),
-        "[vout]".into(),
-    ];
-
-    if has_audio {
-        args.extend(["-map".into(), "[aout]".into()]);
+    match run_result {
+        Ok(p) => {
+            tracing::info!(
+                "Export finalized (original untouched) → {}",
+                p.display()
+            );
+            Ok(p)
+        }
+        Err(e) => {
+            cleanup_temp(&temp_out);
+            Err(e)
+        }
     }
-
-    args.extend([
-        "-c:v".into(),
-        export_opts.video_codec.clone(),
-        "-crf".into(),
-        export_opts.crf.to_string(),
-        "-preset".into(),
-        export_opts.preset.clone(),
-    ]);
-
-    if has_audio {
-        args.extend([
-            "-c:a".into(),
-            export_opts.audio_codec.clone(),
-            "-b:a".into(),
-            format!("{}k", export_opts.audio_bitrate_k),
-        ]);
-    }
-
-    args.extend(["-movflags".into(), "+faststart".into()]);
-    args.push(output.to_string_lossy().into_owned());
-
-    tracing::info!(
-        "Exporting {} keep ranges (~{:.1}s) -> {} (audio_enhance={})",
-        keep.len(),
-        estimated,
-        output.display(),
-        audio.map(|a| a.enabled).unwrap_or(false)
-    );
-
-    ffmpeg
-        .run_expecting_tracked(&args, Some(output), job)
-        .await?;
-    if !output.exists() {
-        return Err(AppError::Ffmpeg(format!(
-            "Export finished but file missing: {}",
-            output.display()
-        )));
-    }
-    Ok(output.to_path_buf())
 }
 
 /// Convenience: export from segment decisions (UI path).
