@@ -15,7 +15,7 @@ use crate::models::visual::{
 };
 use crate::pipeline::semantic::extract_semantic_events;
 use crate::pipeline::time_map::TimeMap;
-use crate::pipeline::transcript_engine::{build_transcript, write_transcript_artifacts};
+use crate::pipeline::transcript_engine::write_transcript_artifacts;
 use crate::pipeline::visual::library::{import_image, list_active_assets};
 use crate::pipeline::visual::match_rank::{rank_suggestions, MatchConfig};
 
@@ -70,16 +70,38 @@ pub async fn run_visual_enrichment(
     prefer_whisper: bool,
     state: &VisualState,
 ) -> AppResult<serde_json::Value> {
+    run_visual_enrichment_with_progress(
+        media_path,
+        edl,
+        explicit_srt,
+        prefer_whisper,
+        state,
+        &mut |_, _, _| {},
+    )
+    .await
+}
+
+pub async fn run_visual_enrichment_with_progress(
+    media_path: &Path,
+    edl: &Edl,
+    explicit_srt: Option<&Path>,
+    prefer_whisper: bool,
+    state: &VisualState,
+    on_progress: &mut crate::pipeline::detectors::whisper_cli::WhisperProgressFn<'_>,
+) -> AppResult<serde_json::Value> {
     let run_id = edl_fingerprint(&edl.keep_ranges());
     let time_map = TimeMap::from_edl(edl);
-    let tr = build_transcript(
+    on_progress("visual", "Preparando transcripción…", 3.0);
+    let tr = crate::pipeline::transcript_engine::build_transcript_with_progress(
         media_path,
         explicit_srt,
         prefer_whisper,
         Some(run_id.clone()),
+        on_progress,
     )
     .await?;
 
+    on_progress("visual", "Extrayendo conceptos…", 93.0);
     let semantics = extract_semantic_events(&tr, &run_id, &time_map);
     let assets = list_active_assets().unwrap_or_default();
     let suggestions = rank_suggestions(
@@ -110,6 +132,7 @@ pub async fn run_visual_enrichment(
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("media");
+    on_progress("visual", "Guardando artefactos…", 97.0);
     let arts = write_transcript_artifacts(&tr, &cache, stem)?;
     let plan_path = save_visual_plan(&plan, None)?;
 
@@ -122,6 +145,7 @@ pub async fn run_visual_enrichment(
         g.plan_path = Some(plan_path.clone());
     }
 
+    on_progress("visual", "Listo", 100.0);
     Ok(serde_json::json!({
         "transcript": tr,
         "semanticEvents": semantics,

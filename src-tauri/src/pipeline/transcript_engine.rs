@@ -14,17 +14,29 @@ pub async fn build_transcript(
     prefer_whisper: bool,
     run_id: Option<String>,
 ) -> AppResult<Transcript> {
+    build_transcript_with_progress(media_path, explicit_srt, prefer_whisper, run_id, &mut |_, _, _| {}).await
+}
+
+pub async fn build_transcript_with_progress(
+    media_path: &Path,
+    explicit_srt: Option<&Path>,
+    prefer_whisper: bool,
+    run_id: Option<String>,
+    on_progress: &mut whisper_cli::WhisperProgressFn<'_>,
+) -> AppResult<Transcript> {
     let mut tr = Transcript::new(media_path.to_string_lossy(), "none");
     tr.run_id = run_id;
 
     // 1) Explicit
     if let Some(p) = explicit_srt {
         if p.is_file() {
+            on_progress("transcript", "Leyendo SRT…", 30.0);
             match load_from_path(p) {
                 Ok(mut t) => {
                     t.media_path = media_path.to_string_lossy().into_owned();
                     t.run_id = tr.run_id.clone();
                     t.engine = format!("file:{}", p.display());
+                    on_progress("transcript", "SRT cargado", 100.0);
                     return Ok(t);
                 }
                 Err(e) => tr.warnings.push(format!("Explicit transcript failed: {e}")),
@@ -34,12 +46,14 @@ pub async fn build_transcript(
 
     // 2) Sidecar
     if let Some(side) = find_sidecar(media_path) {
+        on_progress("transcript", "Leyendo subtítulos del video…", 30.0);
         match load_from_path(&side) {
             Ok(mut t) => {
                 t.media_path = media_path.to_string_lossy().into_owned();
                 t.run_id = tr.run_id.clone();
                 t.engine = format!("sidecar:{}", side.display());
                 t.warnings.push(format!("Loaded sidecar {}", side.display()));
+                on_progress("transcript", "Subtítulos listos", 100.0);
                 return Ok(t);
             }
             Err(e) => tr.warnings.push(format!("Sidecar failed: {e}")),
@@ -48,12 +62,13 @@ pub async fn build_transcript(
 
     // 3) Whisper
     if prefer_whisper {
-        match whisper_cli::try_generate_srt(media_path).await {
+        match whisper_cli::try_generate_srt_with_progress(media_path, on_progress).await {
             Ok(Some(cap)) => match load_from_path(&cap.srt_path) {
                 Ok(mut t) => {
                     t.media_path = media_path.to_string_lossy().into_owned();
                     t.run_id = tr.run_id.clone();
                     t.engine = format!("whisper:{}", cap.method);
+                    on_progress("transcript", "Texto listo", 100.0);
                     return Ok(t);
                 }
                 Err(e) => tr.warnings.push(format!("Whisper SRT unreadable: {e}")),

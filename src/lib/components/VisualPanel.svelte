@@ -141,9 +141,12 @@
     busy = true;
     error = null;
     projectStore.busy = true;
-    projectStore.statusMessage = forceWhisper
-      ? "Transcribiendo con Whisper (puede tardar)…"
-      : "Cargando texto y conceptos…";
+    projectStore.clearProgress();
+    projectStore.setProgress(
+      5,
+      forceWhisper ? "Transcribiendo con Whisper…" : "Cargando texto…",
+      forceWhisper ? "whisper" : "load",
+    );
     try {
       const res = (await api.visualRunEnrichment(
         projectStore.mediaPath,
@@ -160,12 +163,14 @@
         transcriptArtifacts?: [string, string][];
       };
       applyEnrichmentResult(res);
+      projectStore.setProgress(100, "Listo", "done");
     } catch (e) {
       error = String(e);
       projectStore.error = String(e);
     } finally {
       busy = false;
       projectStore.busy = false;
+      projectStore.clearProgress();
     }
   }
 
@@ -184,7 +189,8 @@
     busy = true;
     error = null;
     projectStore.busy = true;
-    projectStore.statusMessage = "Whisper: extrayendo audio y transcribiendo…";
+    projectStore.clearProgress();
+    projectStore.setProgress(3, "Iniciando Whisper…", "whisper");
     try {
       const res = (await api.visualTranscribeWhisper(
         projectStore.mediaPath,
@@ -199,6 +205,7 @@
         transcriptArtifacts?: [string, string][];
       };
       applyEnrichmentResult(res);
+      projectStore.setProgress(100, "Transcripción lista", "done");
       if ((res.transcript?.segments?.length ?? 0) > 0) {
         lastMessage = `Whisper OK (${res.transcript?.engine}) · ${res.transcript?.segments?.length} frases`;
       }
@@ -208,6 +215,7 @@
     } finally {
       busy = false;
       projectStore.busy = false;
+      projectStore.clearProgress();
       await refreshWhisperStatus();
     }
   }

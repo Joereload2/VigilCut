@@ -3,11 +3,12 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::commands::analyze::AnalysisCache;
 use crate::error::{AppError, AppResult};
 use crate::models::edl::Edl;
+use crate::models::progress;
 use crate::models::visual::{AssetStatus, LicenseStatus, SuggestionStatus, VisualPlan};
 use crate::pipeline::visual::library::{
     import_folder, list_assets, list_usage, scan_missing_assets, update_asset_meta,
@@ -15,7 +16,8 @@ use crate::pipeline::visual::library::{
 use crate::pipeline::visual::render::render_visual_plan;
 use crate::pipeline::visual::{
     export_session_transcript, import_library_image, invalidate_if_edl_changed, load_visual_plan,
-    run_visual_enrichment, save_visual_plan, set_suggestion_status, VisualSession,
+    run_visual_enrichment, run_visual_enrichment_with_progress, save_visual_plan,
+    set_suggestion_status, VisualSession,
 };
 
 pub type VisualSessionState = Mutex<VisualSession>;
@@ -47,6 +49,7 @@ fn edl_from_cache(cache: &AnalysisCache, run_id: Option<&str>, media_path: &str)
 
 #[tauri::command]
 pub async fn visual_run_enrichment(
+    app: AppHandle,
     media_path: String,
     analysis_run_id: Option<String>,
     transcript_path: Option<String>,
@@ -56,19 +59,40 @@ pub async fn visual_run_enrichment(
 ) -> AppResult<serde_json::Value> {
     let edl = edl_from_cache(&analysis, analysis_run_id.as_deref(), &media_path)?;
     let srt = transcript_path.as_ref().map(PathBuf::from);
-    run_visual_enrichment(
-        PathBuf::from(&media_path).as_path(),
-        &edl,
-        srt.as_deref(),
-        prefer_whisper.unwrap_or(false),
-        &visual,
-    )
-    .await
+    let prefer = prefer_whisper.unwrap_or(false);
+    let app2 = app.clone();
+    let mut on_prog = move |stage: &str, message: &str, percent: f64| {
+        progress::emit(&app2, "visual", stage, message, percent);
+    };
+    if prefer {
+        run_visual_enrichment_with_progress(
+            PathBuf::from(&media_path).as_path(),
+            &edl,
+            srt.as_deref(),
+            true,
+            &visual,
+            &mut on_prog,
+        )
+        .await
+    } else {
+        progress::emit(&app, "visual", "load", "Cargando…", 10.0);
+        let r = run_visual_enrichment(
+            PathBuf::from(&media_path).as_path(),
+            &edl,
+            srt.as_deref(),
+            false,
+            &visual,
+        )
+        .await;
+        progress::emit(&app, "visual", "done", "Listo", 100.0);
+        r
+    }
 }
 
 /// Force transcription via Whisper (always prefer_whisper=true). Clear action for UI.
 #[tauri::command]
 pub async fn visual_transcribe_whisper(
+    app: AppHandle,
     media_path: String,
     analysis_run_id: Option<String>,
     analysis: State<'_, AnalysisCache>,
@@ -82,12 +106,18 @@ pub async fn visual_transcribe_whisper(
         )));
     }
     let edl = edl_from_cache(&analysis, analysis_run_id.as_deref(), &media_path)?;
-    run_visual_enrichment(
+    let app2 = app.clone();
+    let mut on_prog = move |stage: &str, message: &str, percent: f64| {
+        progress::emit(&app2, "visual", stage, message, percent);
+    };
+    progress::emit(&app, "visual", "start", "Iniciando Whisper…", 2.0);
+    run_visual_enrichment_with_progress(
         PathBuf::from(&media_path).as_path(),
         &edl,
         None,
         true,
         &visual,
+        &mut on_prog,
     )
     .await
 }

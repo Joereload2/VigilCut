@@ -393,19 +393,28 @@
             >{projectStore.statusMessage || "Procesando…"}</span
           >
         </div>
-        {#if projectStore.progressPercent != null}
-          <div class="mt-3 h-1.5 overflow-hidden rounded-full bg-surface-800">
-            <div
-              class="h-full rounded-full bg-vigil-500 transition-all duration-300"
-              style="width: {Math.min(100, Math.max(2, projectStore.progressPercent))}%"
-            ></div>
-          </div>
-          <div class="mt-1 text-right font-mono text-[10px] text-surface-500">
-            {Math.round(projectStore.progressPercent)}%
-            {#if projectStore.progressStage}
-              · {projectStore.progressStage}{/if}
-          </div>
-        {/if}
+        <!-- Always show a bar while busy so long jobs (Whisper) feel alive -->
+        <div class="mt-3 h-2 overflow-hidden rounded-full bg-surface-800">
+          <div
+            class="h-full rounded-full bg-vigil-500 transition-all duration-300
+              {projectStore.progressPercent == null ? 'animate-pulse' : ''}"
+            style="width: {projectStore.progressPercent != null
+              ? Math.min(100, Math.max(3, projectStore.progressPercent))
+              : 35}%"
+          ></div>
+        </div>
+        <div class="mt-1 flex justify-between font-mono text-[10px] text-surface-500">
+          <span class="truncate">
+            {#if projectStore.progressStage}{projectStore.progressStage}{:else}trabajando…{/if}
+          </span>
+          <span>
+            {#if projectStore.progressPercent != null}
+              {Math.round(projectStore.progressPercent)}%
+            {:else}
+              …
+            {/if}
+          </span>
+        </div>
         <button
           type="button"
           class="btn-ghost mt-3 w-full text-xs text-cut hover:bg-cut/10"
