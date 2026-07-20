@@ -1,15 +1,16 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::error::{AppError, AppResult};
 use crate::models::analysis::{AnalysisRun, ResolveExceptionRequest};
 use crate::models::edl::PolicyConfig;
+use crate::models::progress;
 use crate::models::segment::SilenceDetectionOptions;
+use crate::pipeline::engine::run_silence_analysis_with_progress;
 use crate::pipeline::{
     accept_all_exceptions, policy_from_silence_options, reject_all_exceptions, resolve_exception,
-    run_silence_analysis,
 };
 use crate::state::AppState;
 
@@ -63,6 +64,7 @@ fn put_run(cache: &AnalysisCache, run: AnalysisRun) -> AppResult<AnalysisRun> {
 
 #[tauri::command]
 pub async fn run_analysis(
+    app: AppHandle,
     path: String,
     options: Option<SilenceDetectionOptions>,
     policy: Option<PolicyConfig>,
@@ -75,7 +77,15 @@ pub async fn run_analysis(
             .unwrap_or_default()
     });
 
-    let run = run_silence_analysis(PathBuf::from(&path).as_path(), &pol).await?;
+    let mut on_prog = |stage: &str, message: &str, percent: f64| {
+        progress::emit(&app, "analysis", stage, message, percent);
+    };
+    let run = run_silence_analysis_with_progress(
+        PathBuf::from(&path).as_path(),
+        &pol,
+        &mut on_prog,
+    )
+    .await?;
     put_run(&cache, run)
 }
 

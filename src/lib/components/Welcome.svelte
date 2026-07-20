@@ -1,20 +1,28 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import * as api from "$lib/utils/tauri";
+  import type { ProjectSummary } from "$lib/types";
 
   interface Props {
     onOpen: () => void;
     onGoSilence?: () => void;
     onGoClips?: () => void;
+    onOpenPath?: (path: string) => void;
   }
-  let { onOpen, onGoSilence, onGoClips }: Props = $props();
+  let { onOpen, onGoSilence, onGoClips, onOpenPath }: Props = $props();
 
   let paths = $state<{ inbox: string; outbox: string } | null>(null);
+  let recent = $state<ProjectSummary[]>([]);
 
   onMount(() => {
     if (!api.isTauri()) return;
     void api.getFactoryPaths().then((p) => {
       paths = { inbox: p.inbox, outbox: p.outbox };
+    });
+    void api.listRecentProjects().then((list) => {
+      recent = list
+        .filter((p) => p.mediaPath && !p.mediaPath.startsWith("demo://"))
+        .slice(0, 6);
     });
   });
 
@@ -27,6 +35,15 @@
     } catch (e) {
       console.error(e);
     }
+  }
+
+  function openRecent(p: ProjectSummary) {
+    if (onOpenPath) onOpenPath(p.mediaPath);
+  }
+
+  function shortPath(p: string) {
+    const parts = p.split(/[/\\]/);
+    return parts.slice(-2).join("/") || p;
   }
 </script>
 
@@ -70,6 +87,32 @@
   </div>
 
   <button type="button" class="btn-secondary text-xs" onclick={onOpen}>Solo abrir un video…</button>
+
+  {#if recent.length > 0}
+    <div class="w-full max-w-xl rounded-xl border border-surface-800 bg-surface-900/50 p-3 text-left">
+      <div class="mb-2 text-[11px] font-semibold text-surface-300">Recientes</div>
+      <ul class="space-y-1">
+        {#each recent as p (p.id)}
+          <li>
+            <button
+              type="button"
+              class="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left transition hover:bg-surface-800/80"
+              onclick={() => openRecent(p)}
+              title={p.mediaPath}
+            >
+              <span class="min-w-0">
+                <span class="block truncate text-xs font-medium text-surface-100">{p.name}</span>
+                <span class="block truncate font-mono text-[10px] text-surface-500"
+                  >{shortPath(p.mediaPath)}</span
+                >
+              </span>
+              <span class="shrink-0 text-[10px] text-vigil-300">Abrir</span>
+            </button>
+          </li>
+        {/each}
+      </ul>
+    </div>
+  {/if}
 
   {#if paths}
     <div class="w-full max-w-xl rounded-xl border border-surface-800 bg-surface-900/50 p-3 text-left text-[11px]">

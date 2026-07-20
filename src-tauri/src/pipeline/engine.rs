@@ -12,18 +12,31 @@ use crate::pipeline::detectors::{run_secondary, DetectorContext};
 use crate::pipeline::policy::{apply_policies, effective_removes};
 use crate::state::AppState;
 
+/// Progress callback: (stage, message, percent 0..100).
+pub type ProgressFn<'a> = dyn FnMut(&str, &str, f64) + Send + 'a;
+
 /// Run full analysis: detect → events → secondary detectors → policy → EDL → segment projection.
 pub async fn run_silence_analysis(
     media_path: &Path,
     policy: &PolicyConfig,
 ) -> AppResult<AnalysisRun> {
+    run_silence_analysis_with_progress(media_path, policy, &mut |_, _, _| {}).await
+}
+
+pub async fn run_silence_analysis_with_progress(
+    media_path: &Path,
+    policy: &PolicyConfig,
+    on_progress: &mut ProgressFn<'_>,
+) -> AppResult<AnalysisRun> {
     let run_id = AnalysisRun::new_id();
+    on_progress("probe", "Leyendo vídeo…", 4.0);
     let ffmpeg = Ffmpeg::new()?;
     let info = ffmpeg.probe(media_path).await?;
     let duration = info.duration;
     let path_str = media_path.to_string_lossy().into_owned();
 
     // Warm feature cache (16 kHz mono) for Silero / Whisper / future detectors
+    on_progress("audio", "Extrayendo audio 16 kHz…", 12.0);
     let wav_path = match crate::pipeline::features::ensure_audio_16k(media_path).await {
         Ok(p) => Some(p),
         Err(e) => {
@@ -32,24 +45,31 @@ pub async fn run_silence_analysis(
         }
     };
 
+    on_progress("vad", "Detectando silencios (VAD)…", 35.0);
     let (method, silence_ranges) = detect_silence_ranges(media_path, policy).await?;
 
     // Build alternating speech/silence events covering [0, duration]
     let mut events = ranges_to_events(&run_id, duration, &silence_ranges, &method, policy);
 
-    // Optional Whisper captions (feeds filler detector via context)
+    // Whisper only when explicitly requested (slow on long files)
     let mut caption_srt: Option<std::path::PathBuf> = None;
-    match crate::pipeline::detectors::whisper_cli::try_generate_srt(media_path).await {
-        Ok(Some(cap)) => {
-            tracing::info!("Whisper captions via {}", cap.method);
-            caption_srt = Some(cap.srt_path.clone());
+    if policy.prefer_whisper {
+        on_progress("whisper", "Whisper (subtítulos / muletillas)…", 55.0);
+        match crate::pipeline::detectors::whisper_cli::try_generate_srt(media_path).await {
+            Ok(Some(cap)) => {
+                tracing::info!("Whisper captions via {}", cap.method);
+                caption_srt = Some(cap.srt_path.clone());
+            }
+            Ok(None) => {
+                tracing::debug!("No whisper CLI on PATH — skip captions/fillers");
+            }
+            Err(e) => tracing::warn!("Whisper failed: {e}"),
         }
-        Ok(None) => {
-            tracing::debug!("No whisper CLI on PATH — skip captions/fillers");
-        }
-        Err(e) => tracing::warn!("Whisper failed: {e}"),
+    } else {
+        tracing::debug!("Whisper skipped (prefer_whisper=false)");
     }
 
+    on_progress("detectors", "Capítulos, breath, shorts…", 72.0);
     // Secondary detectors: breath, chapters, shorts, fillers (registry)
     {
         let mut ctx = DetectorContext {
@@ -63,6 +83,8 @@ pub async fn run_silence_analysis(
         };
         run_secondary(&mut ctx);
     }
+
+    on_progress("policy", "Aplicando política de cortes…", 88.0);
 
     // Policies: event_type → auto-cut / exception (registry)
     let outcome = apply_policies(&events, policy);
@@ -133,6 +155,7 @@ pub async fn run_silence_analysis(
         });
     }
 
+    on_progress("done", "Análisis listo", 100.0);
     Ok(run)
 }
 
@@ -447,6 +470,7 @@ pub fn policy_from_silence_options(opts: &SilenceDetectionOptions) -> PolicyConf
         padding: opts.padding,
         threshold: opts.threshold,
         prefer_silero: opts.prefer_silero,
+        prefer_whisper: opts.prefer_whisper,
     }
 }
 

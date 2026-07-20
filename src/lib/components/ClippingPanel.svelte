@@ -142,14 +142,21 @@
     }
     busy = true;
     error = null;
+    projectStore.busy = true;
+    projectStore.clearProgress();
     projectStore.statusMessage = "Sacando clips…";
+    projectStore.progressPercent = 5;
     try {
       options = {
         ...DEFAULT_CLIPPING_OPTIONS,
         ...options,
         transcriptPath: options.transcriptPath ?? null,
       };
-      run = await api.runClipping(projectStore.mediaPath, options);
+      run = await api.runClipping(
+        projectStore.mediaPath,
+        options,
+        projectStore.analysisRun?.id ?? null,
+      );
       filter = "review";
       const first =
         run.candidates.find((c) => c.status === "preselected" && c.isPrimaryVariant) ??
@@ -162,11 +169,18 @@
         n > 0
           ? `${n} clips listos · clasifica y mira el 9:16`
           : "No se encontraron clips";
+      if (run.summary.warnings.length) {
+        // keep first quality warning visible on panel
+        error = null;
+      }
     } catch (e) {
       error = String(e);
+      projectStore.error = String(e);
       projectStore.statusMessage = "Error al sacar clips";
     } finally {
       busy = false;
+      projectStore.busy = false;
+      projectStore.clearProgress();
     }
   }
 
@@ -450,6 +464,23 @@
       <p class="mt-2 text-center text-[10px] text-surface-500">
         Solo salen clips con score ≥ {MIN_CLIP_SCORE}. Aquí clasificas y ves el 9:16.
       </p>
+      <div
+        class="mt-2 rounded-lg border border-amber-800/40 bg-amber-950/30 px-2.5 py-2 text-left text-[10px] leading-snug text-amber-100/90"
+      >
+        <strong class="text-amber-50">Mejor con subtítulos.</strong>
+        Importa un .srt o deja Whisper en opciones. Sin texto: nombres Clip 01… y peor score.
+        <div class="mt-1.5 flex flex-wrap gap-1">
+          <button type="button" class="btn-secondary text-[10px]" onclick={pickSrt}>
+            + Importar SRT/VTT
+            {#if options.transcriptPath}<span class="text-keep"> ✓</span>{/if}
+          </button>
+        </div>
+        {#if options.transcriptPath}
+          <p class="mt-1 truncate font-mono text-[9px] text-surface-500" title={options.transcriptPath}>
+            {options.transcriptPath}
+          </p>
+        {/if}
+      </div>
       <button
         type="button"
         class="mt-2 w-full text-center text-[10px] text-surface-600 hover:text-surface-400"
@@ -487,11 +518,8 @@
           </div>
           <label class="flex items-center gap-2 text-[10px] text-surface-400">
             <input type="checkbox" class="accent-vigil-500" bind:checked={options.preferWhisper} />
-            Whisper si no hay subtítulos
+            Whisper si no hay SRT (lento)
           </label>
-          <button type="button" class="btn-ghost text-[10px]" onclick={pickSrt}>
-            + SRT/VTT {#if options.transcriptPath}<span class="text-keep">✓</span>{/if}
-          </button>
         </div>
       {/if}
     {/if}

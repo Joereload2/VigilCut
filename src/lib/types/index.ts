@@ -79,6 +79,15 @@ export interface PolicyConfig {
   padding: number;
   threshold: number;
   preferSilero: boolean;
+  /** Whisper during silence analysis — slow; default off */
+  preferWhisper?: boolean;
+}
+
+export interface JobProgress {
+  job: string;
+  stage: string;
+  message: string;
+  percent: number;
 }
 
 export interface AnalysisRun {
@@ -103,6 +112,8 @@ export interface SilenceDetectionOptions {
   autoCutSilence: boolean;
   /** Min confidence for auto-cut without human review */
   autoApproveMinScore: number;
+  /** Whisper on open/reanalyze — off by default (use clipping or enable here) */
+  preferWhisper: boolean;
 }
 
 export interface SilenceDetectionResult {
@@ -236,6 +247,7 @@ export const DEFAULT_SILENCE_OPTIONS: SilenceDetectionOptions = {
   preferSilero: true,
   autoCutSilence: true,
   autoApproveMinScore: 0.8,
+  preferWhisper: false,
 };
 
 // ── Intelligent clipping ───────────────────────────────────────────────────
@@ -347,7 +359,7 @@ export const DEFAULT_CLIPPING_OPTIONS: ClippingOptions = {
   padBefore: 0.25,
   padAfter: 0.35,
   transcriptPath: null,
-  preferWhisper: true,
+  preferWhisper: false,
   maxCandidates: 40,
 };
 

@@ -44,6 +44,9 @@ class ProjectStore {
   busy = $state(false);
   statusMessage = $state("Listo");
   error = $state<string | null>(null);
+  /** 0..100 while busy; null when unknown */
+  progressPercent = $state<number | null>(null);
+  progressStage = $state<string | null>(null);
   selectedSegmentId = $state<string | null>(null);
   /** Segment ids the user has explicitly decided (review progress). */
   touchedIds = $state<string[]>([]);
@@ -193,13 +196,26 @@ class ProjectStore {
     }
   }
 
+  setProgress(percent: number | null, message?: string, stage?: string) {
+    this.progressPercent = percent;
+    if (message) this.statusMessage = message;
+    if (stage !== undefined) this.progressStage = stage;
+  }
+
+  clearProgress() {
+    this.progressPercent = null;
+    this.progressStage = null;
+  }
+
   async openMedia(path: string, name?: string) {
     this.busy = true;
     this.error = null;
     this.showExportSuccess = false;
     this.lastExport = null;
     this.analysisRun = null;
+    this.clearProgress();
     this.statusMessage = "Abriendo video…";
+    this.progressPercent = 2;
     try {
       this.mediaPath = path;
       if (api.isTauri()) {
@@ -208,8 +224,12 @@ class ProjectStore {
           name ?? path.split(/[/\\]/).pop() ?? "Untitled",
           path,
         );
-        this.statusMessage = "Analizando (eventos + política)…";
-        const run = await api.runAnalysis(path, this.silenceOptions);
+        this.statusMessage = "Analizando silencios…";
+        this.progressPercent = 8;
+        const run = await api.runAnalysis(path, {
+          ...this.silenceOptions,
+          preferWhisper: this.silenceOptions.preferWhisper ?? false,
+        });
         this.applyAnalysisRun(run);
         if (this.project) {
           this.project = {
@@ -253,13 +273,16 @@ class ProjectStore {
       this.statusMessage = "Error al abrir";
     } finally {
       this.busy = false;
+      this.clearProgress();
     }
   }
 
   async reanalyze() {
     if (!this.mediaPath) return;
     this.busy = true;
+    this.clearProgress();
     this.statusMessage = "Re-analizando…";
+    this.progressPercent = 5;
     try {
       if (api.isTauri()) {
         const run = await api.runAnalysis(this.mediaPath, this.silenceOptions);
@@ -280,6 +303,7 @@ class ProjectStore {
       this.error = String(e);
     } finally {
       this.busy = false;
+      this.clearProgress();
     }
   }
 

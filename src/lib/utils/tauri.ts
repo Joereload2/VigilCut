@@ -290,10 +290,12 @@ export async function savePreset(preset: ProcessingPreset): Promise<ProcessingPr
 export async function runClipping(
   mediaPath: string,
   options?: ClippingOptions | null,
+  analysisRunId?: string | null,
 ): Promise<ClippingRun> {
   return invoke("run_clipping", {
     mediaPath,
     options: options ?? null,
+    analysisRunId: analysisRunId ?? null,
   });
 }
 

@@ -109,6 +109,9 @@ pub struct SilenceDetectionOptions {
     /// Policy: min event score for auto-cut without human review (default 0.80)
     #[serde(default = "default_auto_approve")]
     pub auto_approve_min_score: f64,
+    /// Optional Whisper on silence open (slow). Default off — use clipping or reanalyze with this on.
+    #[serde(default)]
+    pub prefer_whisper: bool,
 }
 
 fn default_auto_approve() -> f64 {
@@ -124,6 +127,7 @@ impl Default for SilenceDetectionOptions {
             prefer_silero: true,
             auto_cut_silence: true,
             auto_approve_min_score: 0.80,
+            prefer_whisper: false,
         }
     }
 }

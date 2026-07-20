@@ -178,6 +178,15 @@
           Preferir Silero VAD
         </label>
 
+        <label class="flex items-center gap-2 text-[11px] text-surface-300">
+          <input
+            type="checkbox"
+            class="accent-vigil-500"
+            bind:checked={projectStore.silenceOptions.preferWhisper}
+          />
+          Whisper al re-analizar (lento)
+        </label>
+
         <button
           type="button"
           class="btn-secondary w-full text-xs"

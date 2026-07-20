@@ -185,6 +185,9 @@ pub struct PolicyConfig {
     /// Detection threshold (passed to detector)
     pub threshold: f64,
     pub prefer_silero: bool,
+    /// Run Whisper CLI during silence analysis (slow; off by default — use for fillers / captions).
+    #[serde(default)]
+    pub prefer_whisper: bool,
 }
 
 impl Default for PolicyConfig {
@@ -196,6 +199,7 @@ impl Default for PolicyConfig {
             padding: 0.12,
             threshold: 0.5,
             prefer_silero: true,
+            prefer_whisper: false,
         }
     }
 }

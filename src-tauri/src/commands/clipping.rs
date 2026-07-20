@@ -5,15 +5,17 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, State};
 
+use crate::commands::analyze::AnalysisCache;
 use crate::error::{AppError, AppResult};
 use crate::ffmpeg::Ffmpeg;
 use crate::models::clipping::{
     ClipCandidate, ClipExportResult, ClipFraming, ClipReviewStatus, ClippingOptions, ClippingRun,
 };
+use crate::models::progress;
 use crate::pipeline::clipping::{
-    export_approved_clips, export_one_clip, run_clipping_analysis,
+    export_approved_clips, export_one_clip, run_clipping_analysis_with_progress,
 };
 
 #[derive(Default)]
@@ -56,12 +58,31 @@ where
 
 #[tauri::command]
 pub async fn run_clipping(
+    app: AppHandle,
     media_path: String,
     options: Option<ClippingOptions>,
+    analysis_run_id: Option<String>,
     cache: State<'_, ClippingCache>,
+    analysis_cache: State<'_, AnalysisCache>,
 ) -> AppResult<ClippingRun> {
     let opts = options.unwrap_or_default();
-    let run = run_clipping_analysis(PathBuf::from(&media_path).as_path(), opts).await?;
+    let reused = analysis_run_id.as_ref().and_then(|id| {
+        analysis_cache
+            .runs
+            .lock()
+            .ok()
+            .and_then(|m| m.get(id).cloned())
+    });
+    let mut on_prog = |stage: &str, message: &str, percent: f64| {
+        progress::emit(&app, "clipping", stage, message, percent);
+    };
+    let run = run_clipping_analysis_with_progress(
+        PathBuf::from(&media_path).as_path(),
+        opts,
+        reused.as_ref(),
+        &mut on_prog,
+    )
+    .await?;
     put_run(&cache, run)
 }
 

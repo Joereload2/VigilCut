@@ -7,6 +7,7 @@ pub mod event;
 pub mod media;
 pub mod policy_pack;
 pub mod preset;
+pub mod progress;
 pub mod project;
 pub mod segment;
 pub mod subtitle;
