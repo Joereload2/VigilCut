@@ -1,7 +1,7 @@
 <script lang="ts">
   interface Props {
-    mode: "silence" | "clips";
-    onMode: (m: "silence" | "clips") => void;
+    mode: "silence" | "clips" | "visual";
+    onMode: (m: "silence" | "clips" | "visual") => void;
   }
   let { mode, onMode }: Props = $props();
 </script>
@@ -16,39 +16,47 @@
 
   <button
     type="button"
-    class="flex w-full flex-col items-start gap-0.5 rounded-xl border px-3 py-3 text-left transition
+    class="flex w-full flex-col items-start gap-0.5 rounded-xl border px-3 py-2.5 text-left transition
       {mode === 'silence'
       ? 'border-vigil-500/70 bg-vigil-950/60 text-white'
       : 'border-surface-800 bg-surface-900/40 text-surface-400 hover:border-surface-600 hover:text-surface-200'}"
     onclick={() => onMode("silence")}
   >
-    <span class="text-base font-bold">✂ Silencios</span>
-    <span class="text-[10px] leading-snug opacity-75">Cortar pausas y exportar el vídeo largo</span>
+    <span class="text-sm font-bold">✂ Silencios</span>
+    <span class="text-[10px] leading-snug opacity-75">Cortar pausas</span>
   </button>
 
   <button
     type="button"
-    class="flex w-full flex-col items-start gap-0.5 rounded-xl border px-3 py-3 text-left transition
+    class="flex w-full flex-col items-start gap-0.5 rounded-xl border px-3 py-2.5 text-left transition
       {mode === 'clips'
       ? 'border-amber-500/60 bg-amber-950/50 text-white'
       : 'border-surface-800 bg-surface-900/40 text-surface-400 hover:border-surface-600 hover:text-surface-200'}"
     onclick={() => onMode("clips")}
   >
-    <span class="text-base font-bold">📱 Shorts 9:16</span>
-    <span class="text-[10px] leading-snug opacity-75">Clips virales · revisar · exportar vertical</span>
+    <span class="text-sm font-bold">📱 Shorts 9:16</span>
+    <span class="text-[10px] leading-snug opacity-75">Clips verticales</span>
+  </button>
+
+  <button
+    type="button"
+    class="flex w-full flex-col items-start gap-0.5 rounded-xl border px-3 py-2.5 text-left transition
+      {mode === 'visual'
+      ? 'border-sky-500/60 bg-sky-950/40 text-white'
+      : 'border-surface-800 bg-surface-900/40 text-surface-400 hover:border-surface-600 hover:text-surface-200'}"
+    onclick={() => onMode("visual")}
+  >
+    <span class="text-sm font-bold">🖼 Visual</span>
+    <span class="text-[10px] leading-snug opacity-75">B-roll / biblioteca</span>
   </button>
 
   <div class="mt-auto rounded-lg border border-surface-800/80 bg-surface-900/50 p-2 text-[9px] leading-relaxed text-surface-500">
     {#if mode === "silence"}
-      1) Abre video<br />
-      2) Revisa excepciones<br />
-      3) ▶ Oír cortado<br />
-      4) Exportar
+      1) Analiza<br />2) Supervisa<br />3) Oye<br />4) Exporta
+    {:else if mode === "clips"}
+      1) Sacar clips<br />2) Clasificar<br />3) Export 9:16
     {:else}
-      1) Sacar clips<br />
-      2) Ver 9:16 al centro<br />
-      3) Aprobar / Descartar<br />
-      4) Exportar 9:16
+      1) Analiza silencios<br />2) + Imágenes<br />3) Sugerencias<br />4) Aceptar · Render
     {/if}
   </div>
 </aside>

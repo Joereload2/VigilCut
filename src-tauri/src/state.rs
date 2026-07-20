@@ -30,6 +30,9 @@ impl AppState {
             "models",
             "inbox",
             "outbox",
+            "library",
+            "library/assets",
+            "library/thumbs",
         ] {
             std::fs::create_dir_all(root.join(sub))?;
         }

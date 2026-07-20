@@ -13,3 +13,5 @@ pub mod progress;
 pub mod project;
 pub mod segment;
 pub mod subtitle;
+pub mod transcript;
+pub mod visual;

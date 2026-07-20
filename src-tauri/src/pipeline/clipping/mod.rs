@@ -15,4 +15,4 @@ mod transcript;
 pub use engine::{run_clipping_analysis, run_clipping_analysis_with_progress};
 pub use export_clips::{export_approved_clips, export_one_clip};
 pub use framing::{compute_crop_filter, default_framing_for_media};
-pub use transcript::{cues_to_semantic_units, load_transcript_cues};
+pub use transcript::{cues_to_semantic_units, load_transcript_cues, parse_srt_cues};

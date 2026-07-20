@@ -375,6 +375,54 @@ export async function exportClips(params: {
   });
 }
 
+// ── Visual library + transcript enrichment ───────────────────────────────
+
+export async function visualRunEnrichment(
+  mediaPath: string,
+  analysisRunId?: string | null,
+  transcriptPath?: string | null,
+  preferWhisper = false,
+): Promise<unknown> {
+  return invoke("visual_run_enrichment", {
+    mediaPath,
+    analysisRunId: analysisRunId ?? null,
+    transcriptPath: transcriptPath ?? null,
+    preferWhisper,
+  });
+}
+
+export async function visualListAssets(query?: string | null, limit = 100): Promise<unknown> {
+  return invoke("visual_list_assets", { query: query ?? null, limit });
+}
+
+export async function visualImportImage(
+  path: string,
+  title?: string | null,
+  tags: string[] = [],
+  concepts: string[] = [],
+): Promise<unknown> {
+  return invoke("visual_import_image", { path, title: title ?? null, tags, concepts });
+}
+
+export async function visualSetSuggestionStatus(
+  suggestionId: string,
+  status: string,
+): Promise<unknown> {
+  return invoke("visual_set_suggestion_status", { suggestionId, status });
+}
+
+export async function visualGetSession(): Promise<unknown> {
+  return invoke("visual_get_session");
+}
+
+export async function visualRenderPlan(
+  cutVideoPath: string,
+  outputPath: string,
+  mediaPath: string,
+): Promise<string> {
+  return invoke("visual_render_plan", { cutVideoPath, outputPath, mediaPath });
+}
+
 /** Demo segments for Vite-only UI work without backend. */
 export function demoSegments(duration = 60): Segment[] {
   const segs: Segment[] = [];

@@ -8,10 +8,13 @@ mod state;
 
 use commands::analyze::AnalysisCache;
 use commands::clipping::ClippingCache;
+use commands::visual::VisualSessionState;
 use commands::watch::InboxWatchState;
 use job_control::JobControl;
+use pipeline::visual::VisualSession;
 use state::AppState;
 use tauri::Manager;
+use std::sync::Mutex;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -32,6 +35,7 @@ pub fn run() {
         .manage(ClippingCache::default())
         .manage(InboxWatchState::default())
         .manage(JobControl::default())
+        .manage(Mutex::new(VisualSession::default()) as VisualSessionState)
         .invoke_handler(tauri::generate_handler![
             // System
             commands::system::get_app_info,
@@ -98,6 +102,15 @@ pub fn run() {
             commands::color::analyze_color_stats,
             commands::subtitles::import_subtitles,
             commands::subtitles::generate_subtitles_whisper,
+            // Visual library + transcript enrichment
+            commands::visual::visual_run_enrichment,
+            commands::visual::visual_list_assets,
+            commands::visual::visual_import_image,
+            commands::visual::visual_update_asset,
+            commands::visual::visual_set_suggestion_status,
+            commands::visual::visual_get_session,
+            commands::visual::visual_check_edl,
+            commands::visual::visual_render_plan,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

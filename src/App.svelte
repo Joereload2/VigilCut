@@ -11,6 +11,7 @@
   import ModeNav from "$lib/components/ModeNav.svelte";
   import ShortPlayer from "$lib/components/ShortPlayer.svelte";
   import RightDock from "$lib/components/RightDock.svelte";
+  import VisualPanel from "$lib/components/VisualPanel.svelte";
   import { projectStore } from "$lib/stores/project.svelte";
   import type { FfmpegStatus, JobProgress } from "$lib/types";
   import * as api from "$lib/utils/tauri";
@@ -18,7 +19,7 @@
   let ffmpeg = $state<FfmpegStatus | null>(null);
   let version = $state("0.1.0");
   /** Top-level work mode — always visible when a video is open */
-  let workspaceTab = $state<"silence" | "clips">("silence");
+  let workspaceTab = $state<"silence" | "clips" | "visual">("silence");
   let toast = $state<string | null>(null);
   let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -310,7 +311,7 @@
             <RightDock />
           </div>
         </main>
-      {:else}
+      {:else if workspaceTab === "clips"}
         <!-- SHORTS: ModeNav (left) | 9:16 live player | candidate list -->
         <main
           class="grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-hidden p-2 md:grid-cols-[minmax(0,1fr)_minmax(280px,400px)]"
@@ -332,6 +333,24 @@
           </div>
           <aside class="flex min-h-[300px] min-w-0 flex-col overflow-hidden">
             <ClippingPanel />
+          </aside>
+        </main>
+      {:else}
+        <!-- VISUAL: preview + visual library panel -->
+        <main
+          class="grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-hidden p-2 md:grid-cols-[minmax(0,1fr)_minmax(300px,380px)]"
+        >
+          <div class="flex min-h-0 min-w-0 flex-col gap-2 overflow-hidden">
+            <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+              <VideoPreview />
+            </div>
+            <p class="shrink-0 px-1 text-[10px] text-surface-500">
+              1) Analiza en Silencios · 2) Importa imágenes con conceptos · 3) Genera sugerencias · 4)
+              Acepta · 5) Exporta el cortado y Render plan
+            </p>
+          </div>
+          <aside class="flex min-h-[280px] min-w-0 flex-col overflow-hidden">
+            <VisualPanel />
           </aside>
         </main>
       {/if}

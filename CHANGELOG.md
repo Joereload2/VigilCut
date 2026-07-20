@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — visual library MVP
+
+### Visual enrichment (local)
+- Canonical transcript + TXT/SRT/JSON projections
+- Source↔output TimeMap from EDL (unit tests)
+- Deterministic semantic events (keywords / concepts)
+- SQLite image library (import, hash dedupe, thumbs, usage)
+- Explainable suggestions + accept/reject → VisualPlan
+- FFmpeg overlay render of accepted placements (atomic)
+- UI mode **Visual** (`VisualPanel`)
+- Design: `docs/VISUAL_LIBRARY_DESIGN.md` · Report: `docs/VISUAL_LIBRARY_IMPLEMENTATION_REPORT.md`
+
 ## 1.1.0 — 2026-07-20 (hardening)
 
 ### Safety
