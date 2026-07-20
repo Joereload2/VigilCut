@@ -907,11 +907,16 @@
     </section>
 
     {#if session?.plan}
-      <section
-        class="rounded-lg border border-surface-800 bg-surface-950/40 p-2 text-[10px] text-surface-400"
-      >
-        <div class="font-semibold text-surface-300">VisualPlan · v{session.plan.version ?? 1}</div>
-        <div>Placements: {session.plan.placements?.length ?? 0}</div>
+      <section class="rounded-lg border border-surface-800 bg-surface-950/40 p-2 text-[10px] text-surface-400">
+        <p class="font-semibold text-surface-300">
+          VisualPlan · v{session.plan.version ?? 1}
+        </p>
+        <p>
+          Imágenes en el video: {session.plan.placements?.length ?? 0} (aceptadas / adheridas)
+        </p>
+        <p class="mt-1 text-[9px] text-surface-600">
+          Usa Render plan sobre el MP4 cortado para verlas en el export.
+        </p>
       </section>
     {/if}
   </div>
