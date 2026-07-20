@@ -66,6 +66,42 @@ pub async fn visual_run_enrichment(
     .await
 }
 
+/// Force transcription via Whisper (always prefer_whisper=true). Clear action for UI.
+#[tauri::command]
+pub async fn visual_transcribe_whisper(
+    media_path: String,
+    analysis_run_id: Option<String>,
+    analysis: State<'_, AnalysisCache>,
+    visual: State<'_, VisualSessionState>,
+) -> AppResult<serde_json::Value> {
+    let st = crate::pipeline::detectors::whisper_cli::whisper_status();
+    if !st.available {
+        return Err(AppError::Invalid(format!(
+            "Whisper no está disponible. {}\n{}",
+            st.detail, st.install_hint
+        )));
+    }
+    let edl = edl_from_cache(&analysis, analysis_run_id.as_deref(), &media_path)?;
+    run_visual_enrichment(
+        PathBuf::from(&media_path).as_path(),
+        &edl,
+        None,
+        true,
+        &visual,
+    )
+    .await
+}
+
+#[tauri::command]
+pub fn visual_whisper_status() -> AppResult<crate::pipeline::detectors::whisper_cli::WhisperStatus> {
+    Ok(crate::pipeline::detectors::whisper_cli::whisper_status())
+}
+
+#[tauri::command]
+pub async fn visual_install_whisper() -> AppResult<String> {
+    crate::pipeline::detectors::whisper_cli::install_openai_whisper().await
+}
+
 #[tauri::command]
 pub fn visual_list_assets(query: Option<String>, limit: Option<usize>) -> AppResult<serde_json::Value> {
     let list = list_assets(query.as_deref(), limit.unwrap_or(100))?;

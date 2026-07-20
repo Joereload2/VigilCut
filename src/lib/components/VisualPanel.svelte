@@ -64,12 +64,18 @@
     timeMap?: { sourceDuration: number; outputDuration: number };
   } | null>(null);
   let assets = $state<Asset[]>([]);
-  let preferWhisper = $state(false);
   let showSourceTime = $state(false);
   let transcriptQuery = $state("");
   let lastMessage = $state("");
   let lastArtifacts = $state<string[]>([]);
   let explicitSrt = $state<string | null>(null);
+  let whisper = $state<{
+    available: boolean;
+    kind: string;
+    detail: string;
+    installHint: string;
+  } | null>(null);
+  let installingWhisper = $state(false);
 
   /** User-selected keyword from transcript / chips */
   let selectedWord = $state<string | null>(null);
@@ -84,7 +90,50 @@
     }
   }
 
-  async function runEnrichment() {
+  async function refreshWhisperStatus() {
+    try {
+      whisper = await api.visualWhisperStatus();
+    } catch {
+      whisper = {
+        available: false,
+        kind: "none",
+        detail: "No se pudo consultar Whisper",
+        installHint: "npm run setup:whisper",
+      };
+    }
+  }
+
+  function applyEnrichmentResult(res: {
+    transcript: NonNullable<typeof session>["transcript"];
+    semanticEvents?: SemanticEv[];
+    suggestions: Suggestion[];
+    plan: NonNullable<typeof session>["plan"];
+    planPath?: string;
+    timeMap?: { sourceDuration: number; outputDuration: number };
+    transcriptArtifacts?: [string, string][];
+  }) {
+    session = {
+      transcript: res.transcript,
+      semanticEvents: res.semanticEvents ?? [],
+      suggestions: res.suggestions,
+      plan: res.plan,
+      planPath: res.planPath,
+      timeMap: res.timeMap,
+    };
+    lastArtifacts = (res.transcriptArtifacts || []).map(([, p]) => p);
+    const nSeg = res.transcript?.segments?.length ?? 0;
+    const nSug = res.suggestions?.length ?? 0;
+    lastMessage = `Texto: ${nSeg} frases · ${nSug} sugerencias · motor ${res.transcript?.engine ?? "?"}`;
+    if (res.plan?.warnings?.length) {
+      lastMessage += ` · ${res.plan.warnings[0]}`;
+    }
+    if (nSeg === 0 && res.transcript?.warnings?.[0]) {
+      error = res.transcript.warnings[0];
+    }
+    projectStore.statusMessage = lastMessage;
+  }
+
+  async function runEnrichment(forceWhisper = false) {
     if (!projectStore.mediaPath) {
       error = "Abre un video primero";
       return;
@@ -92,13 +141,15 @@
     busy = true;
     error = null;
     projectStore.busy = true;
-    projectStore.statusMessage = "Generando transcripción y conceptos…";
+    projectStore.statusMessage = forceWhisper
+      ? "Transcribiendo con Whisper (puede tardar)…"
+      : "Cargando texto y conceptos…";
     try {
       const res = (await api.visualRunEnrichment(
         projectStore.mediaPath,
         projectStore.analysisRun?.id ?? null,
-        explicitSrt,
-        preferWhisper,
+        forceWhisper ? null : explicitSrt,
+        forceWhisper,
       )) as {
         transcript: NonNullable<typeof session>["transcript"];
         semanticEvents?: SemanticEv[];
@@ -108,26 +159,74 @@
         timeMap?: { sourceDuration: number; outputDuration: number };
         transcriptArtifacts?: [string, string][];
       };
-      session = {
-        transcript: res.transcript,
-        semanticEvents: res.semanticEvents ?? [],
-        suggestions: res.suggestions,
-        plan: res.plan,
-        planPath: res.planPath,
-        timeMap: res.timeMap,
-      };
-      lastArtifacts = (res.transcriptArtifacts || []).map(([, p]) => p);
-      const kw = keywordList.length;
-      lastMessage = `Texto listo · ${res.transcript?.segments?.length ?? 0} frases · ${kw} palabras clave · ${res.suggestions?.length ?? 0} sugerencias`;
-      if (res.plan?.warnings?.length) {
-        lastMessage += ` · ${res.plan.warnings[0]}`;
-      }
-      projectStore.statusMessage = lastMessage;
+      applyEnrichmentResult(res);
     } catch (e) {
       error = String(e);
       projectStore.error = String(e);
     } finally {
       busy = false;
+      projectStore.busy = false;
+    }
+  }
+
+  /** Explicit primary action: always runs Whisper (not a checkbox). */
+  async function runWhisper() {
+    if (!projectStore.mediaPath) {
+      error = "Abre un video primero";
+      return;
+    }
+    await refreshWhisperStatus();
+    if (!whisper?.available) {
+      error =
+        "Whisper no está instalado. Pulsa «Instalar Whisper» o en terminal: npm run setup:whisper";
+      return;
+    }
+    busy = true;
+    error = null;
+    projectStore.busy = true;
+    projectStore.statusMessage = "Whisper: extrayendo audio y transcribiendo…";
+    try {
+      const res = (await api.visualTranscribeWhisper(
+        projectStore.mediaPath,
+        projectStore.analysisRun?.id ?? null,
+      )) as {
+        transcript: NonNullable<typeof session>["transcript"];
+        semanticEvents?: SemanticEv[];
+        suggestions: Suggestion[];
+        plan: NonNullable<typeof session>["plan"];
+        planPath?: string;
+        timeMap?: { sourceDuration: number; outputDuration: number };
+        transcriptArtifacts?: [string, string][];
+      };
+      applyEnrichmentResult(res);
+      if ((res.transcript?.segments?.length ?? 0) > 0) {
+        lastMessage = `Whisper OK (${res.transcript?.engine}) · ${res.transcript?.segments?.length} frases`;
+      }
+    } catch (e) {
+      error = String(e);
+      projectStore.error = String(e);
+    } finally {
+      busy = false;
+      projectStore.busy = false;
+      await refreshWhisperStatus();
+    }
+  }
+
+  async function installWhisper() {
+    if (!api.isTauri()) return;
+    installingWhisper = true;
+    error = null;
+    projectStore.busy = true;
+    projectStore.statusMessage = "Instalando openai-whisper (pip)…";
+    try {
+      const msg = await api.visualInstallWhisper();
+      lastMessage = msg;
+      await refreshWhisperStatus();
+      projectStore.statusMessage = msg;
+    } catch (e) {
+      error = String(e);
+    } finally {
+      installingWhisper = false;
       projectStore.busy = false;
     }
   }
@@ -144,7 +243,7 @@
       if (typeof p !== "string") return;
       explicitSrt = p;
       lastMessage = `SRT seleccionado: ${p.split(/[/\\]/).pop()}`;
-      await runEnrichment();
+      await runEnrichment(false);
     } catch (e) {
       error = String(e);
     }
@@ -178,7 +277,7 @@
       lastMessage = `Imagen ligada al concepto «${concept}» (original intacto)`;
       // Re-rank if we already have transcript
       if (session?.transcript?.segments?.length) {
-        await runEnrichment();
+        await runEnrichment(false);
       }
     } catch (e) {
       error = String(e);
@@ -203,7 +302,7 @@
       await api.visualImportImage(p, concepts[0] ?? null, concepts, concepts);
       await refreshAssets();
       lastMessage = `Imagen importada · ${concepts.join(", ")}`;
-      if (session?.transcript?.segments?.length) await runEnrichment();
+      if (session?.transcript?.segments?.length) await runEnrichment(false);
     } catch (e) {
       error = String(e);
     }
@@ -229,7 +328,7 @@
       };
       await refreshAssets();
       lastMessage = `Carpeta: ${res.imported} nuevas · ${res.duplicates} dup · ${res.failed} fallos`;
-      if (session?.transcript?.segments?.length) await runEnrichment();
+      if (session?.transcript?.segments?.length) await runEnrichment(false);
     } catch (e) {
       error = String(e);
     }
@@ -401,6 +500,7 @@
 
   $effect(() => {
     void refreshAssets();
+    void refreshWhisperStatus();
   });
 </script>
 
@@ -411,13 +511,25 @@
       1) Carga el texto · 2) Pulsa una palabra · 3) Añade imagen · 4) Acepta sugerencias · 5) Render
     </div>
     <div class="mt-2 flex flex-wrap gap-1.5">
-      <button type="button" class="btn-primary text-xs" disabled={busy} onclick={runEnrichment}>
-        {busy ? "…" : "Cargar texto / sugerencias"}
+      <button
+        type="button"
+        class="btn-primary text-xs"
+        disabled={busy || installingWhisper}
+        onclick={runWhisper}
+        title={whisper?.available ? whisper.detail : "Requiere instalar Whisper"}
+      >
+        {busy ? "Transcribiendo…" : "Transcribir con Whisper"}
       </button>
       <button type="button" class="btn-secondary text-xs" disabled={busy} onclick={pickSrt}
         >Importar SRT…</button
       >
-      <button type="button" class="btn-secondary text-xs" onclick={importImageGeneric}>+ Imagen</button>
+      <button
+        type="button"
+        class="btn-ghost text-xs"
+        disabled={busy}
+        onclick={() => runEnrichment(false)}>Solo sugerencias</button
+      >
+      <button type="button" class="btn-ghost text-xs" onclick={importImageGeneric}>+ Imagen</button>
       <button type="button" class="btn-ghost text-xs" onclick={importFolder}>+ Carpeta</button>
       <button
         type="button"
@@ -429,10 +541,28 @@
         >Render plan</button
       >
     </div>
-    <label class="mt-1.5 flex items-center gap-2 text-[10px] text-surface-400">
-      <input type="checkbox" class="accent-vigil-500" bind:checked={preferWhisper} />
-      Usar Whisper si no hay SRT (lento)
-    </label>
+    <div class="mt-1.5 flex flex-wrap items-center gap-2 text-[10px]">
+      {#if whisper?.available}
+        <span class="rounded-full border border-keep/40 bg-keep/10 px-2 py-0.5 text-keep">
+          Whisper listo · {whisper.kind}
+        </span>
+      {:else}
+        <span class="rounded-full border border-amber-600/40 bg-amber-950/40 px-2 py-0.5 text-amber-200">
+          Whisper no instalado
+        </span>
+        <button
+          type="button"
+          class="btn-secondary text-[10px]"
+          disabled={installingWhisper || busy}
+          onclick={installWhisper}
+        >
+          {installingWhisper ? "Instalando…" : "Instalar Whisper"}
+        </button>
+        <span class="text-surface-600" title={whisper?.installHint || ""}
+          >o: npm run setup:whisper</span
+        >
+      {/if}
+    </div>
   </div>
 
   {#if error}
@@ -506,31 +636,52 @@
           class="rounded-xl border border-dashed border-surface-700 bg-surface-950/60 px-3 py-4 text-center"
         >
           <p class="text-[11px] text-surface-400">
-            Pulsa <strong class="text-surface-200">Cargar texto</strong> o
-            <strong class="text-surface-200">Importar SRT</strong> para ver las palabras del video.
+            Pulsa <strong class="text-surface-200">Transcribir con Whisper</strong> o
+            <strong class="text-surface-200">Importar SRT</strong> para ver el texto del video.
           </p>
-          <p class="mt-1 text-[10px] text-surface-600">
-            Luego toca una palabra clave y usa «Añadir imagen».
+          <div class="mt-3 flex flex-wrap justify-center gap-2">
+            <button
+              type="button"
+              class="btn-primary text-xs"
+              disabled={busy || installingWhisper}
+              onclick={runWhisper}>Transcribir con Whisper</button
+            >
+            <button type="button" class="btn-secondary text-xs" onclick={pickSrt}
+              >Importar SRT…</button
+            >
+          </div>
+          <p class="mt-2 text-[10px] text-surface-600">
+            Luego toca una palabra y usa «Añadir imagen».
           </p>
         </div>
       {:else if !hasText}
         <div class="rounded-xl border border-amber-800/40 bg-amber-950/20 px-3 py-3">
           <p class="text-[11px] text-amber-200/90">
-            Sin texto todavía. Importa un <strong>.srt</strong> del video o marca Whisper y vuelve a
-            cargar.
+            Sin texto todavía. Usa el botón verde <strong>Transcribir con Whisper</strong> o importa
+            un <strong>.srt</strong>.
           </p>
           <div class="mt-2 flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              class="btn-primary text-[10px]"
+              disabled={busy || installingWhisper}
+              onclick={runWhisper}
+            >
+              {busy ? "…" : "Transcribir con Whisper"}
+            </button>
             <button type="button" class="btn-secondary text-[10px]" onclick={pickSrt}
               >Importar SRT…</button
             >
-            <button
-              type="button"
-              class="btn-ghost text-[10px]"
-              onclick={() => {
-                preferWhisper = true;
-                void runEnrichment();
-              }}>Cargar con Whisper</button
-            >
+            {#if !whisper?.available}
+              <button
+                type="button"
+                class="btn-ghost text-[10px]"
+                disabled={installingWhisper}
+                onclick={installWhisper}
+              >
+                {installingWhisper ? "Instalando…" : "Instalar Whisper"}
+              </button>
+            {/if}
           </div>
           {#if session.transcript?.warnings?.[0]}
             <p class="mt-2 text-[9px] text-surface-500">{session.transcript.warnings[0]}</p>

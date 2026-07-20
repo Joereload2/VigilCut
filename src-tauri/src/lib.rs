@@ -104,6 +104,9 @@ pub fn run() {
             commands::subtitles::generate_subtitles_whisper,
             // Visual library + transcript enrichment
             commands::visual::visual_run_enrichment,
+            commands::visual::visual_transcribe_whisper,
+            commands::visual::visual_whisper_status,
+            commands::visual::visual_install_whisper,
             commands::visual::visual_list_assets,
             commands::visual::visual_import_image,
             commands::visual::visual_import_folder,

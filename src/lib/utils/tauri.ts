@@ -391,6 +391,29 @@ export async function visualRunEnrichment(
   });
 }
 
+export async function visualTranscribeWhisper(
+  mediaPath: string,
+  analysisRunId?: string | null,
+): Promise<unknown> {
+  return invoke("visual_transcribe_whisper", {
+    mediaPath,
+    analysisRunId: analysisRunId ?? null,
+  });
+}
+
+export async function visualWhisperStatus(): Promise<{
+  available: boolean;
+  kind: string;
+  detail: string;
+  installHint: string;
+}> {
+  return invoke("visual_whisper_status");
+}
+
+export async function visualInstallWhisper(): Promise<string> {
+  return invoke("visual_install_whisper");
+}
+
 export async function visualListAssets(query?: string | null, limit = 100): Promise<unknown> {
   return invoke("visual_list_assets", { query: query ?? null, limit });
 }
