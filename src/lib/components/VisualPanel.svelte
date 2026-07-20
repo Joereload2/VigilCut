@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { convertFileSrc } from "@tauri-apps/api/core";
   import { projectStore } from "$lib/stores/project.svelte";
   import * as api from "$lib/utils/tauri";
 
@@ -25,6 +26,7 @@
     matchReasons: string[];
     status: string;
     assetTitle?: string;
+    thumbnailPath?: string;
     outputSpan: { start: number; end: number };
     sourceSpan: { start: number; end: number };
   };
@@ -35,10 +37,44 @@
     concepts: string[];
     tags: string[];
     thumbnailPath?: string;
+    managedPath?: string;
     timesUsed?: number;
     licenseStatus?: string;
     status?: string;
   };
+
+  function fileUrl(path?: string | null): string | null {
+    if (!path) return null;
+    try {
+      return convertFileSrc(path.replace(/\\/g, "/"));
+    } catch {
+      try {
+        return convertFileSrc(path);
+      } catch {
+        return null;
+      }
+    }
+  }
+
+  function isAccepted(status: string): boolean {
+    const s = (status || "").toLowerCase();
+    return s === "accepted";
+  }
+
+  function isRejected(status: string): boolean {
+    return (status || "").toLowerCase() === "rejected";
+  }
+
+  function goToSourceTime(t: number, end?: number) {
+    const start = Math.max(0, t);
+    projectStore.previewMode = "original";
+    projectStore.currentTime = start;
+    window.dispatchEvent(
+      new CustomEvent("vigilcut:play-from", {
+        detail: { t: start, end: end ?? start + 4, play: true },
+      }),
+    );
+  }
 
   const STOP = new Set([
     "el","la","los","las","un","una","unos","unas","de","del","al","a","en","y","o",
@@ -313,20 +349,27 @@
       };
 
       await refreshAssets();
+      // Normalize statuses for UI
+      const suggestions = (res.suggestions ?? session?.suggestions ?? []).map((s) => ({
+        ...s,
+        status: (s.status || "suggested").toLowerCase(),
+      }));
       // Merge into session — never drop transcript
       session = {
         transcript: res.transcript ?? session?.transcript,
         semanticEvents: session?.semanticEvents,
-        suggestions: res.suggestions ?? session?.suggestions ?? [],
+        suggestions,
         plan: res.plan ?? session?.plan,
         planPath: session?.planPath,
         timeMap: res.timeMap ?? session?.timeMap,
       };
       lastMessage =
         res.message ||
-        `Imagen «${concept}» adherida al video (transcripción conservada)`;
+        `Imagen «${concept}» adherida al video (ya en el plan; no hace falta Aceptar)`;
       projectStore.statusMessage = lastMessage;
       error = null;
+      // Jump preview to that phrase so the user sees where it will appear
+      goToSourceTime(srcStart, srcEnd);
     } catch (e) {
       error = String(e);
     }
@@ -418,17 +461,18 @@
         session = {
           ...session,
           suggestions: session.suggestions?.map((s) =>
-            s.id === id ? { ...s, status } : s,
+            s.id === id ? { ...s, status: status.toLowerCase() } : s,
           ),
           plan: plan as typeof session.plan,
         };
       }
       lastMessage =
         status === "accepted"
-          ? "Imagen aceptada en el VisualPlan"
+          ? "Imagen en el plan del video"
           : status === "rejected"
-            ? "Sugerencia rechazada"
+            ? "Imagen quitada del plan"
             : `Estado: ${status}`;
+      projectStore.statusMessage = lastMessage;
     } catch (e) {
       error = String(e);
     }
@@ -534,8 +578,9 @@
   });
 
   const acceptedCount = $derived(
-    session?.suggestions?.filter((s) => s.status === "accepted").length ?? 0,
+    session?.suggestions?.filter((s) => isAccepted(s.status)).length ?? 0,
   );
+  const planCount = $derived(session?.plan?.placements?.length ?? 0);
 
   const hasText = $derived((session?.transcript?.segments?.length ?? 0) > 0);
 
@@ -835,18 +880,35 @@
       </div>
       {#if assets.length === 0}
         <p class="text-[10px] text-surface-500">
-          Aún no hay imágenes. Selecciona una palabra y pulsa <strong>Añadir imagen</strong>. No se
-          descarga de Internet; el original no se modifica.
+          Aún no hay imágenes. Selecciona una palabra y pulsa
+          <strong>Añadir y adherir al video</strong>.
         </p>
       {:else}
         {@const list = selectedWord && assetsForSelected.length ? assetsForSelected : assets}
-        <ul class="space-y-1">
+        <ul class="space-y-1.5">
           {#each list.slice(0, 10) as a (a.id)}
-            <li class="rounded-lg border border-surface-800 bg-surface-950/50 px-2 py-1.5 text-[10px]">
-              <div class="font-medium text-surface-200">{a.title}</div>
-              <div class="text-surface-500">
-                {(a.concepts || []).join(", ") || (a.tags || []).join(", ") || "—"}
-                {#if a.timesUsed}· {a.timesUsed}×{/if}
+            {@const thumb = fileUrl(a.thumbnailPath)}
+            <li
+              class="flex items-center gap-2 rounded-lg border border-surface-800 bg-surface-950/50 px-2 py-1.5 text-[10px]"
+            >
+              {#if thumb}
+                <img
+                  src={thumb}
+                  alt=""
+                  class="h-10 w-10 shrink-0 rounded object-cover ring-1 ring-surface-700"
+                />
+              {:else}
+                <div
+                  class="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-surface-800 text-[9px] text-surface-500"
+                >
+                  img
+                </div>
+              {/if}
+              <div class="min-w-0 flex-1">
+                <div class="truncate font-medium text-surface-200">{a.title}</div>
+                <div class="truncate text-surface-500">
+                  {(a.concepts || []).join(", ") || (a.tags || []).join(", ") || "—"}
+                </div>
               </div>
             </li>
           {/each}
@@ -854,51 +916,103 @@
       {/if}
     </section>
 
-    <!-- SUGGESTIONS -->
+    <!-- SUGGESTIONS / ATTACHMENTS -->
     <section>
       <div class="mb-1 text-[11px] font-semibold text-surface-300">
-        Sugerencias ({session?.suggestions?.length ?? 0})
+        En el video ({session?.suggestions?.length ?? 0})
         {#if acceptedCount}
-          <span class="font-normal text-keep"> · {acceptedCount} aceptada(s)</span>
+          <span class="font-normal text-keep"> · {acceptedCount} en el plan</span>
         {/if}
       </div>
       {#if !session?.suggestions?.length}
         <p class="text-[10px] text-surface-500">
-          Cuando haya texto + imágenes con el mismo concepto, aparecerán aquí para aceptar o
-          rechazar.
+          Elige una palabra del texto y <strong>Añadir y adherir al video</strong>. La imagen queda
+          en el plan automáticamente (no hace falta pulsar Aceptar).
         </p>
       {:else}
         <ul class="space-y-2">
           {#each session.suggestions as s (s.id)}
+            {@const ok = isAccepted(s.status)}
+            {@const no = isRejected(s.status)}
+            {@const thumb = fileUrl(s.thumbnailPath)}
             <li
               class="rounded-xl border p-2 text-[10px]
-                {s.status === 'accepted'
-                ? 'border-keep/40 bg-keep/10'
-                : s.status === 'rejected'
+                {ok
+                ? 'border-keep/50 bg-keep/10'
+                : no
                   ? 'border-surface-800 opacity-50'
                   : 'border-surface-800 bg-surface-950/50'}"
             >
-              <div class="font-semibold text-surface-100">
-                {s.assetTitle || s.assetId}
-                <span class="font-mono text-surface-500">
-                  · {s.outputSpan.start.toFixed(1)}–{s.outputSpan.end.toFixed(1)}s · score
-                  {Math.round(s.matchScore * 100)}
-                </span>
+              <div class="flex gap-2">
+                {#if thumb}
+                  <img
+                    src={thumb}
+                    alt=""
+                    class="h-12 w-12 shrink-0 rounded-lg object-cover ring-1 ring-surface-700"
+                  />
+                {:else}
+                  <div
+                    class="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-surface-800 text-[9px] text-surface-500"
+                  >
+                    sin mini
+                  </div>
+                {/if}
+                <div class="min-w-0 flex-1">
+                  <div class="flex flex-wrap items-center gap-1.5">
+                    <span class="font-semibold text-surface-100"
+                      >{s.assetTitle || s.assetId}</span
+                    >
+                    {#if ok}
+                      <span
+                        class="rounded-full border border-keep/40 bg-keep/20 px-1.5 py-0.5 text-[9px] font-semibold text-keep"
+                        >En el plan ✓</span
+                      >
+                    {:else if no}
+                      <span class="text-[9px] text-surface-500">Rechazada</span>
+                    {:else}
+                      <span class="text-[9px] text-amber-300">Pendiente</span>
+                    {/if}
+                  </div>
+                  <div class="font-mono text-surface-500">
+                    salida {s.outputSpan.start.toFixed(1)}–{s.outputSpan.end.toFixed(1)}s · fuente
+                    {s.sourceSpan.start.toFixed(1)}–{s.sourceSpan.end.toFixed(1)}s
+                  </div>
+                  <div class="mt-0.5 truncate text-surface-600">
+                    {(s.matchReasons || []).join(" · ")}
+                  </div>
+                </div>
               </div>
-              <div class="mt-0.5 text-surface-500">{(s.matchReasons || []).join(" · ")}</div>
-              <div class="mt-1.5 flex gap-1">
+              <div class="mt-1.5 flex flex-wrap gap-1">
                 <button
                   type="button"
-                  class="btn-ghost text-[10px] text-keep"
-                  disabled={s.status === "accepted"}
-                  onclick={() => setStatus(s.id, "accepted")}>Aceptar</button
+                  class="btn-ghost text-[10px] text-sky-300"
+                  onclick={() => goToSourceTime(s.sourceSpan.start, s.sourceSpan.end)}
                 >
-                <button
-                  type="button"
-                  class="btn-ghost text-[10px] text-cut"
-                  disabled={s.status === "rejected"}
-                  onclick={() => setStatus(s.id, "rejected")}>Rechazar</button
-                >
+                  Ir al momento
+                </button>
+                {#if !ok && !no}
+                  <button
+                    type="button"
+                    class="btn-ghost text-[10px] text-keep"
+                    onclick={() => setStatus(s.id, "accepted")}>Aceptar</button
+                  >
+                {/if}
+                {#if !no}
+                  <button
+                    type="button"
+                    class="btn-ghost text-[10px] text-cut"
+                    onclick={() => setStatus(s.id, "rejected")}
+                  >
+                    {ok ? "Quitar del plan" : "Rechazar"}
+                  </button>
+                {/if}
+                {#if no}
+                  <button
+                    type="button"
+                    class="btn-ghost text-[10px] text-keep"
+                    onclick={() => setStatus(s.id, "accepted")}>Volver a poner</button
+                  >
+                {/if}
               </div>
             </li>
           {/each}
@@ -906,18 +1020,34 @@
       {/if}
     </section>
 
-    {#if session?.plan}
-      <section class="rounded-lg border border-surface-800 bg-surface-950/40 p-2 text-[10px] text-surface-400">
-        <p class="font-semibold text-surface-300">
-          VisualPlan · v{session.plan.version ?? 1}
+    {#if planCount > 0}
+      <section
+        class="rounded-xl border border-keep/40 bg-keep/10 p-3 text-[11px] text-surface-200"
+      >
+        <p class="font-semibold text-keep">
+          Plan listo · {planCount} imagen(es) en el video
         </p>
-        <p>
-          Imágenes en el video: {session.plan.placements?.length ?? 0} (aceptadas / adheridas)
+        <p class="mt-1 text-[10px] text-surface-400">
+          Ya están adheridas (no hace falta Aceptar). Para verlas en un archivo MP4:
         </p>
-        <p class="mt-1 text-[9px] text-surface-600">
-          Usa Render plan sobre el MP4 cortado para verlas en el export.
-        </p>
+        <ol class="mt-1 list-decimal space-y-0.5 pl-4 text-[10px] text-surface-400">
+          <li>Exporta el video cortado en modo Silencios (si aún no lo hiciste).</li>
+          <li>Pulsa <strong class="text-surface-200">Render plan</strong> arriba.</li>
+        </ol>
+        <button
+          type="button"
+          class="btn-primary mt-2 w-full text-xs"
+          disabled={busy}
+          onclick={renderPlan}
+        >
+          Render plan (generar MP4 con imágenes)
+        </button>
+      </section>
+    {:else if session?.plan}
+      <section class="rounded-lg border border-surface-800 bg-surface-950/40 p-2 text-[10px] text-surface-500">
+        VisualPlan vacío — adhiere una imagen desde el texto.
       </section>
     {/if}
   </div>
 </div>
+
