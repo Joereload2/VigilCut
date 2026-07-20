@@ -2,9 +2,6 @@
   import { onMount } from "svelte";
   import TopBar from "$lib/components/TopBar.svelte";
   import VideoPreview from "$lib/components/VideoPreview.svelte";
-  import Timeline from "$lib/components/Timeline.svelte";
-  import SidePanel from "$lib/components/SidePanel.svelte";
-  import ExceptionQueue from "$lib/components/ExceptionQueue.svelte";
   import BatchPanel from "$lib/components/BatchPanel.svelte";
   import StatusBar from "$lib/components/StatusBar.svelte";
   import Welcome from "$lib/components/Welcome.svelte";
@@ -13,6 +10,7 @@
   import ClippingPanel from "$lib/components/ClippingPanel.svelte";
   import ModeNav from "$lib/components/ModeNav.svelte";
   import ShortPlayer from "$lib/components/ShortPlayer.svelte";
+  import RightDock from "$lib/components/RightDock.svelte";
   import { projectStore } from "$lib/stores/project.svelte";
   import type { FfmpegStatus, JobProgress } from "$lib/types";
   import * as api from "$lib/utils/tauri";
@@ -292,42 +290,25 @@
       <ModeNav mode={workspaceTab} onMode={(m) => (workspaceTab = m)} />
 
       {#if workspaceTab === "silence"}
+        <!-- 3-zone layout: [ModeNav] | stage (video+actions) | RightDock tabs -->
         <main
-          class="grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-hidden p-2 lg:grid-cols-[minmax(0,1.4fr)_minmax(260px,320px)]"
+          class="grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-hidden p-2 md:grid-cols-[minmax(0,1fr)_minmax(300px,360px)]"
         >
-          <div class="flex min-h-0 min-w-0 flex-col gap-2">
-            <div class="flex min-h-[300px] flex-1 flex-col overflow-hidden lg:min-h-[380px]">
+          <div class="flex min-h-0 min-w-0 flex-col gap-2 overflow-hidden">
+            <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
               <VideoPreview />
             </div>
-            <ActionBar
-              onApply={() => exportVideo(false)}
-              onApplyAs={() => exportVideo(true)}
-              onListenResult={listenResult}
-            />
-            <details
-              class="max-h-[36%] shrink-0 overflow-hidden rounded-xl border border-surface-800 bg-surface-900/40"
-            >
-              <summary
-                class="cursor-pointer select-none px-3 py-2 text-xs font-medium text-surface-400 hover:text-surface-200"
-              >
-                Supervisión ({projectStore.pendingExceptionCount} excepciones) · timeline
-                ({projectStore.segments.length})
-              </summary>
-              <div class="max-h-56 space-y-2 overflow-y-auto border-t border-surface-800 p-2">
-                <ExceptionQueue />
-                <details class="rounded-lg border border-surface-800">
-                  <summary class="cursor-pointer px-2 py-1 text-[10px] text-surface-500"
-                    >Timeline diagnóstico</summary
-                  >
-                  <Timeline />
-                </details>
-              </div>
-            </details>
+            <div class="shrink-0">
+              <ActionBar
+                onApply={() => exportVideo(false)}
+                onApplyAs={() => exportVideo(true)}
+                onListenResult={listenResult}
+              />
+            </div>
           </div>
-          <aside class="min-h-0 space-y-2 overflow-y-auto">
-            <SidePanel />
-            <BatchPanel />
-          </aside>
+          <div class="flex min-h-[280px] min-w-0 flex-col overflow-hidden md:min-h-0">
+            <RightDock />
+          </div>
         </main>
       {:else}
         <!-- SHORTS: ModeNav (left) | 9:16 live player | candidate list -->

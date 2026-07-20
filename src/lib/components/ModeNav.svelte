@@ -7,11 +7,11 @@
 </script>
 
 <aside
-  class="flex w-[200px] shrink-0 flex-col gap-2 border-r border-surface-800 bg-surface-950/95 p-3"
-  aria-label="Navegación"
+  class="flex w-[168px] shrink-0 flex-col gap-2 border-r border-surface-800 bg-surface-950 p-2.5"
+  aria-label="Modo de trabajo"
 >
-  <div class="mb-1 px-1 text-[10px] font-bold uppercase tracking-wider text-surface-500">
-    VigilCut
+  <div class="mb-0.5 px-1 text-[10px] font-bold uppercase tracking-wider text-surface-500">
+    Modo
   </div>
 
   <button
