@@ -211,13 +211,9 @@
     const dy = e.clientY - originY;
     if (Math.abs(dx) + Math.abs(dy) > 2) dragMoved = true;
 
-    if (dragMode === "frame") {
-      const x = (e.clientX - r.left) / r.width;
-      const y = (e.clientY - r.top) / r.height;
-      applyFocus(x, y, false);
-    } else {
-      applyFocus(originFx - dx / r.width, originFy - dy / r.height, false);
-    }
+    // Mouse and green frame move in the SAME direction (no invert).
+    // dx>0 (right) → focusX up → frame goes right.
+    applyFocus(originFx + dx / r.width, originFy + dy / r.height, false);
   }
 
   function onWinUp(e: PointerEvent) {
