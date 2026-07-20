@@ -15,9 +15,9 @@ use crate::pipeline::visual::library::{
 };
 use crate::pipeline::visual::render::render_visual_plan;
 use crate::pipeline::visual::{
-    export_session_transcript, import_library_image, invalidate_if_edl_changed, load_visual_plan,
-    run_visual_enrichment, run_visual_enrichment_with_progress, save_visual_plan,
-    set_suggestion_status, VisualSession,
+    attach_image_to_moment, export_session_transcript, import_library_image,
+    invalidate_if_edl_changed, load_visual_plan, run_visual_enrichment,
+    run_visual_enrichment_with_progress, save_visual_plan, set_suggestion_status, VisualSession,
 };
 
 pub type VisualSessionState = Mutex<VisualSession>;
@@ -152,6 +152,31 @@ pub fn visual_import_image(
         concepts.unwrap_or_default(),
     )?;
     Ok(serde_json::to_value(a)?)
+}
+
+/// Import image + attach as accepted placement at a transcript moment.
+/// Does not rebuild or clear the session transcript.
+#[tauri::command]
+pub fn visual_attach_image(
+    media_path: String,
+    analysis_run_id: Option<String>,
+    path: String,
+    concept: String,
+    source_start: f64,
+    source_end: f64,
+    analysis: State<'_, AnalysisCache>,
+    visual: State<'_, VisualSessionState>,
+) -> AppResult<serde_json::Value> {
+    let edl = edl_from_cache(&analysis, analysis_run_id.as_deref(), &media_path)?;
+    attach_image_to_moment(
+        &visual,
+        &edl,
+        PathBuf::from(&media_path).as_path(),
+        PathBuf::from(&path).as_path(),
+        &concept,
+        source_start,
+        source_end,
+    )
 }
 
 #[tauri::command]

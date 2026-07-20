@@ -109,6 +109,7 @@ pub fn run() {
             commands::visual::visual_install_whisper,
             commands::visual::visual_list_assets,
             commands::visual::visual_import_image,
+            commands::visual::visual_attach_image,
             commands::visual::visual_import_folder,
             commands::visual::visual_update_asset,
             commands::visual::visual_list_usage,

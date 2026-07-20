@@ -427,6 +427,25 @@ export async function visualImportImage(
   return invoke("visual_import_image", { path, title: title ?? null, tags, concepts });
 }
 
+/** Import image and attach as accepted VisualPlan placement at a transcript moment. */
+export async function visualAttachImage(params: {
+  mediaPath: string;
+  analysisRunId?: string | null;
+  path: string;
+  concept: string;
+  sourceStart: number;
+  sourceEnd: number;
+}): Promise<unknown> {
+  return invoke("visual_attach_image", {
+    mediaPath: params.mediaPath,
+    analysisRunId: params.analysisRunId ?? null,
+    path: params.path,
+    concept: params.concept,
+    sourceStart: params.sourceStart,
+    sourceEnd: params.sourceEnd,
+  });
+}
+
 export async function visualImportFolder(
   path: string,
   tags: string[] = [],

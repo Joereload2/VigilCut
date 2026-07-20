@@ -271,28 +271,73 @@
       error = "Selecciona una palabra del texto o escribe un concepto";
       return;
     }
+    if (!projectStore.mediaPath) {
+      error = "Abre un video primero";
+      return;
+    }
     if (!api.isTauri()) return;
+
+    // Need a moment on the timeline (selected phrase or current playhead)
+    let srcStart = selectedSeg?.span.start;
+    let srcEnd = selectedSeg?.span.end;
+    if (srcStart == null || srcEnd == null) {
+      const t = projectStore.currentTime || 0;
+      srcStart = Math.max(0, t - 0.5);
+      srcEnd = t + 3.5;
+    }
+
     try {
       const { open } = await import("@tauri-apps/plugin-dialog");
       const p = await open({
         multiple: false,
         filters: [{ name: "Imagen", extensions: ["jpg", "jpeg", "png", "webp"] }],
-        title: `Imagen para: ${concept}`,
+        title: `Imagen para: ${concept} (${srcStart.toFixed(1)}s)`,
       });
       if (typeof p !== "string") return;
-      await api.visualImportImage(p, concept, [concept], [concept]);
+
+      // Attach without re-running Whisper / wiping transcript
+      const res = (await api.visualAttachImage({
+        mediaPath: projectStore.mediaPath,
+        analysisRunId: projectStore.analysisRun?.id ?? null,
+        path: p,
+        concept,
+        sourceStart: srcStart,
+        sourceEnd: srcEnd,
+      })) as {
+        message?: string;
+        transcript?: NonNullable<typeof session>["transcript"];
+        suggestions?: Suggestion[];
+        plan?: NonNullable<typeof session>["plan"];
+        timeMap?: { sourceDuration: number; outputDuration: number };
+        suggestion?: Suggestion;
+      };
+
       await refreshAssets();
-      lastMessage = `Imagen ligada al concepto «${concept}» (original intacto)`;
-      // Re-rank if we already have transcript
-      if (session?.transcript?.segments?.length) {
-        await runEnrichment(false);
-      }
+      // Merge into session — never drop transcript
+      session = {
+        transcript: res.transcript ?? session?.transcript,
+        semanticEvents: session?.semanticEvents,
+        suggestions: res.suggestions ?? session?.suggestions ?? [],
+        plan: res.plan ?? session?.plan,
+        planPath: session?.planPath,
+        timeMap: res.timeMap ?? session?.timeMap,
+      };
+      lastMessage =
+        res.message ||
+        `Imagen «${concept}» adherida al video (transcripción conservada)`;
+      projectStore.statusMessage = lastMessage;
+      error = null;
     } catch (e) {
       error = String(e);
     }
   }
 
   async function importImageGeneric() {
+    // If a word is selected, attach to that moment; else library-only import
+    if (selectedWord || manualKeyword.trim()) {
+      await importImageForSelection();
+      return;
+    }
     if (!api.isTauri()) return;
     try {
       const { open } = await import("@tauri-apps/plugin-dialog");
@@ -301,7 +346,7 @@
         filters: [{ name: "Imagen", extensions: ["jpg", "jpeg", "png", "webp"] }],
       });
       if (typeof p !== "string") return;
-      const def = selectedWord || "concepto";
+      const def = "concepto";
       const raw = prompt("Conceptos (coma). Primera = principal", def) ?? def;
       const concepts = raw
         .split(",")
@@ -309,8 +354,7 @@
         .filter(Boolean);
       await api.visualImportImage(p, concepts[0] ?? null, concepts, concepts);
       await refreshAssets();
-      lastMessage = `Imagen importada · ${concepts.join(", ")}`;
-      if (session?.transcript?.segments?.length) await runEnrichment(false);
+      lastMessage = `Imagen en biblioteca · ${concepts.join(", ")}. Selecciona una palabra del texto y «Añadir imagen» para adherirla al video.`;
     } catch (e) {
       error = String(e);
     }
@@ -335,8 +379,8 @@
         failed: number;
       };
       await refreshAssets();
-      lastMessage = `Carpeta: ${res.imported} nuevas · ${res.duplicates} dup · ${res.failed} fallos`;
-      if (session?.transcript?.segments?.length) await runEnrichment(false);
+      lastMessage = `Carpeta: ${res.imported} nuevas · ${res.duplicates} dup · ${res.failed} fallos (transcripción intacta)`;
+      // Do NOT re-run enrichment — that used to wipe Whisper text
     } catch (e) {
       error = String(e);
     }
@@ -616,8 +660,9 @@
       class="btn-primary text-xs"
       disabled={!(selectedWord || manualKeyword.trim())}
       onclick={importImageForSelection}
+      title="Importa la imagen y la pega en el VisualPlan en el momento de la frase"
     >
-      Añadir imagen
+      Añadir y adherir al video
     </button>
   </div>
 
