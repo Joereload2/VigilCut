@@ -429,9 +429,176 @@ fn main() -> ExitCode {
                         ExitCode::FAILURE
                     }
                 },
+                "enrich" => {
+                    // Headless: silence EDL + transcript + suggestions + plan JSON (no auto-accept).
+                    let media = args.get(1).cloned().unwrap_or_default();
+                    let out = args.get(2).cloned().unwrap_or_else(|| {
+                        PathBuf::from(&media)
+                            .parent()
+                            .map(|p| p.join("visual-out").to_string_lossy().into_owned())
+                            .unwrap_or_else(|| "visual-out".into())
+                    });
+                    if media.is_empty() {
+                        eprintln!(
+                            "usage: vigilcut-cli visual enrich <video.mp4> [outdir] [--srt path] [--whisper] [--policy factory]"
+                        );
+                        return ExitCode::FAILURE;
+                    }
+                    let media_p = PathBuf::from(&media);
+                    let out_dir = PathBuf::from(&out);
+                    let _ = std::fs::create_dir_all(&out_dir);
+                    let srt = arg_value(&args, "--srt").map(PathBuf::from);
+                    let whisper = args.iter().any(|a| a == "--whisper");
+                    let policy = policy_from_args(&args);
+                    let run = match rt.block_on(
+                        vigilcut_lib::pipeline::engine::run_silence_analysis(&media_p, &policy),
+                    ) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            eprintln!("analyze error: {e}");
+                            return ExitCode::FAILURE;
+                        }
+                    };
+                    let run_id = vigilcut_lib::models::visual::edl_fingerprint(&run.edl.keep_ranges());
+                    let time_map = vigilcut_lib::pipeline::time_map::TimeMap::from_edl(&run.edl);
+                    let tr = match rt.block_on(
+                        vigilcut_lib::pipeline::transcript_engine::build_transcript(
+                            &media_p,
+                            srt.as_deref(),
+                            whisper,
+                            Some(run_id.clone()),
+                        ),
+                    ) {
+                        Ok(t) => t,
+                        Err(e) => {
+                            eprintln!("transcript error: {e}");
+                            return ExitCode::FAILURE;
+                        }
+                    };
+                    let stem = media_p
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("media");
+                    if let Err(e) =
+                        vigilcut_lib::pipeline::transcript_engine::write_transcript_artifacts(
+                            &tr, &out_dir, stem,
+                        )
+                    {
+                        eprintln!("warn: transcript artifacts: {e}");
+                    }
+                    let semantics =
+                        vigilcut_lib::pipeline::semantic::extract_semantic_events(
+                            &tr, &run_id, &time_map,
+                        );
+                    let assets =
+                        vigilcut_lib::pipeline::visual::library::list_active_assets()
+                            .unwrap_or_default();
+                    let suggestions = vigilcut_lib::pipeline::visual::match_rank::rank_suggestions(
+                        &semantics,
+                        &assets,
+                        time_map.output_duration,
+                        &vigilcut_lib::pipeline::visual::match_rank::MatchConfig::default(),
+                    );
+                    let mut plan = vigilcut_lib::models::visual::VisualPlan::new(
+                        &run_id,
+                        media_p.to_string_lossy(),
+                        run_id.clone(),
+                    );
+                    if assets.is_empty() {
+                        plan.warnings.push(
+                            "Biblioteca vacía: visual import <imagenes> --concepts …".into(),
+                        );
+                    }
+                    if suggestions.is_empty() {
+                        plan.warnings.push(
+                            "Sin sugerencias (transcripción o conceptos de biblioteca).".into(),
+                        );
+                    }
+                    let sug_path = out_dir.join(format!("{stem}.visual-suggestions.json"));
+                    let plan_path = out_dir.join(format!("{stem}.visual-plan.json"));
+                    let sem_path = out_dir.join(format!("{stem}.semantic-events.json"));
+                    let _ = std::fs::write(
+                        &sug_path,
+                        serde_json::to_string_pretty(&suggestions).unwrap_or_default(),
+                    );
+                    let _ = std::fs::write(
+                        &sem_path,
+                        serde_json::to_string_pretty(&semantics).unwrap_or_default(),
+                    );
+                    if let Err(e) =
+                        vigilcut_lib::pipeline::visual::save_visual_plan(&plan, Some(&plan_path))
+                    {
+                        eprintln!("warn: plan save: {e}");
+                    }
+                    println!("run_id={run_id}");
+                    println!(
+                        "edl {:.2}s → {:.2}s  transcript_segments={}  semantics={}  suggestions={}",
+                        run.duration,
+                        run.edl.output_duration,
+                        tr.segments.len(),
+                        semantics.len(),
+                        suggestions.len()
+                    );
+                    for w in &plan.warnings {
+                        println!("warn: {w}");
+                    }
+                    println!("  suggestions → {}", sug_path.display());
+                    println!("  plan → {}", plan_path.display());
+                    println!("  semantics → {}", sem_path.display());
+                    println!(
+                        "Human: review suggestions JSON, accept in UI, export cut, then render."
+                    );
+                    ExitCode::SUCCESS
+                }
+                "render" => {
+                    // Apply VisualPlan overlays onto an already-cut longform.
+                    let cut = args.get(1).cloned().unwrap_or_default();
+                    let plan_path = args.get(2).cloned().unwrap_or_default();
+                    let out = args.get(3).cloned().unwrap_or_default();
+                    if cut.is_empty() || plan_path.is_empty() || out.is_empty() {
+                        eprintln!(
+                            "usage: vigilcut-cli visual render <cut.mp4> <plan.json> <out.mp4> [--media source.mp4]"
+                        );
+                        return ExitCode::FAILURE;
+                    }
+                    let plan = match vigilcut_lib::pipeline::visual::load_visual_plan(
+                        PathBuf::from(&plan_path).as_path(),
+                    ) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            eprintln!("plan error: {e}");
+                            return ExitCode::FAILURE;
+                        }
+                    };
+                    if plan.placements.is_empty() {
+                        eprintln!(
+                            "error: VisualPlan has no placements. Accept suggestions in the UI first."
+                        );
+                        return ExitCode::FAILURE;
+                    }
+                    let media_ref = arg_value(&args, "--media")
+                        .unwrap_or_else(|| plan.media_path.clone());
+                    match rt.block_on(
+                        vigilcut_lib::pipeline::visual::render::render_visual_plan(
+                            PathBuf::from(&cut).as_path(),
+                            &plan,
+                            PathBuf::from(&out).as_path(),
+                            &media_ref,
+                        ),
+                    ) {
+                        Ok(p) => {
+                            println!("rendered {}", p.display());
+                            ExitCode::SUCCESS
+                        }
+                        Err(e) => {
+                            eprintln!("render error: {e}");
+                            ExitCode::FAILURE
+                        }
+                    }
+                }
                 _ => {
                     eprintln!(
-                        "usage: vigilcut-cli visual <import|list|transcript|scan-missing> ..."
+                        "usage: vigilcut-cli visual <import|list|transcript|scan-missing|enrich|render> ..."
                     );
                     ExitCode::FAILURE
                 }
@@ -512,6 +679,8 @@ VigilCut CLI v1.1 — factory engine (no UI)
   vigilcut-cli visual import <image|folder> [--concepts a,b] [--tags t] [--recursive]
   vigilcut-cli visual list [query]
   vigilcut-cli visual transcript <video.mp4> [outdir] [--srt path] [--whisper]
+  vigilcut-cli visual enrich <video.mp4> [outdir] [--srt path] [--whisper]
+  vigilcut-cli visual render <cut.mp4> <plan.json> <out.mp4> [--media source.mp4]
   vigilcut-cli visual scan-missing
 
   Policies: factory (default), youtube, podcast, gentle, shorts-first

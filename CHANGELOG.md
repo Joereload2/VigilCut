@@ -11,7 +11,8 @@
 - Explainable suggestions + accept/reject → VisualPlan (persisted JSON)
 - FFmpeg overlay render of accepted placements (atomic) + visual-manifest
 - UI mode **Visual** (`VisualPanel`): import folder, export transcript, source/output times
-- CLI: `visual import|list|transcript|scan-missing`
+- CLI: `visual import|list|transcript|enrich|render|scan-missing`
+- Smoke FFmpeg overlay (`smoke_visual`) + unknown license excluded from auto-rank
 - Design: `docs/VISUAL_LIBRARY_DESIGN.md` · Report: `docs/VISUAL_LIBRARY_IMPLEMENTATION_REPORT.md`
 
 ## 1.1.0 — 2026-07-20 (hardening)

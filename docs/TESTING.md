@@ -5,7 +5,7 @@
 | Capa | Comando | Qué valida |
 |------|---------|------------|
 | **Unit** | `npm run test:unit` | Policy, EDL, export filter, chapters map, fillers, parse (sin media) |
-| **Smoke** | `npm run test:smoke` | Silencios + clipping con SRT/sidecar sobre vídeo sintético |
+| **Smoke** | `npm run test:smoke` | Silencios + clipping + overlay visual FFmpeg sobre vídeo sintético |
 | **E2E fábrica** | `npm run test:e2e` | Export EDL longform + export clips 9:16 + batch |
 | **Todo** | `npm test` | Unit + smoke (pipeline+clipping) + e2e (factory+clipping) |
 | **CI** | GitHub Actions | `.github/workflows/ci.yml` en push/PR |
@@ -28,11 +28,18 @@ Cubierto en `cargo test --lib`:
 
 Override de tests: `set_library_root_override` / `VIGILCUT_LIBRARY_ROOT`.
 
+## Smoke visual (FFmpeg)
+
+```powershell
+cargo test --manifest-path src-tauri/Cargo.toml --test smoke_visual -- --nocapture
+```
+
+Valida: import PNG → VisualPlan placement → overlay encode → manifiesto → usage post-éxito → original intacto; y rechazo de plan vacío.
+
 ## Qué no cubre (aún)
 
 - E2E de la app Tauri/WebView (clics UI) — el producto de 5 años es el **motor**; la UI es cliente delgado
 - Modelos Silero/Whisper en CI (smoke fuerza `prefer_silero: false` para determinismo)
-- Smoke FFmpeg del overlay visual (requiere encode + assets; se valida en manual Windows)
 
 ## Fixtures
 

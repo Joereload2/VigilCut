@@ -91,7 +91,7 @@ EDL = what survives of the source. VisualPlan = stills on the **output** timelin
 
 ### Partial
 - Live preview of overlays inside the video player (render-only path works)  
-- Full headless “analyze + suggest + render” single CLI command (building blocks exist)  
+- Headless enrich writes suggestions for human review; render is separate CLI step  
 - Supervised re-map of placements when EDL changes (clear + warn; no auto-remap)  
 - Word-level timestamps from Whisper (segment-level only)  
 - Embeddings / local LLM matching (interface ready; not required)  
@@ -143,14 +143,15 @@ Transcript search, export TXT/SRT/JSON, and explicit source vs output timing lab
 | Suite | Result |
 |-------|--------|
 | `cargo test --lib` | **59 passed**, 0 failed |
+| `cargo test --test smoke_visual` | **2 passed** (overlay + empty-plan refusal) |
 | `npm run check` | **0 errors**, 0 warnings |
 | `npm run build` | **OK** (vite) |
 | CLI smoke `visual import` + `list` | **OK** (temp PNG + `VIGILCUT_LIBRARY_ROOT`) |
 | `cargo build --bin vigilcut-cli` | **OK** |
 
-New/expanded tests: time_map (11), match_rank (4), library (3), transcript, semantic.
+New/expanded tests: time_map (11), match_rank (4), library (3), smoke_visual (2), transcript, semantic.
 
-**Not run this session:** full Tauri WebView E2E, FFmpeg visual overlay encode smoke (needs real cut video + assets on PATH encode path in CI).
+Third wave: unknown license excluded from auto-rank; CLI `visual enrich` / `visual render`; FFmpeg overlay smoke.
 
 ---
 

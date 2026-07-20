@@ -59,6 +59,10 @@ pub fn rank_suggestions(
             if !matches!(asset.status, AssetStatus::Active) {
                 continue;
             }
+            // Unknown license must not enter silent automation (human can still import + tag later).
+            if matches!(asset.license_status, LicenseStatus::Unknown) {
+                continue;
+            }
             if used_assets.contains(&asset.id) && !asset.allow_same_video_repeat {
                 continue;
             }
@@ -141,12 +145,14 @@ fn score_pair(ev: &SemanticEvent, asset: &MediaAsset) -> (f64, Vec<String>) {
         score -= 0.08 * (asset.times_used as f64).min(5.0);
         reasons.push("penalty:used_before".into());
     }
+    // Defense in depth: unknown already skipped in rank_suggestions; keep penalty for callers of score_pair.
     if matches!(asset.license_status, LicenseStatus::Unknown) {
-        score -= 0.12;
+        score = 0.0;
         reasons.push("penalty:license_unknown".into());
     }
     if matches!(asset.status, AssetStatus::Blocked) {
         score = 0.0;
+        reasons.push("penalty:blocked".into());
     }
 
     (score.clamp(0.0, 1.0), reasons)
@@ -233,11 +239,14 @@ mod tests {
             payload: serde_json::json!({}),
         };
         let (score, reasons) = score_pair(&ev, &a);
+        assert!(score < 0.01);
         assert!(reasons.iter().any(|r| r.contains("license_unknown")));
-        assert!(reasons.iter().any(|r| r.contains("used_before")));
+        // Not selected by ranker either
+        let s = rank_suggestions(&[ev.clone()], &[a], 60.0, &MatchConfig::default());
+        assert!(s.is_empty());
         let clean = asset("a2", &["inflacion"]);
         let (clean_score, _) = score_pair(&ev, &clean);
-        assert!(clean_score > score);
+        assert!(clean_score > 0.25);
     }
 
     #[test]
