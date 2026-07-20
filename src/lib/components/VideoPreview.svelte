@@ -339,6 +339,15 @@
     <div class="flex flex-wrap items-center gap-2">
       <button
         type="button"
+        class="btn h-8 border border-surface-600 bg-surface-800 px-3 text-xs font-bold text-white hover:bg-surface-700 disabled:opacity-40"
+        disabled={!src || !ready}
+        onclick={togglePlay}
+        title="Espacio — play / pausa"
+      >
+        {projectStore.isPlaying ? "⏸ Pausa" : "▶ Play"}
+      </button>
+      <button
+        type="button"
         class="btn h-8 bg-vigil-600 px-3 text-xs font-bold text-white hover:bg-vigil-500 disabled:opacity-40"
         disabled={!canPreviewCut || !src}
         onclick={listenCutResult}
