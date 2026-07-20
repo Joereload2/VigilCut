@@ -111,6 +111,25 @@
           Otro destino…
         </button>
       {/if}
+      <label
+        class="flex h-11 cursor-pointer items-center gap-2 rounded-lg border px-2.5 text-[11px] transition
+          {projectStore.audioEnhance.enabled
+          ? 'border-vigil-500/50 bg-vigil-950/50 text-vigil-200'
+          : 'border-surface-700 bg-surface-950 text-surface-400 hover:border-surface-500'}"
+        title="Denoise + normalización al exportar el MP4"
+      >
+        <input
+          type="checkbox"
+          class="accent-vigil-500"
+          checked={projectStore.audioEnhance.enabled}
+          onchange={(e) =>
+            projectStore.setAudioEnhanceEnabled((e.currentTarget as HTMLInputElement).checked)}
+        />
+        <span class="font-medium leading-tight">
+          Audio enhance
+          <span class="block text-[9px] opacity-70">denoise · loudnorm</span>
+        </span>
+      </label>
     </div>
 
     <div class="mx-1 hidden h-8 w-px bg-surface-700 sm:block"></div>

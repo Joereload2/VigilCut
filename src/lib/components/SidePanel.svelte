@@ -187,24 +187,26 @@
           Whisper al re-analizar (lento)
         </label>
 
-        {#if projectStore.project}
-          <div class="mt-2 border-t border-surface-800 pt-2">
-            <div class="mb-1 text-[10px] font-semibold uppercase tracking-wide text-surface-500">
-              Al exportar
-            </div>
-            <label class="flex items-center gap-2 text-[11px] text-surface-300">
-              <input
-                type="checkbox"
-                class="accent-vigil-500"
-                bind:checked={projectStore.project.preset.audio.enabled}
-              />
-              Audio enhance (denoise + loudnorm)
-            </label>
-            <p class="mt-1 text-[9px] leading-snug text-surface-600">
-              Se aplica de verdad en el MP4 exportado (no solo preview).
-            </p>
+        <div class="mt-2 border-t border-surface-800 pt-2">
+          <div class="mb-1 text-[10px] font-semibold uppercase tracking-wide text-surface-500">
+            Al exportar
           </div>
-        {/if}
+          <label class="flex items-center gap-2 text-[11px] text-surface-300">
+            <input
+              type="checkbox"
+              class="accent-vigil-500"
+              checked={projectStore.audioEnhance.enabled}
+              onchange={(e) =>
+                projectStore.setAudioEnhanceEnabled(
+                  (e.currentTarget as HTMLInputElement).checked,
+                )}
+            />
+            Audio enhance (denoise + loudnorm)
+          </label>
+          <p class="mt-1 text-[9px] leading-snug text-surface-600">
+            También en la barra de Exportar (siempre visible).
+          </p>
+        </div>
 
         <button
           type="button"

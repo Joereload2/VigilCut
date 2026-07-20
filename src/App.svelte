@@ -222,7 +222,7 @@
         segments: projectStore.segments,
         exportOptions: projectStore.project?.preset.export,
         colorOptions: projectStore.project?.preset.color,
-        audioOptions: projectStore.project?.preset.audio,
+        audioOptions: projectStore.audioEnhance,
         hasAudio: projectStore.media?.hasAudio ?? true,
       });
       // Multi-artifact factory pack (chapters, shorts, events, edl, manifest)

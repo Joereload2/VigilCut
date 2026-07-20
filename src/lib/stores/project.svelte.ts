@@ -1,5 +1,6 @@
 import type {
   AnalysisRun,
+  AudioEnhanceOptions,
   ExportEstimate,
   MediaInfo,
   ProcessingPreset,
@@ -12,6 +13,16 @@ import type {
 import { DEFAULT_SILENCE_OPTIONS, segmentDuration } from "$lib/types";
 import * as api from "$lib/utils/tauri";
 
+const DEFAULT_AUDIO_ENHANCE: AudioEnhanceOptions = {
+  enabled: false,
+  denoise: true,
+  denoiseStrength: 0.35,
+  normalize: true,
+  targetLufs: -14,
+  highpassHz: 80,
+  compress: false,
+};
+
 /** Reactive project / timeline state using Svelte 5 runes. */
 class ProjectStore {
   project = $state<Project | null>(null);
@@ -22,6 +33,8 @@ class ProjectStore {
   presets = $state<ProcessingPreset[]>([]);
   activePresetId = $state("default");
   silenceOptions = $state<SilenceDetectionOptions>({ ...DEFAULT_SILENCE_OPTIONS });
+  /** Always available for export UI (not buried under project.preset). */
+  audioEnhance = $state<AudioEnhanceOptions>({ ...DEFAULT_AUDIO_ENHANCE });
 
   currentTime = $state(0);
   isPlaying = $state(false);
@@ -472,8 +485,31 @@ class ProjectStore {
       autoApproveMinScore:
         preset.silence.autoApproveMinScore ?? DEFAULT_SILENCE_OPTIONS.autoApproveMinScore,
     };
+    this.audioEnhance = {
+      ...DEFAULT_AUDIO_ENHANCE,
+      ...(preset.audio ?? {}),
+    };
     if (this.project) {
-      this.project = { ...this.project, preset };
+      this.project = {
+        ...this.project,
+        preset: {
+          ...preset,
+          audio: { ...this.audioEnhance },
+        },
+      };
+    }
+  }
+
+  setAudioEnhanceEnabled(on: boolean) {
+    this.audioEnhance = { ...this.audioEnhance, enabled: on };
+    if (this.project) {
+      this.project = {
+        ...this.project,
+        preset: {
+          ...this.project.preset,
+          audio: { ...this.audioEnhance },
+        },
+      };
     }
   }
 
