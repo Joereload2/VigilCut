@@ -33,6 +33,7 @@
 
   let job = $state<BatchJob | null>(null);
   let unsubs: UnlistenFn[] = [];
+  /** Open by default on factory tab (home is compact with tabs). */
   let panelOpen = $state(true);
   let watchRunning = $state(false);
   let watchMsg = $state("");

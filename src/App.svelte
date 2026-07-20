@@ -2,7 +2,6 @@
   import { onMount } from "svelte";
   import TopBar from "$lib/components/TopBar.svelte";
   import VideoPreview from "$lib/components/VideoPreview.svelte";
-  import BatchPanel from "$lib/components/BatchPanel.svelte";
   import StatusBar from "$lib/components/StatusBar.svelte";
   import Welcome from "$lib/components/Welcome.svelte";
   import ActionBar from "$lib/components/ActionBar.svelte";
@@ -267,7 +266,7 @@
   />
 
   {#if !projectStore.mediaPath}
-    <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
+    <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
       <Welcome
         onOpen={openFile}
         onGoSilence={() => {
@@ -286,9 +285,6 @@
           void projectStore.openMedia(path);
         }}
       />
-      <div class="mx-auto w-full max-w-lg">
-        <BatchPanel />
-      </div>
     </div>
   {:else}
     <div class="flex min-h-0 flex-1 overflow-hidden">
