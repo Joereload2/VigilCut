@@ -446,6 +446,89 @@ export async function visualAttachImage(params: {
   });
 }
 
+/** Manual placement on output timeline — transcript optional. */
+export async function visualCreateManualPlacement(params: {
+  mediaPath: string;
+  analysisRunId?: string | null;
+  assetId?: string | null;
+  imagePath?: string | null;
+  outputStart: number;
+  outputEnd: number;
+  displayMode?: string;
+  positionX?: number | null;
+  positionY?: number | null;
+  sizeW?: number | null;
+  fit?: string | null;
+  label?: string | null;
+  sourceDuration?: number | null;
+}): Promise<unknown> {
+  return invoke("visual_create_manual_placement", {
+    mediaPath: params.mediaPath,
+    analysisRunId: params.analysisRunId ?? null,
+    assetId: params.assetId ?? null,
+    imagePath: params.imagePath ?? null,
+    outputStart: params.outputStart,
+    outputEnd: params.outputEnd,
+    displayMode: params.displayMode ?? "completa",
+    positionX: params.positionX ?? null,
+    positionY: params.positionY ?? null,
+    sizeW: params.sizeW ?? null,
+    fit: params.fit ?? null,
+    label: params.label ?? null,
+    sourceDuration: params.sourceDuration ?? null,
+  });
+}
+
+export async function visualUpdatePlacement(params: {
+  placementId: string;
+  outputStart?: number | null;
+  outputEnd?: number | null;
+  displayMode?: string | null;
+  positionX?: number | null;
+  positionY?: number | null;
+  sizeW?: number | null;
+  fit?: string | null;
+  status?: string | null;
+}): Promise<unknown> {
+  return invoke("visual_update_placement", {
+    placementId: params.placementId,
+    outputStart: params.outputStart ?? null,
+    outputEnd: params.outputEnd ?? null,
+    displayMode: params.displayMode ?? null,
+    positionX: params.positionX ?? null,
+    positionY: params.positionY ?? null,
+    sizeW: params.sizeW ?? null,
+    fit: params.fit ?? null,
+    status: params.status ?? null,
+  });
+}
+
+export async function visualRemovePlacement(placementId: string): Promise<unknown> {
+  return invoke("visual_remove_placement", { placementId });
+}
+
+export async function visualAddProtectedRange(params: {
+  mediaPath: string;
+  analysisRunId?: string | null;
+  outputStart: number;
+  outputEnd: number;
+  reason?: string | null;
+  sourceDuration?: number | null;
+}): Promise<unknown> {
+  return invoke("visual_add_protected_range", {
+    mediaPath: params.mediaPath,
+    analysisRunId: params.analysisRunId ?? null,
+    outputStart: params.outputStart,
+    outputEnd: params.outputEnd,
+    reason: params.reason ?? null,
+    sourceDuration: params.sourceDuration ?? null,
+  });
+}
+
+export async function visualRemoveProtectedRange(rangeId: string): Promise<unknown> {
+  return invoke("visual_remove_protected_range", { rangeId });
+}
+
 export async function visualImportFolder(
   path: string,
   tags: string[] = [],

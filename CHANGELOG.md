@@ -9,8 +9,10 @@
 - SQLite image library (import, hash dedupe, thumbs, usage)
 - Folder bulk import + usage history + missing-file scan
 - Explainable suggestions + accept/reject → VisualPlan (persisted JSON)
-- FFmpeg overlay render of accepted placements (atomic) + visual-manifest
-- UI mode **Visual** (`VisualPanel`): import folder, export transcript, source/output times
+- **Manual placement** without transcript: Completa / Parcial / Flotante + layout
+- **Protected ranges** (no B-roll zones) on output timeline
+- FFmpeg overlay respects mode/position (full / PIP / lower-third)
+- Simplified Visual panel: Colocar · Plan · Texto · Más + track
 - CLI: `visual import|list|transcript|enrich|render|scan-missing`
 - Smoke FFmpeg overlay (`smoke_visual`) + unknown license excluded from auto-rank
 - Design: `docs/VISUAL_LIBRARY_DESIGN.md` · Report: `docs/VISUAL_LIBRARY_IMPLEMENTATION_REPORT.md`

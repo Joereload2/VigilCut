@@ -2,477 +2,195 @@
   import { convertFileSrc } from "@tauri-apps/api/core";
   import { projectStore } from "$lib/stores/project.svelte";
   import * as api from "$lib/utils/tauri";
+  import VisualPlaceForm from "./visual/VisualPlaceForm.svelte";
+  import VisualTrack from "./visual/VisualTrack.svelte";
+  import PlacementInspector from "./visual/PlacementInspector.svelte";
+  import type {
+    Asset,
+    DisplayMode,
+    ProtectedRange,
+    Suggestion,
+    VisualPlacement,
+    VisualPlan,
+  } from "./visual/types";
 
-  type Seg = {
-    id?: string;
-    text: string;
-    span: { start: number; end: number };
-  };
+  type ToolTab = "colocar" | "plan" | "texto" | "mas";
 
-  type SemanticEv = {
-    id: string;
-    label: string;
-    terms?: string[];
-    score: number;
-    kind?: string;
-    sourceSpan?: { start: number; end: number };
-    outputSpan?: { start: number; end: number } | null;
-  };
+  let busy = $state(false);
+  let error = $state<string | null>(null);
+  let lastMessage = $state("");
+  let tool = $state<ToolTab>("colocar");
 
-  type Suggestion = {
-    id: string;
-    assetId: string;
-    matchScore: number;
-    matchReasons: string[];
-    status: string;
-    assetTitle?: string;
-    thumbnailPath?: string;
-    outputSpan: { start: number; end: number };
-    sourceSpan: { start: number; end: number };
-  };
+  let displayMode = $state<DisplayMode>("completa");
+  let outputStart = $state(0);
+  let outputEnd = $state(4);
+  let selectedPlacementId = $state<string | null>(null);
 
-  type Asset = {
-    id: string;
-    title: string;
-    concepts: string[];
-    tags: string[];
-    thumbnailPath?: string;
-    managedPath?: string;
-    timesUsed?: number;
-    licenseStatus?: string;
-    status?: string;
-  };
+  let assets = $state<Asset[]>([]);
+  let plan = $state<VisualPlan | null>(null);
+  let suggestions = $state<Suggestion[]>([]);
+  let transcriptSegs = $state<
+    { id?: string; text: string; span: { start: number; end: number } }[]
+  >([]);
+  let whisperOk = $state(false);
+  let whisperKind = $state("");
+  let preferBusyWhisper = $state(false);
 
-  function fileUrl(path?: string | null): string | null {
+  const duration = $derived(
+    projectStore.estimate?.estimatedDuration ??
+      projectStore.keptDuration ??
+      projectStore.duration ??
+      60,
+  );
+  const playhead = $derived(projectStore.currentTime);
+  const placements = $derived(plan?.placements ?? []);
+  const protectedRanges = $derived(plan?.protectedRanges ?? []);
+  const selectedPlacement = $derived(
+    placements.find((p) => p.id === selectedPlacementId) ?? null,
+  );
+  const selectedThumb = $derived.by(() => {
+    if (!selectedPlacement) return null;
+    const a = assets.find((x) => x.id === selectedPlacement.assetId);
+    return a?.thumbnailPath ?? null;
+  });
+
+  function fileUrl(path?: string | null) {
     if (!path) return null;
     try {
       return convertFileSrc(path.replace(/\\/g, "/"));
     } catch {
-      try {
-        return convertFileSrc(path);
-      } catch {
-        return null;
-      }
+      return null;
     }
   }
-
-  function isAccepted(status: string): boolean {
-    const s = (status || "").toLowerCase();
-    return s === "accepted";
-  }
-
-  function isRejected(status: string): boolean {
-    return (status || "").toLowerCase() === "rejected";
-  }
-
-  function goToSourceTime(t: number, end?: number) {
-    const start = Math.max(0, t);
-    projectStore.previewMode = "original";
-    projectStore.currentTime = start;
-    window.dispatchEvent(
-      new CustomEvent("vigilcut:play-from", {
-        detail: { t: start, end: end ?? start + 4, play: true },
-      }),
-    );
-  }
-
-  const STOP = new Set([
-    "el","la","los","las","un","una","unos","unas","de","del","al","a","en","y","o",
-    "que","se","es","son","por","para","con","sin","como","más","muy","ya","lo","su",
-    "sus","me","te","nos","les","le","mi","tu","si","no","esto","esta","ese","esa",
-    "hay","fue","ser","está","están","porque","cuando","donde","qué","cuál","the","and",
-    "of","to","is","are","in","on","for","with","that","this","it","was","be","as","at",
-  ]);
-
-  let busy = $state(false);
-  let error = $state<string | null>(null);
-  let session = $state<{
-    transcript?: {
-      segments?: Seg[];
-      status?: string;
-      warnings?: string[];
-      engine?: string;
-    };
-    semanticEvents?: SemanticEv[];
-    suggestions?: Suggestion[];
-    plan?: { placements?: unknown[]; warnings?: string[]; version?: number };
-    planPath?: string;
-    timeMap?: { sourceDuration: number; outputDuration: number };
-  } | null>(null);
-  let assets = $state<Asset[]>([]);
-  let showSourceTime = $state(false);
-  let transcriptQuery = $state("");
-  let lastMessage = $state("");
-  let lastArtifacts = $state<string[]>([]);
-  let explicitSrt = $state<string | null>(null);
-  let whisper = $state<{
-    available: boolean;
-    kind: string;
-    detail: string;
-    installHint: string;
-  } | null>(null);
-  let installingWhisper = $state(false);
-
-  /** User-selected keyword from transcript / chips */
-  let selectedWord = $state<string | null>(null);
-  let selectedSeg = $state<Seg | null>(null);
-  let manualKeyword = $state("");
 
   async function refreshAssets() {
     try {
       assets = (await api.visualListAssets(null, 80)) as Asset[];
-    } catch (e) {
-      console.warn(e);
-    }
-  }
-
-  async function refreshWhisperStatus() {
-    try {
-      whisper = await api.visualWhisperStatus();
     } catch {
-      whisper = {
-        available: false,
-        kind: "none",
-        detail: "No se pudo consultar Whisper",
-        installHint: "npm run setup:whisper",
+      /* ignore */
+    }
+  }
+
+  async function refreshSession() {
+    try {
+      const s = (await api.visualGetSession()) as {
+        plan?: VisualPlan;
+        suggestions?: Suggestion[];
+        transcript?: { segments?: typeof transcriptSegs };
       };
+      if (s.plan) plan = s.plan;
+      if (s.suggestions) suggestions = s.suggestions;
+      if (s.transcript?.segments) transcriptSegs = s.transcript.segments;
+    } catch {
+      /* ignore */
     }
   }
 
-  function applyEnrichmentResult(res: {
-    transcript: NonNullable<typeof session>["transcript"];
-    semanticEvents?: SemanticEv[];
-    suggestions: Suggestion[];
-    plan: NonNullable<typeof session>["plan"];
-    planPath?: string;
-    timeMap?: { sourceDuration: number; outputDuration: number };
-    transcriptArtifacts?: [string, string][];
-  }) {
-    session = {
-      transcript: res.transcript,
-      semanticEvents: res.semanticEvents ?? [],
-      suggestions: res.suggestions,
-      plan: res.plan,
-      planPath: res.planPath,
-      timeMap: res.timeMap,
-    };
-    lastArtifacts = (res.transcriptArtifacts || []).map(([, p]) => p);
-    const nSeg = res.transcript?.segments?.length ?? 0;
-    const nSug = res.suggestions?.length ?? 0;
-    lastMessage = `Texto: ${nSeg} frases · ${nSug} sugerencias · motor ${res.transcript?.engine ?? "?"}`;
-    if (res.plan?.warnings?.length) {
-      lastMessage += ` · ${res.plan.warnings[0]}`;
+  async function refreshWhisper() {
+    try {
+      const w = await api.visualWhisperStatus();
+      whisperOk = w.available;
+      whisperKind = w.kind;
+    } catch {
+      whisperOk = false;
     }
-    if (nSeg === 0 && res.transcript?.warnings?.[0]) {
-      error = res.transcript.warnings[0];
-    }
-    projectStore.statusMessage = lastMessage;
   }
 
-  async function runEnrichment(forceWhisper = false) {
-    if (!projectStore.mediaPath) {
+  function usePlayhead() {
+    const t = projectStore.currentTime || 0;
+    outputStart = Math.max(0, t - 0.2);
+    outputEnd = Math.min(duration, t + 3.8);
+  }
+
+  async function placeImageFile() {
+    if (!projectStore.mediaPath || !api.isTauri()) {
       error = "Abre un video primero";
       return;
     }
-    busy = true;
-    error = null;
-    projectStore.busy = true;
-    projectStore.clearProgress();
-    projectStore.setProgress(
-      5,
-      forceWhisper ? "Transcribiendo con Whisper…" : "Cargando texto…",
-      forceWhisper ? "whisper" : "load",
-    );
-    try {
-      const res = (await api.visualRunEnrichment(
-        projectStore.mediaPath,
-        projectStore.analysisRun?.id ?? null,
-        forceWhisper ? null : explicitSrt,
-        forceWhisper,
-      )) as {
-        transcript: NonNullable<typeof session>["transcript"];
-        semanticEvents?: SemanticEv[];
-        suggestions: Suggestion[];
-        plan: NonNullable<typeof session>["plan"];
-        planPath?: string;
-        timeMap?: { sourceDuration: number; outputDuration: number };
-        transcriptArtifacts?: [string, string][];
-      };
-      applyEnrichmentResult(res);
-      projectStore.setProgress(100, "Listo", "done");
-    } catch (e) {
-      error = String(e);
-      projectStore.error = String(e);
-    } finally {
-      busy = false;
-      projectStore.busy = false;
-      projectStore.clearProgress();
-    }
-  }
-
-  /** Explicit primary action: always runs Whisper (not a checkbox). */
-  async function runWhisper() {
-    if (!projectStore.mediaPath) {
-      error = "Abre un video primero";
+    if (outputEnd <= outputStart) {
+      error = "El fin debe ser mayor que el inicio";
       return;
     }
-    await refreshWhisperStatus();
-    if (!whisper?.available) {
-      error =
-        "Whisper no está instalado. Pulsa «Instalar Whisper» o en terminal: npm run setup:whisper";
-      return;
-    }
-    busy = true;
-    error = null;
-    projectStore.busy = true;
-    projectStore.clearProgress();
-    projectStore.setProgress(3, "Iniciando Whisper…", "whisper");
-    try {
-      const res = (await api.visualTranscribeWhisper(
-        projectStore.mediaPath,
-        projectStore.analysisRun?.id ?? null,
-      )) as {
-        transcript: NonNullable<typeof session>["transcript"];
-        semanticEvents?: SemanticEv[];
-        suggestions: Suggestion[];
-        plan: NonNullable<typeof session>["plan"];
-        planPath?: string;
-        timeMap?: { sourceDuration: number; outputDuration: number };
-        transcriptArtifacts?: [string, string][];
-      };
-      applyEnrichmentResult(res);
-      projectStore.setProgress(100, "Transcripción lista", "done");
-      if ((res.transcript?.segments?.length ?? 0) > 0) {
-        lastMessage = `Whisper OK (${res.transcript?.engine}) · ${res.transcript?.segments?.length} frases`;
-      }
-    } catch (e) {
-      error = String(e);
-      projectStore.error = String(e);
-    } finally {
-      busy = false;
-      projectStore.busy = false;
-      projectStore.clearProgress();
-      await refreshWhisperStatus();
-    }
-  }
-
-  async function installWhisper() {
-    if (!api.isTauri()) return;
-    installingWhisper = true;
-    error = null;
-    projectStore.busy = true;
-    projectStore.statusMessage = "Instalando openai-whisper (pip)…";
-    try {
-      const msg = await api.visualInstallWhisper();
-      lastMessage = msg;
-      await refreshWhisperStatus();
-      projectStore.statusMessage = msg;
-    } catch (e) {
-      error = String(e);
-    } finally {
-      installingWhisper = false;
-      projectStore.busy = false;
-    }
-  }
-
-  async function pickSrt() {
-    if (!api.isTauri()) return;
-    try {
-      const { open } = await import("@tauri-apps/plugin-dialog");
-      const p = await open({
-        multiple: false,
-        filters: [{ name: "Subtítulos", extensions: ["srt", "vtt"] }],
-        title: "Importar transcripción SRT/VTT",
-      });
-      if (typeof p !== "string") return;
-      explicitSrt = p;
-      lastMessage = `SRT seleccionado: ${p.split(/[/\\]/).pop()}`;
-      await runEnrichment(false);
-    } catch (e) {
-      error = String(e);
-    }
-  }
-
-  function selectWord(word: string, seg?: Seg | null) {
-    const w = word.trim().toLowerCase();
-    if (w.length < 2) return;
-    selectedWord = w;
-    selectedSeg = seg ?? null;
-    manualKeyword = w;
-  }
-
-  async function importImageForSelection() {
-    const concept = (selectedWord || manualKeyword).trim().toLowerCase();
-    if (!concept) {
-      error = "Selecciona una palabra del texto o escribe un concepto";
-      return;
-    }
-    if (!projectStore.mediaPath) {
-      error = "Abre un video primero";
-      return;
-    }
-    if (!api.isTauri()) return;
-
-    // Need a moment on the timeline (selected phrase or current playhead)
-    let srcStart = selectedSeg?.span.start;
-    let srcEnd = selectedSeg?.span.end;
-    if (srcStart == null || srcEnd == null) {
-      const t = projectStore.currentTime || 0;
-      srcStart = Math.max(0, t - 0.5);
-      srcEnd = t + 3.5;
-    }
-
     try {
       const { open } = await import("@tauri-apps/plugin-dialog");
       const p = await open({
         multiple: false,
         filters: [{ name: "Imagen", extensions: ["jpg", "jpeg", "png", "webp"] }],
-        title: `Imagen para: ${concept} (${srcStart.toFixed(1)}s)`,
+        title: `Imagen ${displayMode} ${outputStart.toFixed(1)}–${outputEnd.toFixed(1)}s`,
       });
       if (typeof p !== "string") return;
-
-      // Attach without re-running Whisper / wiping transcript
-      const res = (await api.visualAttachImage({
+      busy = true;
+      error = null;
+      const res = (await api.visualCreateManualPlacement({
         mediaPath: projectStore.mediaPath,
         analysisRunId: projectStore.analysisRun?.id ?? null,
-        path: p,
-        concept,
-        sourceStart: srcStart,
-        sourceEnd: srcEnd,
-      })) as {
-        message?: string;
-        transcript?: NonNullable<typeof session>["transcript"];
-        suggestions?: Suggestion[];
-        plan?: NonNullable<typeof session>["plan"];
-        timeMap?: { sourceDuration: number; outputDuration: number };
-        suggestion?: Suggestion;
-      };
-
-      await refreshAssets();
-      // Normalize statuses for UI
-      const suggestions = (res.suggestions ?? session?.suggestions ?? []).map((s) => ({
-        ...s,
-        status: (s.status || "suggested").toLowerCase(),
-      }));
-      // Merge into session — never drop transcript
-      session = {
-        transcript: res.transcript ?? session?.transcript,
-        semanticEvents: session?.semanticEvents,
-        suggestions,
-        plan: res.plan ?? session?.plan,
-        planPath: session?.planPath,
-        timeMap: res.timeMap ?? session?.timeMap,
-      };
-      lastMessage =
-        res.message ||
-        `Imagen «${concept}» adherida al video (ya en el plan; no hace falta Aceptar)`;
+        imagePath: p,
+        outputStart,
+        outputEnd,
+        displayMode,
+        sourceDuration: projectStore.duration,
+        label: p.split(/[/\\]/).pop() ?? "imagen",
+      })) as { plan?: VisualPlan; message?: string; placement?: VisualPlacement };
+      plan = res.plan ?? plan;
+      if (res.placement) selectedPlacementId = res.placement.id;
+      lastMessage = res.message || "Placement añadido";
       projectStore.statusMessage = lastMessage;
-      error = null;
-      // Jump preview to that phrase so the user sees where it will appear
-      goToSourceTime(srcStart, srcEnd);
-    } catch (e) {
-      error = String(e);
-    }
-  }
-
-  async function importImageGeneric() {
-    // If a word is selected, attach to that moment; else library-only import
-    if (selectedWord || manualKeyword.trim()) {
-      await importImageForSelection();
-      return;
-    }
-    if (!api.isTauri()) return;
-    try {
-      const { open } = await import("@tauri-apps/plugin-dialog");
-      const p = await open({
-        multiple: false,
-        filters: [{ name: "Imagen", extensions: ["jpg", "jpeg", "png", "webp"] }],
-      });
-      if (typeof p !== "string") return;
-      const def = "concepto";
-      const raw = prompt("Conceptos (coma). Primera = principal", def) ?? def;
-      const concepts = raw
-        .split(",")
-        .map((s) => s.trim().toLowerCase())
-        .filter(Boolean);
-      await api.visualImportImage(p, concepts[0] ?? null, concepts, concepts);
       await refreshAssets();
-      lastMessage = `Imagen en biblioteca · ${concepts.join(", ")}. Selecciona una palabra del texto y «Añadir imagen» para adherirla al video.`;
+    } catch (e) {
+      error = String(e);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function protectRange() {
+    if (!projectStore.mediaPath) return;
+    try {
+      busy = true;
+      const p = (await api.visualAddProtectedRange({
+        mediaPath: projectStore.mediaPath,
+        analysisRunId: projectStore.analysisRun?.id ?? null,
+        outputStart,
+        outputEnd,
+        reason: "Sin B-roll (usuario)",
+        sourceDuration: projectStore.duration,
+      })) as VisualPlan;
+      plan = p;
+      lastMessage = `Protegido ${outputStart.toFixed(1)}–${outputEnd.toFixed(1)}s`;
+    } catch (e) {
+      error = String(e);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function updateSelected(patch: {
+    outputStart?: number;
+    outputEnd?: number;
+    displayMode?: string;
+    positionX?: number;
+    positionY?: number;
+    sizeW?: number;
+  }) {
+    if (!selectedPlacementId) return;
+    try {
+      const p = (await api.visualUpdatePlacement({
+        placementId: selectedPlacementId,
+        ...patch,
+      })) as VisualPlan;
+      plan = p;
     } catch (e) {
       error = String(e);
     }
   }
 
-  async function importFolder() {
-    if (!api.isTauri()) return;
+  async function removeSelected() {
+    if (!selectedPlacementId) return;
     try {
-      const { open } = await import("@tauri-apps/plugin-dialog");
-      const p = await open({ directory: true, multiple: false });
-      if (typeof p !== "string") return;
-      const def = selectedWord || "general";
-      const raw = prompt("Conceptos para toda la carpeta (coma)", def) ?? def;
-      const concepts = raw
-        .split(",")
-        .map((s) => s.trim().toLowerCase())
-        .filter(Boolean);
-      const res = (await api.visualImportFolder(p, concepts, concepts, false)) as {
-        scanned: number;
-        imported: number;
-        duplicates: number;
-        failed: number;
-      };
-      await refreshAssets();
-      lastMessage = `Carpeta: ${res.imported} nuevas · ${res.duplicates} dup · ${res.failed} fallos (transcripción intacta)`;
-      // Do NOT re-run enrichment — that used to wipe Whisper text
-    } catch (e) {
-      error = String(e);
-    }
-  }
-
-  async function exportTranscript() {
-    if (!api.isTauri() || !session?.transcript?.segments?.length) {
-      error = "Carga o genera la transcripción primero";
-      return;
-    }
-    try {
-      const { open } = await import("@tauri-apps/plugin-dialog");
-      const dir = await open({
-        directory: true,
-        multiple: false,
-        title: "Carpeta para TXT/SRT/JSON",
-      });
-      if (typeof dir !== "string") return;
-      const stem =
-        projectStore.mediaPath?.split(/[/\\]/).pop()?.replace(/\.[^.]+$/, "") || "transcript";
-      const res = (await api.visualExportTranscript(dir, stem)) as {
-        artifacts: [string, string][];
-      };
-      lastArtifacts = (res.artifacts || []).map(([, p]) => p);
-      lastMessage = `Transcripción exportada (${lastArtifacts.length} archivos)`;
-    } catch (e) {
-      error = String(e);
-    }
-  }
-
-  async function setStatus(id: string, status: string) {
-    try {
-      const plan = await api.visualSetSuggestionStatus(id, status);
-      if (session) {
-        session = {
-          ...session,
-          suggestions: session.suggestions?.map((s) =>
-            s.id === id ? { ...s, status: status.toLowerCase() } : s,
-          ),
-          plan: plan as typeof session.plan,
-        };
-      }
-      lastMessage =
-        status === "accepted"
-          ? "Imagen en el plan del video"
-          : status === "rejected"
-            ? "Imagen quitada del plan"
-            : `Estado: ${status}`;
-      projectStore.statusMessage = lastMessage;
+      const p = (await api.visualRemovePlacement(selectedPlacementId)) as VisualPlan;
+      plan = p;
+      selectedPlacementId = null;
+      lastMessage = "Placement eliminado";
     } catch (e) {
       error = String(e);
     }
@@ -487,12 +205,12 @@
         const p = await open({
           multiple: false,
           filters: [{ name: "Video cortado", extensions: ["mp4"] }],
-          title: "Selecciona el MP4 ya cortado (timeline de salida)",
+          title: "MP4 cortado (timeline de salida)",
         });
         return typeof p === "string" ? p : null;
       })());
     if (!cut) {
-      error = "Exporta primero el video cortado (Silencios) o elige el MP4 editado";
+      error = "Exporta primero el video en Silencios o elige el MP4 editado";
       return;
     }
     const parts = cut.split(/[/\\]/);
@@ -503,10 +221,9 @@
     busy = true;
     try {
       const path = await api.visualRenderPlan(cut, out, projectStore.mediaPath);
-      lastMessage = `Render visual → ${path}`;
+      lastMessage = `Render → ${path}`;
       projectStore.statusMessage = lastMessage;
       projectStore.recordExportSuccess(path, projectStore.keptDuration);
-      await refreshAssets();
     } catch (e) {
       error = String(e);
     } finally {
@@ -514,151 +231,101 @@
     }
   }
 
-  /** Tokenize a segment into display tokens (words + separators). */
-  function tokenizeDisplay(text: string): { t: string; word: boolean }[] {
-    const out: { t: string; word: boolean }[] = [];
-    const re = /([A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9]+)|([^A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9]+)/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(text)) !== null) {
-      if (m[1]) out.push({ t: m[1], word: true });
-      else if (m[2]) out.push({ t: m[2], word: false });
+  async function runWhisper() {
+    if (!projectStore.mediaPath) {
+      error = "Abre un video";
+      return;
     }
-    return out;
+    busy = true;
+    preferBusyWhisper = true;
+    projectStore.busy = true;
+    projectStore.setProgress(5, "Whisper…", "whisper");
+    try {
+      const res = (await api.visualTranscribeWhisper(
+        projectStore.mediaPath,
+        projectStore.analysisRun?.id ?? null,
+      )) as {
+        transcript?: { segments?: typeof transcriptSegs };
+        plan?: VisualPlan;
+        suggestions?: Suggestion[];
+      };
+      transcriptSegs = res.transcript?.segments ?? [];
+      if (res.plan) plan = res.plan;
+      if (res.suggestions) suggestions = res.suggestions;
+      lastMessage = `Texto: ${transcriptSegs.length} frases`;
+    } catch (e) {
+      error = String(e);
+    } finally {
+      busy = false;
+      preferBusyWhisper = false;
+      projectStore.busy = false;
+      projectStore.clearProgress();
+      await refreshWhisper();
+    }
   }
 
-  function isKeywordCandidate(w: string): boolean {
-    const l = w.toLowerCase();
-    if (l.length < 4) return false;
-    if (STOP.has(l)) return false;
-    if (/^\d+$/.test(l)) return false;
-    return true;
+  async function pickSrt() {
+    if (!api.isTauri() || !projectStore.mediaPath) return;
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const p = await open({
+      multiple: false,
+      filters: [{ name: "SRT", extensions: ["srt", "vtt"] }],
+    });
+    if (typeof p !== "string") return;
+    busy = true;
+    try {
+      const res = (await api.visualRunEnrichment(
+        projectStore.mediaPath,
+        projectStore.analysisRun?.id ?? null,
+        p,
+        false,
+      )) as { transcript?: { segments?: typeof transcriptSegs }; plan?: VisualPlan };
+      transcriptSegs = res.transcript?.segments ?? [];
+      if (res.plan) plan = res.plan;
+      lastMessage = `SRT cargado · ${transcriptSegs.length} frases`;
+    } catch (e) {
+      error = String(e);
+    } finally {
+      busy = false;
+    }
   }
-
-  /** Keywords from engine + local freq on transcript */
-  const keywordList = $derived.by(() => {
-    const map = new Map<string, { word: string; score: number; count: number }>();
-    for (const ev of session?.semanticEvents || []) {
-      const label = (ev.label || "").toLowerCase();
-      if (!label || label.length < 3) continue;
-      const prev = map.get(label);
-      const sc = ev.score ?? 0.5;
-      if (!prev || sc > prev.score) {
-        map.set(label, { word: label, score: sc, count: (prev?.count ?? 0) + 1 });
-      } else {
-        prev.count += 1;
-      }
-      for (const t of ev.terms || []) {
-        const tl = t.toLowerCase();
-        if (tl.length < 4 || STOP.has(tl)) continue;
-        if (!map.has(tl)) map.set(tl, { word: tl, score: sc * 0.85, count: 1 });
-      }
-    }
-    for (const seg of session?.transcript?.segments || []) {
-      for (const tok of tokenizeDisplay(seg.text)) {
-        if (!tok.word) continue;
-        const l = tok.t.toLowerCase();
-        if (!isKeywordCandidate(l)) continue;
-        const prev = map.get(l);
-        if (prev) prev.count += 1;
-        else map.set(l, { word: l, score: 0.4, count: 1 });
-      }
-    }
-    return [...map.values()]
-      .sort((a, b) => b.score - a.score || b.count - a.count)
-      .slice(0, 36);
-  });
-
-  const keywordSet = $derived(new Set(keywordList.map((k) => k.word)));
-
-  const filteredSegments = $derived.by(() => {
-    const segs = session?.transcript?.segments || [];
-    const q = transcriptQuery.trim().toLowerCase();
-    if (!q) return segs;
-    return segs.filter((s) => s.text.toLowerCase().includes(q));
-  });
-
-  const acceptedCount = $derived(
-    session?.suggestions?.filter((s) => isAccepted(s.status)).length ?? 0,
-  );
-  const planCount = $derived(session?.plan?.placements?.length ?? 0);
-
-  const hasText = $derived((session?.transcript?.segments?.length ?? 0) > 0);
-
-  const assetsForSelected = $derived.by(() => {
-    const c = (selectedWord || "").toLowerCase();
-    if (!c) return [] as Asset[];
-    return assets.filter(
-      (a) =>
-        (a.concepts || []).some((x) => x.toLowerCase().includes(c) || c.includes(x.toLowerCase())) ||
-        (a.tags || []).some((x) => x.toLowerCase().includes(c) || c.includes(x.toLowerCase())) ||
-        (a.title || "").toLowerCase().includes(c),
-    );
-  });
 
   $effect(() => {
     void refreshAssets();
-    void refreshWhisperStatus();
+    void refreshSession();
+    void refreshWhisper();
+    // Init interval from playhead once
+    if (outputStart === 0 && outputEnd === 4 && playhead > 0.5) {
+      usePlayhead();
+    }
   });
 </script>
 
 <div class="panel flex min-h-0 flex-col overflow-hidden border-sky-800/30">
+  <!-- Header: primary path -->
   <div class="border-b border-surface-800 px-3 py-2">
-    <div class="text-sm font-semibold text-surface-100">Visual · Texto e imágenes</div>
+    <div class="text-sm font-semibold text-surface-100">Visual · B-roll</div>
     <div class="text-[10px] text-surface-500">
-      1) Carga el texto · 2) Pulsa una palabra · 3) Añade imagen · 4) Acepta sugerencias · 5) Render
+      Pausar → + Imagen → modo → ajustar → Render
     </div>
-    <div class="mt-2 flex flex-wrap gap-1.5">
-      <button
-        type="button"
-        class="btn-primary text-xs"
-        disabled={busy || installingWhisper}
-        onclick={runWhisper}
-        title={whisper?.available ? whisper.detail : "Requiere instalar Whisper"}
-      >
-        {busy ? "Transcribiendo…" : "Transcribir con Whisper"}
-      </button>
-      <button type="button" class="btn-secondary text-xs" disabled={busy} onclick={pickSrt}
-        >Importar SRT…</button
-      >
-      <button
-        type="button"
-        class="btn-ghost text-xs"
-        disabled={busy}
-        onclick={() => runEnrichment(false)}>Solo sugerencias</button
-      >
-      <button type="button" class="btn-ghost text-xs" onclick={importImageGeneric}>+ Imagen</button>
-      <button type="button" class="btn-ghost text-xs" onclick={importFolder}>+ Carpeta</button>
-      <button
-        type="button"
-        class="btn-ghost text-xs"
-        disabled={!hasText}
-        onclick={exportTranscript}>Exportar TXT/SRT</button
-      >
-      <button type="button" class="btn-ghost text-xs" disabled={busy} onclick={renderPlan}
-        >Render plan</button
-      >
-    </div>
-    <div class="mt-1.5 flex flex-wrap items-center gap-2 text-[10px]">
-      {#if whisper?.available}
-        <span class="rounded-full border border-keep/40 bg-keep/10 px-2 py-0.5 text-keep">
-          Whisper listo · {whisper.kind}
-        </span>
-      {:else}
-        <span class="rounded-full border border-amber-600/40 bg-amber-950/40 px-2 py-0.5 text-amber-200">
-          Whisper no instalado
-        </span>
+    <div class="mt-2 flex flex-wrap gap-1">
+      {#each [
+        { id: "colocar" as ToolTab, label: "Colocar" },
+        { id: "plan" as ToolTab, label: `Plan (${placements.length})` },
+        { id: "texto" as ToolTab, label: "Texto" },
+        { id: "mas" as ToolTab, label: "Más" },
+      ] as t}
         <button
           type="button"
-          class="btn-secondary text-[10px]"
-          disabled={installingWhisper || busy}
-          onclick={installWhisper}
+          class="rounded-lg px-2.5 py-1 text-[10px] font-semibold
+            {tool === t.id
+            ? 'bg-sky-600 text-white'
+            : 'bg-surface-900 text-surface-400 hover:text-surface-200'}"
+          onclick={() => (tool = t.id)}
         >
-          {installingWhisper ? "Instalando…" : "Instalar Whisper"}
+          {t.label}
         </button>
-        <span class="text-surface-600" title={whisper?.installHint || ""}
-          >o: npm run setup:whisper</span
-        >
-      {/if}
+      {/each}
     </div>
   </div>
 
@@ -669,385 +336,170 @@
     <div class="border-b border-surface-800 px-3 py-1 text-[10px] text-surface-400">{lastMessage}</div>
   {/if}
 
-  <!-- Sticky selection bar -->
-  <div
-    class="flex flex-wrap items-center gap-2 border-b border-sky-900/40 bg-sky-950/30 px-3 py-2"
-  >
-    <span class="text-[10px] font-semibold uppercase tracking-wide text-sky-300/90">Selección</span>
-    {#if selectedWord}
-      <span
-        class="rounded-full border border-sky-500/50 bg-sky-900/50 px-2.5 py-0.5 text-xs font-semibold text-sky-100"
-      >
-        {selectedWord}
-      </span>
-      {#if selectedSeg}
-        <span class="font-mono text-[9px] text-surface-500">
-          {selectedSeg.span.start.toFixed(1)}–{selectedSeg.span.end.toFixed(1)}s
-        </span>
-      {/if}
-    {:else}
-      <span class="text-[10px] text-surface-500">Pulsa una palabra del texto o un chip abajo</span>
-    {/if}
-    <input
-      type="text"
-      class="min-w-[7rem] flex-1 rounded border border-surface-700 bg-surface-950 px-2 py-1 text-[11px] text-surface-100"
-      placeholder="O escribe un concepto…"
-      bind:value={manualKeyword}
-      onkeydown={(e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          if (manualKeyword.trim()) selectWord(manualKeyword.trim());
-        }
+  <div class="min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
+    <!-- Always-visible track -->
+    <VisualTrack
+      duration={duration}
+      currentTime={playhead}
+      {placements}
+      {protectedRanges}
+      selectedId={selectedPlacementId}
+      onSelect={(id) => {
+        selectedPlacementId = id;
+        tool = "plan";
       }}
     />
-    <button
-      type="button"
-      class="btn-primary text-xs"
-      disabled={!(selectedWord || manualKeyword.trim())}
-      onclick={importImageForSelection}
-      title="Importa la imagen y la pega en el VisualPlan en el momento de la frase"
-    >
-      Añadir y adherir al video
-    </button>
-  </div>
 
-  <div class="min-h-0 flex-1 space-y-3 overflow-y-auto p-2">
-    <!-- TRANSCRIPT FIRST -->
-    <section>
-      <div class="mb-1 flex items-center justify-between gap-2">
-        <div class="text-[11px] font-semibold text-surface-300">
-          Lo que se dice
-          {#if hasText}
-            <span class="font-normal text-surface-500"
-              >({session?.transcript?.segments?.length} frases)</span
-            >
-          {/if}
-        </div>
-        <label class="flex items-center gap-1 text-[9px] text-surface-500">
-          <input type="checkbox" class="accent-vigil-500" bind:checked={showSourceTime} />
-          tiempos fuente
-        </label>
-      </div>
-
-      {#if !session}
-        <div
-          class="rounded-xl border border-dashed border-surface-700 bg-surface-950/60 px-3 py-4 text-center"
-        >
-          <p class="text-[11px] text-surface-400">
-            Pulsa <strong class="text-surface-200">Transcribir con Whisper</strong> o
-            <strong class="text-surface-200">Importar SRT</strong> para ver el texto del video.
-          </p>
-          <div class="mt-3 flex flex-wrap justify-center gap-2">
+    {#if tool === "colocar"}
+      <VisualPlaceForm
+        bind:outputStart
+        bind:outputEnd
+        bind:displayMode
+        {duration}
+        {busy}
+        onPlaceFile={placeImageFile}
+        onProtect={protectRange}
+        onChangeStart={(v) => (outputStart = v)}
+        onChangeEnd={(v) => (outputEnd = v)}
+        onChangeMode={(m) => (displayMode = m)}
+        onUsePlayhead={usePlayhead}
+      />
+      <PlacementInspector
+        placement={selectedPlacement}
+        thumbPath={selectedThumb}
+        {busy}
+        onUpdate={updateSelected}
+        onRemove={removeSelected}
+      />
+      {#if placements.length > 0}
+        <button type="button" class="btn-primary w-full text-xs" disabled={busy} onclick={renderPlan}>
+          Render plan ({placements.filter((p) => p.status === "active").length} imágenes)
+        </button>
+      {/if}
+    {:else if tool === "plan"}
+      <PlacementInspector
+        placement={selectedPlacement}
+        thumbPath={selectedThumb}
+        {busy}
+        onUpdate={updateSelected}
+        onRemove={removeSelected}
+      />
+      <ul class="space-y-1">
+        {#each placements as pl (pl.id)}
+          {@const a = assets.find((x) => x.id === pl.assetId)}
+          {@const u = fileUrl(a?.thumbnailPath)}
+          <li>
             <button
               type="button"
-              class="btn-primary text-xs"
-              disabled={busy || installingWhisper}
-              onclick={runWhisper}>Transcribir con Whisper</button
+              class="flex w-full items-center gap-2 rounded-lg border px-2 py-1.5 text-left text-[10px]
+                {selectedPlacementId === pl.id
+                ? 'border-sky-500 bg-sky-950/40'
+                : 'border-surface-800 bg-surface-950/50'}"
+              onclick={() => (selectedPlacementId = pl.id)}
             >
-            <button type="button" class="btn-secondary text-xs" onclick={pickSrt}
-              >Importar SRT…</button
-            >
-          </div>
-          <p class="mt-2 text-[10px] text-surface-600">
-            Luego toca una palabra y usa «Añadir imagen».
-          </p>
-        </div>
-      {:else if !hasText}
-        <div class="rounded-xl border border-amber-800/40 bg-amber-950/20 px-3 py-3">
-          <p class="text-[11px] text-amber-200/90">
-            Sin texto todavía. Usa el botón verde <strong>Transcribir con Whisper</strong> o importa
-            un <strong>.srt</strong>.
-          </p>
-          <div class="mt-2 flex flex-wrap gap-1.5">
-            <button
-              type="button"
-              class="btn-primary text-[10px]"
-              disabled={busy || installingWhisper}
-              onclick={runWhisper}
-            >
-              {busy ? "…" : "Transcribir con Whisper"}
+              {#if u}
+                <img src={u} alt="" class="h-8 w-8 rounded object-cover" />
+              {/if}
+              <span class="min-w-0 flex-1 truncate text-surface-200"
+                >{pl.label || pl.assetId}</span
+              >
+              <span class="font-mono text-surface-500"
+                >{pl.outputStart.toFixed(1)}–{pl.outputEnd.toFixed(1)}</span
+              >
             </button>
-            <button type="button" class="btn-secondary text-[10px]" onclick={pickSrt}
-              >Importar SRT…</button
-            >
-            {#if !whisper?.available}
+          </li>
+        {:else}
+          <li class="text-[10px] text-surface-500">Sin placements. Usa la pestaña Colocar.</li>
+        {/each}
+      </ul>
+      {#if protectedRanges.length}
+        <div class="text-[10px] text-surface-400">
+          <div class="mb-1 font-semibold">Zonas protegidas</div>
+          {#each protectedRanges as pr (pr.id)}
+            <div class="flex items-center justify-between gap-2 py-0.5">
+              <span class="font-mono"
+                >{pr.outputStart.toFixed(1)}–{pr.outputEnd.toFixed(1)} · {pr.reason}</span
+              >
               <button
                 type="button"
-                class="btn-ghost text-[10px]"
-                disabled={installingWhisper}
-                onclick={installWhisper}
+                class="btn-ghost text-[9px] text-cut"
+                onclick={async () => {
+                  try {
+                    plan = (await api.visualRemoveProtectedRange(pr.id)) as VisualPlan;
+                  } catch (e) {
+                    error = String(e);
+                  }
+                }}>Quitar</button
               >
-                {installingWhisper ? "Instalando…" : "Instalar Whisper"}
-              </button>
-            {/if}
-          </div>
-          {#if session.transcript?.warnings?.[0]}
-            <p class="mt-2 text-[9px] text-surface-500">{session.transcript.warnings[0]}</p>
-          {/if}
-        </div>
-      {:else}
-        {#if session.timeMap}
-          <p class="mb-1 text-[9px] text-surface-500">
-            {session.transcript?.engine || "texto"} · fuente
-            {session.timeMap.sourceDuration.toFixed(0)}s → salida
-            {session.timeMap.outputDuration.toFixed(0)}s
-          </p>
-        {/if}
-        <input
-          type="search"
-          class="mb-1.5 w-full rounded border border-surface-800 bg-surface-950 px-2 py-1 text-[10px] text-surface-200"
-          placeholder="Buscar en el texto…"
-          bind:value={transcriptQuery}
-        />
-        <div
-          class="max-h-52 space-y-2 overflow-y-auto rounded-xl border border-surface-800 bg-surface-950/90 p-2"
-        >
-          {#each filteredSegments as seg, i (seg.id ?? i)}
-            <div
-              class="rounded-lg px-1.5 py-1 text-[11px] leading-relaxed
-                {selectedSeg === seg ? 'bg-sky-950/50 ring-1 ring-sky-700/50' : ''}"
-            >
-              <div class="mb-0.5 font-mono text-[9px] text-surface-600">
-                {seg.span.start.toFixed(1)}–{seg.span.end.toFixed(1)}s
-                {#if showSourceTime}<span class="text-surface-700"> fuente</span>{/if}
-              </div>
-              <p class="text-surface-200">
-                {#each tokenizeDisplay(seg.text) as tok}
-                  {#if tok.word}
-                    {@const low = tok.t.toLowerCase()}
-                    {@const isKw = keywordSet.has(low) || isKeywordCandidate(low)}
-                    <button
-                      type="button"
-                      class="rounded px-0.5 transition
-                        {selectedWord === low
-                        ? 'bg-sky-500 text-white'
-                        : isKw
-                          ? 'bg-sky-900/40 text-sky-100 hover:bg-sky-700/50'
-                          : 'text-surface-300 hover:bg-surface-800 hover:text-white'}"
-                      title={isKw
-                        ? `Palabra clave — clic para añadir imagen a «${low}»`
-                        : `Clic para usar «${low}» como concepto`}
-                      onclick={() => selectWord(tok.t, seg)}
-                    >{tok.t}</button
-                    >
-                  {:else}<span class="text-surface-400">{tok.t}</span>{/if}
-                {/each}
-              </p>
             </div>
           {/each}
         </div>
       {/if}
-    </section>
-
-    <!-- KEYWORD CHIPS -->
-    {#if keywordList.length > 0}
-      <section>
-        <div class="mb-1 text-[11px] font-semibold text-surface-300">
-          Palabras clave ({keywordList.length})
-        </div>
-        <p class="mb-1.5 text-[9px] text-surface-500">
-          Destacadas del texto. Clic = seleccionar · luego «Añadir imagen».
+      <button type="button" class="btn-primary w-full text-xs" disabled={busy} onclick={renderPlan}>
+        Render plan
+      </button>
+    {:else if tool === "texto"}
+      <div class="space-y-2">
+        <p class="text-[10px] text-surface-500">
+          Opcional: ayuda a sugerir conceptos. El placement manual no lo necesita.
         </p>
         <div class="flex flex-wrap gap-1">
-          {#each keywordList as k (k.word)}
+          <button
+            type="button"
+            class="btn-secondary text-[10px]"
+            disabled={busy || preferBusyWhisper}
+            onclick={runWhisper}
+          >
+            {whisperOk ? "Transcribir Whisper" : "Whisper…"}
+          </button>
+          <button type="button" class="btn-ghost text-[10px]" disabled={busy} onclick={pickSrt}
+            >Importar SRT</button
+          >
+        </div>
+        {#if whisperOk}
+          <span class="text-[9px] text-keep">Whisper listo · {whisperKind}</span>
+        {/if}
+        <div class="max-h-48 space-y-1 overflow-y-auto text-[10px]">
+          {#each transcriptSegs.slice(0, 40) as seg}
             <button
               type="button"
-              class="rounded-full border px-2 py-0.5 text-[10px] font-medium transition
-                {selectedWord === k.word
-                ? 'border-sky-400 bg-sky-600 text-white'
-                : 'border-surface-700 bg-surface-900 text-surface-300 hover:border-sky-600 hover:text-sky-100'}"
-              onclick={() => selectWord(k.word)}
-              title={`score ${Math.round(k.score * 100)} · ${k.count}×`}
+              class="block w-full rounded px-1 py-0.5 text-left hover:bg-surface-800"
+              onclick={() => {
+                // Map source-ish to place form (approx output if no cuts)
+                outputStart = seg.span.start;
+                outputEnd = Math.min(duration, seg.span.end + 1);
+                tool = "colocar";
+              }}
             >
-              {k.word}
+              <span class="font-mono text-surface-600"
+                >{seg.span.start.toFixed(1)}–{seg.span.end.toFixed(1)}</span
+              >
+              {seg.text}
             </button>
+          {:else}
+            <p class="text-surface-600">Sin texto todavía.</p>
           {/each}
         </div>
-      </section>
-    {/if}
-
-    <!-- LIBRARY filtered by selection -->
-    <section>
-      <div class="mb-1 text-[11px] font-semibold text-surface-300">
-        Biblioteca
-        {#if selectedWord && assetsForSelected.length}
-          <span class="font-normal text-sky-400/90"
-            >· {assetsForSelected.length} para «{selectedWord}»</span
-          >
-        {:else}
-          <span class="font-normal text-surface-500">({assets.length})</span>
-        {/if}
       </div>
-      {#if assets.length === 0}
-        <p class="text-[10px] text-surface-500">
-          Aún no hay imágenes. Selecciona una palabra y pulsa
-          <strong>Añadir y adherir al video</strong>.
-        </p>
-      {:else}
-        {@const list = selectedWord && assetsForSelected.length ? assetsForSelected : assets}
-        <ul class="space-y-1.5">
-          {#each list.slice(0, 10) as a (a.id)}
-            {@const thumb = fileUrl(a.thumbnailPath)}
-            <li
-              class="flex items-center gap-2 rounded-lg border border-surface-800 bg-surface-950/50 px-2 py-1.5 text-[10px]"
-            >
-              {#if thumb}
-                <img
-                  src={thumb}
-                  alt=""
-                  class="h-10 w-10 shrink-0 rounded object-cover ring-1 ring-surface-700"
-                />
-              {:else}
-                <div
-                  class="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-surface-800 text-[9px] text-surface-500"
-                >
-                  img
-                </div>
-              {/if}
-              <div class="min-w-0 flex-1">
-                <div class="truncate font-medium text-surface-200">{a.title}</div>
-                <div class="truncate text-surface-500">
-                  {(a.concepts || []).join(", ") || (a.tags || []).join(", ") || "—"}
-                </div>
-              </div>
+    {:else}
+      <div class="space-y-2 text-[10px] text-surface-400">
+        <p>Biblioteca: {assets.length} imágenes</p>
+        <ul class="max-h-40 space-y-1 overflow-y-auto">
+          {#each assets.slice(0, 12) as a (a.id)}
+            {@const u = fileUrl(a.thumbnailPath)}
+            <li class="flex items-center gap-2">
+              {#if u}<img src={u} alt="" class="h-7 w-7 rounded object-cover" />{/if}
+              <span class="truncate">{a.title}</span>
             </li>
           {/each}
         </ul>
-      {/if}
-    </section>
-
-    <!-- SUGGESTIONS / ATTACHMENTS -->
-    <section>
-      <div class="mb-1 text-[11px] font-semibold text-surface-300">
-        En el video ({session?.suggestions?.length ?? 0})
-        {#if acceptedCount}
-          <span class="font-normal text-keep"> · {acceptedCount} en el plan</span>
+        {#if suggestions.length}
+          <p class="font-semibold text-surface-300">Sugerencias auto: {suggestions.length}</p>
         {/if}
+        <p class="text-surface-600">
+          EDL = cortes · VisualPlan = overlays. Originales intactos.
+        </p>
       </div>
-      {#if !session?.suggestions?.length}
-        <p class="text-[10px] text-surface-500">
-          Elige una palabra del texto y <strong>Añadir y adherir al video</strong>. La imagen queda
-          en el plan automáticamente (no hace falta pulsar Aceptar).
-        </p>
-      {:else}
-        <ul class="space-y-2">
-          {#each session.suggestions as s (s.id)}
-            {@const ok = isAccepted(s.status)}
-            {@const no = isRejected(s.status)}
-            {@const thumb = fileUrl(s.thumbnailPath)}
-            <li
-              class="rounded-xl border p-2 text-[10px]
-                {ok
-                ? 'border-keep/50 bg-keep/10'
-                : no
-                  ? 'border-surface-800 opacity-50'
-                  : 'border-surface-800 bg-surface-950/50'}"
-            >
-              <div class="flex gap-2">
-                {#if thumb}
-                  <img
-                    src={thumb}
-                    alt=""
-                    class="h-12 w-12 shrink-0 rounded-lg object-cover ring-1 ring-surface-700"
-                  />
-                {:else}
-                  <div
-                    class="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-surface-800 text-[9px] text-surface-500"
-                  >
-                    sin mini
-                  </div>
-                {/if}
-                <div class="min-w-0 flex-1">
-                  <div class="flex flex-wrap items-center gap-1.5">
-                    <span class="font-semibold text-surface-100"
-                      >{s.assetTitle || s.assetId}</span
-                    >
-                    {#if ok}
-                      <span
-                        class="rounded-full border border-keep/40 bg-keep/20 px-1.5 py-0.5 text-[9px] font-semibold text-keep"
-                        >En el plan ✓</span
-                      >
-                    {:else if no}
-                      <span class="text-[9px] text-surface-500">Rechazada</span>
-                    {:else}
-                      <span class="text-[9px] text-amber-300">Pendiente</span>
-                    {/if}
-                  </div>
-                  <div class="font-mono text-surface-500">
-                    salida {s.outputSpan.start.toFixed(1)}–{s.outputSpan.end.toFixed(1)}s · fuente
-                    {s.sourceSpan.start.toFixed(1)}–{s.sourceSpan.end.toFixed(1)}s
-                  </div>
-                  <div class="mt-0.5 truncate text-surface-600">
-                    {(s.matchReasons || []).join(" · ")}
-                  </div>
-                </div>
-              </div>
-              <div class="mt-1.5 flex flex-wrap gap-1">
-                <button
-                  type="button"
-                  class="btn-ghost text-[10px] text-sky-300"
-                  onclick={() => goToSourceTime(s.sourceSpan.start, s.sourceSpan.end)}
-                >
-                  Ir al momento
-                </button>
-                {#if !ok && !no}
-                  <button
-                    type="button"
-                    class="btn-ghost text-[10px] text-keep"
-                    onclick={() => setStatus(s.id, "accepted")}>Aceptar</button
-                  >
-                {/if}
-                {#if !no}
-                  <button
-                    type="button"
-                    class="btn-ghost text-[10px] text-cut"
-                    onclick={() => setStatus(s.id, "rejected")}
-                  >
-                    {ok ? "Quitar del plan" : "Rechazar"}
-                  </button>
-                {/if}
-                {#if no}
-                  <button
-                    type="button"
-                    class="btn-ghost text-[10px] text-keep"
-                    onclick={() => setStatus(s.id, "accepted")}>Volver a poner</button
-                  >
-                {/if}
-              </div>
-            </li>
-          {/each}
-        </ul>
-      {/if}
-    </section>
-
-    {#if planCount > 0}
-      <section
-        class="rounded-xl border border-keep/40 bg-keep/10 p-3 text-[11px] text-surface-200"
-      >
-        <p class="font-semibold text-keep">
-          Plan listo · {planCount} imagen(es) en el video
-        </p>
-        <p class="mt-1 text-[10px] text-surface-400">
-          Ya están adheridas (no hace falta Aceptar). Para verlas en un archivo MP4:
-        </p>
-        <ol class="mt-1 list-decimal space-y-0.5 pl-4 text-[10px] text-surface-400">
-          <li>Exporta el video cortado en modo Silencios (si aún no lo hiciste).</li>
-          <li>Pulsa <strong class="text-surface-200">Render plan</strong> arriba.</li>
-        </ol>
-        <button
-          type="button"
-          class="btn-primary mt-2 w-full text-xs"
-          disabled={busy}
-          onclick={renderPlan}
-        >
-          Render plan (generar MP4 con imágenes)
-        </button>
-      </section>
-    {:else if session?.plan}
-      <section class="rounded-lg border border-surface-800 bg-surface-950/40 p-2 text-[10px] text-surface-500">
-        VisualPlan vacío — adhiere una imagen desde el texto.
-      </section>
     {/if}
   </div>
 </div>
-

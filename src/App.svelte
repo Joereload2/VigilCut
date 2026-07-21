@@ -345,8 +345,8 @@
               <VideoPreview />
             </div>
             <p class="shrink-0 px-1 text-[10px] text-surface-500">
-              1) Analiza en Silencios · 2) Importa imágenes con conceptos · 3) Genera sugerencias · 4)
-              Acepta · 5) Exporta el cortado y Render plan
+              Pausar → Colocar imagen (completa / parcial / flotante) → ajustar en la pista → Render
+              plan sobre el MP4 cortado
             </p>
           </div>
           <aside class="flex min-h-[280px] min-w-0 flex-col overflow-hidden">
