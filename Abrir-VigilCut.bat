@@ -1,5 +1,5 @@
 @echo off
-REM Silent launch via VBS (no console). Falls back to start if VBS missing.
+REM Always launch production release (embedded UI — no Vite/localhost).
 set "ROOT=%~dp0"
 cd /d "%ROOT%"
 if exist "%ROOT%Abrir-VigilCut.vbs" (
@@ -11,9 +11,6 @@ if exist "%ROOT%src-tauri\target\release\vigilcut.exe" (
   start "" "%ROOT%src-tauri\target\release\vigilcut.exe"
   exit /b 0
 )
-if exist "%ROOT%src-tauri\target\debug\vigilcut.exe" (
-  start "" "%ROOT%src-tauri\target\debug\vigilcut.exe"
-  exit /b 0
-)
-echo No hay ejecutable. npm run tauri:build
+echo No hay release. Ejecuta: npx tauri build --no-bundle
+echo No uses target\debug sin Vite.
 pause

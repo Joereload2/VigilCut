@@ -1,27 +1,25 @@
-' Silent launcher — no console window.
-' Prefers release (standalone UI), then debug.
+' Silent launcher — production only (no localhost / Vite).
+' Always opens release build with embedded UI.
 
 Option Explicit
-Dim fso, sh, root, releaseExe, debugExe, exe, wsh
+Dim fso, sh, root, releaseExe
 Set fso = CreateObject("Scripting.FileSystemObject")
 Set sh = CreateObject("WScript.Shell")
 root = fso.GetParentFolderName(WScript.ScriptFullName)
 releaseExe = root & "\src-tauri\target\release\vigilcut.exe"
-debugExe = root & "\src-tauri\target\debug\vigilcut.exe"
 
 On Error Resume Next
 sh.Run "taskkill /IM vigilcut.exe /F", 0, True
 On Error GoTo 0
 
-If fso.FileExists(releaseExe) Then
-  exe = releaseExe
-ElseIf fso.FileExists(debugExe) Then
-  exe = debugExe
-Else
-  MsgBox "No hay ejecutable." & vbCrLf & "Ejecuta: npm run tauri:build" & vbCrLf & "o: npm run dev:win", 48, "VigilCut"
+If Not fso.FileExists(releaseExe) Then
+  MsgBox "No hay build de producción." & vbCrLf & vbCrLf & _
+    "Ejecuta en PowerShell:" & vbCrLf & _
+    "  cd " & root & vbCrLf & _
+    "  npx tauri build --no-bundle" & vbCrLf & vbCrLf & _
+    "NO uses target\debug (requiere Vite en localhost:1420).", 48, "VigilCut"
   WScript.Quit 1
 End If
 
-' 0 = hidden window for the process start helper; GUI app still shows.
-sh.CurrentDirectory = fso.GetParentFolderName(exe)
-sh.Run """" & exe & """", 1, False
+sh.CurrentDirectory = fso.GetParentFolderName(releaseExe)
+sh.Run """" & releaseExe & """", 1, False
