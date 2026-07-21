@@ -64,6 +64,8 @@ async fn smoke_visual_overlay_render_atomic_and_manifest() {
         status: "active".into(),
         provenance: "smoke_test".into(),
         suggestion_id: None,
+        layout: Default::default(),
+        label: Some("smoke".into()),
     });
 
     let out = ws.join("visual-enriched.mp4");

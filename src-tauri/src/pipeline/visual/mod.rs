@@ -12,12 +12,13 @@ use crate::models::edl::Edl;
 use crate::models::event::Span;
 use crate::models::transcript::{Transcript, TranscriptStatus};
 use crate::models::visual::{
-    edl_fingerprint, LicenseStatus, SuggestionStatus, VisualPlan, VisualPlacement, VisualSuggestion,
+    edl_fingerprint, PlacementLayout, PlacementMode, ProtectedRange, LicenseStatus,
+    SuggestionStatus, VisualPlan, VisualPlacement, VisualSuggestion,
 };
 use crate::pipeline::semantic::extract_semantic_events;
 use crate::pipeline::time_map::TimeMap;
 use crate::pipeline::transcript_engine::write_transcript_artifacts;
-use crate::pipeline::visual::library::{import_image, list_active_assets};
+use crate::pipeline::visual::library::{get_asset_by_id, import_image, list_active_assets};
 use crate::pipeline::visual::match_rank::{rank_suggestions, MatchConfig};
 use uuid::Uuid;
 
@@ -326,6 +327,286 @@ pub fn attach_image_to_moment(
             concept, output.start, output.end
         ),
     }))
+}
+
+/// Create a manual placement on the **output** timeline. Transcript is optional.
+/// Accepts either an existing `asset_id` or a new `image_path` to import.
+pub fn create_manual_placement(
+    state: &VisualState,
+    edl: &Edl,
+    media_path: &Path,
+    asset_id: Option<&str>,
+    image_path: Option<&Path>,
+    output_start: f64,
+    output_end: f64,
+    display_mode: &str,
+    position_x: Option<f64>,
+    position_y: Option<f64>,
+    size_w: Option<f64>,
+    fit: Option<&str>,
+    label: Option<String>,
+) -> AppResult<serde_json::Value> {
+    let mode = PlacementMode::from_user(display_mode);
+    let mut layout = PlacementLayout::for_mode(mode);
+    if let Some(x) = position_x {
+        layout.x = x;
+    }
+    if let Some(y) = position_y {
+        layout.y = y;
+    }
+    if let Some(w) = size_w {
+        layout.w = w;
+    }
+    layout = layout.clamp();
+
+    let asset = if let Some(id) = asset_id.filter(|s| !s.is_empty()) {
+        get_asset_by_id(id)?
+    } else if let Some(p) = image_path {
+        import_image(
+            p,
+            label.clone(),
+            vec![],
+            vec![],
+            LicenseStatus::Owned,
+        )?
+    } else {
+        return Err(AppError::Invalid(
+            "Indica asset_id o image_path para el placement manual.".into(),
+        ));
+    };
+
+    let time_map = TimeMap::from_edl(edl);
+    let out_dur = time_map.output_duration.max(0.1);
+    let start = output_start.clamp(0.0, out_dur);
+    let mut end = output_end.clamp(0.0, out_dur);
+    if end < start + 0.25 {
+        end = (start + 3.5).min(out_dur);
+    }
+    if end <= start {
+        return Err(AppError::Invalid(
+            "Intervalo de salida inválido para el placement.".into(),
+        ));
+    }
+
+    let mut g = state.lock().map_err(|e| AppError::Message(e.to_string()))?;
+    let fp = edl_fingerprint(&edl.keep_ranges());
+    if g.plan.is_none() {
+        g.plan = Some(VisualPlan::new(
+            g.edl_fp.clone().unwrap_or_else(|| fp.clone()),
+            media_path.to_string_lossy(),
+            fp.clone(),
+        ));
+    }
+    let plan = g.plan.as_mut().unwrap();
+    if plan.edl_fingerprint != fp {
+        plan.edl_fingerprint = fp.clone();
+        plan.placements.clear();
+        plan.protected_ranges.clear();
+        plan.warnings
+            .push("EDL cambió: plan visual reiniciado.".into());
+    }
+
+    if plan.is_protected(start, end) {
+        return Err(AppError::Invalid(
+            "Ese intervalo está protegido (sin imágenes). Quita el rango protegido o elige otro momento.".into(),
+        ));
+    }
+
+    // Soft-trim against protected ranges: reject hard overlap for MVP clarity
+    for pr in &plan.protected_ranges {
+        if pr.overlaps(start, end) {
+            return Err(AppError::Invalid(format!(
+                "Choca con zona protegida {:.1}–{:.1}s: {}",
+                pr.output_start, pr.output_end, pr.reason
+            )));
+        }
+    }
+
+    let placement = VisualPlacement::manual(
+        &asset.id,
+        start,
+        end,
+        mode,
+        layout,
+        fit.unwrap_or("cover"),
+        label.or_else(|| Some(asset.title.clone())),
+    );
+    plan.placements.push(placement.clone());
+    plan.touch();
+    plan.warnings.retain(|w| !w.contains("Biblioteca vacía"));
+
+    let plan_out = plan.clone();
+    if let Ok(p) = save_visual_plan(&plan_out, None) {
+        g.plan_path = Some(p);
+    }
+    g.edl_fp = Some(fp);
+
+    Ok(serde_json::json!({
+        "placement": placement,
+        "asset": asset,
+        "plan": plan_out,
+        "transcript": g.transcript,
+        "suggestions": g.suggestions,
+        "timeMap": {
+            "sourceDuration": time_map.source_duration,
+            "outputDuration": time_map.output_duration,
+        },
+        "message": format!(
+            "Placement manual {:.1}–{:.1}s · {:?}",
+            start, end, mode
+        ),
+    }))
+}
+
+pub fn update_placement(
+    state: &VisualState,
+    placement_id: &str,
+    output_start: Option<f64>,
+    output_end: Option<f64>,
+    display_mode: Option<&str>,
+    position_x: Option<f64>,
+    position_y: Option<f64>,
+    size_w: Option<f64>,
+    fit: Option<&str>,
+    status: Option<&str>,
+) -> AppResult<VisualPlan> {
+    let mut g = state.lock().map_err(|e| AppError::Message(e.to_string()))?;
+    let plan = g
+        .plan
+        .as_mut()
+        .ok_or_else(|| AppError::Invalid("No hay VisualPlan en sesión.".into()))?;
+    let pl = plan
+        .placements
+        .iter_mut()
+        .find(|p| p.id == placement_id)
+        .ok_or_else(|| AppError::NotFound(placement_id.into()))?;
+    if let Some(s) = output_start {
+        pl.output_start = s.max(0.0);
+    }
+    if let Some(e) = output_end {
+        pl.output_end = e.max(pl.output_start + 0.25);
+    }
+    if let Some(m) = display_mode {
+        pl.mode = PlacementMode::from_user(m);
+        // refresh layout defaults when mode changes unless user also sent coords
+        if position_x.is_none() && position_y.is_none() && size_w.is_none() {
+            pl.layout = PlacementLayout::for_mode(pl.mode);
+        }
+    }
+    if let Some(x) = position_x {
+        pl.layout.x = x;
+    }
+    if let Some(y) = position_y {
+        pl.layout.y = y;
+    }
+    if let Some(w) = size_w {
+        pl.layout.w = w;
+    }
+    pl.layout = pl.layout.clone().clamp();
+    if let Some(f) = fit {
+        pl.fit = f.into();
+    }
+    if let Some(st) = status {
+        pl.status = st.into();
+    }
+    let check_start = pl.output_start;
+    let check_end = pl.output_end;
+    let check_active = pl.status == "active";
+    // Protected range check (after releasing pl borrow via copies)
+    if check_active && plan.is_protected(check_start, check_end) {
+        return Err(AppError::Invalid(
+            "El placement cae en un rango protegido.".into(),
+        ));
+    }
+    plan.touch();
+    let out = plan.clone();
+    let _ = save_visual_plan(&out, None);
+    Ok(out)
+}
+
+pub fn remove_placement(state: &VisualState, placement_id: &str) -> AppResult<VisualPlan> {
+    let mut g = state.lock().map_err(|e| AppError::Message(e.to_string()))?;
+    let plan = g
+        .plan
+        .as_mut()
+        .ok_or_else(|| AppError::Invalid("No hay VisualPlan en sesión.".into()))?;
+    let before = plan.placements.len();
+    plan.placements.retain(|p| p.id != placement_id);
+    if plan.placements.len() == before {
+        return Err(AppError::NotFound(placement_id.into()));
+    }
+    plan.touch();
+    let out = plan.clone();
+    let _ = save_visual_plan(&out, None);
+    Ok(out)
+}
+
+pub fn add_protected_range(
+    state: &VisualState,
+    edl: &Edl,
+    media_path: &Path,
+    output_start: f64,
+    output_end: f64,
+    reason: Option<String>,
+) -> AppResult<VisualPlan> {
+    let mut g = state.lock().map_err(|e| AppError::Message(e.to_string()))?;
+    let fp = edl_fingerprint(&edl.keep_ranges());
+    if g.plan.is_none() {
+        g.plan = Some(VisualPlan::new(
+            fp.clone(),
+            media_path.to_string_lossy(),
+            fp.clone(),
+        ));
+    }
+    let plan = g.plan.as_mut().unwrap();
+    if plan.edl_fingerprint != fp {
+        plan.edl_fingerprint = fp;
+    }
+    let pr = ProtectedRange::new(
+        output_start,
+        output_end,
+        reason.unwrap_or_else(|| "Sin B-roll".into()),
+    );
+    // Deactivate overlapping placements
+    for pl in plan.placements.iter_mut() {
+        if pr.overlaps(pl.output_start, pl.output_end) {
+            pl.status = "blocked_protected".into();
+        }
+    }
+    plan.protected_ranges.push(pr);
+    plan.touch();
+    let out = plan.clone();
+    let _ = save_visual_plan(&out, None);
+    Ok(out)
+}
+
+pub fn remove_protected_range(state: &VisualState, range_id: &str) -> AppResult<VisualPlan> {
+    let mut g = state.lock().map_err(|e| AppError::Message(e.to_string()))?;
+    let plan = g
+        .plan
+        .as_mut()
+        .ok_or_else(|| AppError::Invalid("No hay VisualPlan en sesión.".into()))?;
+    let before = plan.protected_ranges.len();
+    plan.protected_ranges.retain(|r| r.id != range_id);
+    if plan.protected_ranges.len() == before {
+        return Err(AppError::NotFound(range_id.into()));
+    }
+    // Reactivate placements that were only blocked by protection (heuristic)
+    for pl in plan.placements.iter_mut() {
+        if pl.status == "blocked_protected" {
+            let still = plan
+                .protected_ranges
+                .iter()
+                .any(|r| r.overlaps(pl.output_start, pl.output_end));
+            if !still {
+                pl.status = "active".into();
+            }
+        }
+    }
+    plan.touch();
+    let out = plan.clone();
+    let _ = save_visual_plan(&out, None);
+    Ok(out)
 }
 
 pub fn set_suggestion_status(

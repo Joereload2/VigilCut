@@ -15,9 +15,11 @@ use crate::pipeline::visual::library::{
 };
 use crate::pipeline::visual::render::render_visual_plan;
 use crate::pipeline::visual::{
-    attach_image_to_moment, export_session_transcript, import_library_image,
-    invalidate_if_edl_changed, load_visual_plan, run_visual_enrichment,
-    run_visual_enrichment_with_progress, save_visual_plan, set_suggestion_status, VisualSession,
+    add_protected_range, attach_image_to_moment, create_manual_placement,
+    export_session_transcript, import_library_image, invalidate_if_edl_changed, load_visual_plan,
+    remove_placement, remove_protected_range, run_visual_enrichment,
+    run_visual_enrichment_with_progress, save_visual_plan, set_suggestion_status, update_placement,
+    VisualSession,
 };
 
 pub type VisualSessionState = Mutex<VisualSession>;
@@ -45,6 +47,22 @@ fn edl_from_cache(cache: &AnalysisCache, run_id: Option<&str>, media_path: &str)
                 .into(),
         )
     })
+}
+
+/// Prefer analysis EDL; otherwise identity keep of full duration (manual B-roll without cuts).
+fn edl_from_cache_or_identity(
+    cache: &AnalysisCache,
+    run_id: Option<&str>,
+    media_path: &str,
+    source_duration: Option<f64>,
+) -> AppResult<Edl> {
+    if let Ok(edl) = edl_from_cache(cache, run_id, media_path) {
+        return Ok(edl);
+    }
+    let dur = source_duration
+        .filter(|d| d.is_finite() && *d > 0.0)
+        .unwrap_or(60.0);
+    Ok(Edl::from_remove_spans(media_path, dur, &[]))
 }
 
 #[tauri::command]
@@ -167,7 +185,12 @@ pub fn visual_attach_image(
     analysis: State<'_, AnalysisCache>,
     visual: State<'_, VisualSessionState>,
 ) -> AppResult<serde_json::Value> {
-    let edl = edl_from_cache(&analysis, analysis_run_id.as_deref(), &media_path)?;
+    let edl = edl_from_cache_or_identity(
+        &analysis,
+        analysis_run_id.as_deref(),
+        &media_path,
+        Some(source_end.max(source_start) + 5.0),
+    )?;
     attach_image_to_moment(
         &visual,
         &edl,
@@ -177,6 +200,119 @@ pub fn visual_attach_image(
         source_start,
         source_end,
     )
+}
+
+/// Manual placement on output timeline — no transcript required.
+#[tauri::command]
+pub fn visual_create_manual_placement(
+    media_path: String,
+    analysis_run_id: Option<String>,
+    asset_id: Option<String>,
+    image_path: Option<String>,
+    output_start: f64,
+    output_end: f64,
+    display_mode: Option<String>,
+    position_x: Option<f64>,
+    position_y: Option<f64>,
+    size_w: Option<f64>,
+    fit: Option<String>,
+    label: Option<String>,
+    source_duration: Option<f64>,
+    analysis: State<'_, AnalysisCache>,
+    visual: State<'_, VisualSessionState>,
+) -> AppResult<serde_json::Value> {
+    let edl = edl_from_cache_or_identity(
+        &analysis,
+        analysis_run_id.as_deref(),
+        &media_path,
+        source_duration.or(Some(output_end.max(output_start) + 1.0)),
+    )?;
+    let img = image_path.as_ref().map(PathBuf::from);
+    create_manual_placement(
+        &visual,
+        &edl,
+        PathBuf::from(&media_path).as_path(),
+        asset_id.as_deref(),
+        img.as_deref(),
+        output_start,
+        output_end,
+        display_mode.as_deref().unwrap_or("completa"),
+        position_x,
+        position_y,
+        size_w,
+        fit.as_deref(),
+        label,
+    )
+}
+
+#[tauri::command]
+pub fn visual_update_placement(
+    placement_id: String,
+    output_start: Option<f64>,
+    output_end: Option<f64>,
+    display_mode: Option<String>,
+    position_x: Option<f64>,
+    position_y: Option<f64>,
+    size_w: Option<f64>,
+    fit: Option<String>,
+    status: Option<String>,
+    visual: State<'_, VisualSessionState>,
+) -> AppResult<VisualPlan> {
+    update_placement(
+        &visual,
+        &placement_id,
+        output_start,
+        output_end,
+        display_mode.as_deref(),
+        position_x,
+        position_y,
+        size_w,
+        fit.as_deref(),
+        status.as_deref(),
+    )
+}
+
+#[tauri::command]
+pub fn visual_remove_placement(
+    placement_id: String,
+    visual: State<'_, VisualSessionState>,
+) -> AppResult<VisualPlan> {
+    remove_placement(&visual, &placement_id)
+}
+
+#[tauri::command]
+pub fn visual_add_protected_range(
+    media_path: String,
+    analysis_run_id: Option<String>,
+    output_start: f64,
+    output_end: f64,
+    reason: Option<String>,
+    source_duration: Option<f64>,
+    analysis: State<'_, AnalysisCache>,
+    visual: State<'_, VisualSessionState>,
+) -> AppResult<VisualPlan> {
+    let edl = edl_from_cache_or_identity(
+        &analysis,
+        analysis_run_id.as_deref(),
+        &media_path,
+        source_duration,
+    )?;
+    add_protected_range(
+        &visual,
+        &edl,
+        PathBuf::from(&media_path).as_path(),
+        output_start,
+        output_end,
+        reason,
+    )
+}
+
+#[tauri::command]
+pub fn visual_remove_protected_range(
+    range_id: String,
+    visual: State<'_, VisualSessionState>,
+) -> AppResult<VisualPlan> {
+    remove_protected_range(&visual, &range_id)
 }
 
 #[tauri::command]
