@@ -42,6 +42,20 @@
   let whisperOk = $state(false);
   let whisperKind = $state("");
   let preferBusyWhisper = $state(false);
+  /** Intelligent library coverage (optional project key from detect needs) */
+  let projectKey = $state<string | null>(null);
+  let coverage = $state<{
+    total?: number;
+    reused?: number;
+    generated?: number;
+    waiting?: number;
+    needsReview?: number;
+    uncovered?: number;
+    failed?: number;
+    skipped?: number;
+  } | null>(null);
+  let reviewQueue = $state<{ id: string; qaReason?: string; localPath?: string }[]>([]);
+  let intelBusy = $state(false);
 
   const duration = $derived(
     projectStore.estimate?.estimatedDuration ??
@@ -765,20 +779,205 @@
           onUsePlayhead={usePlayhead}
         />
       {:else if activeAux === "library"}
-        <div class="flex min-w-0 flex-wrap gap-2">
-          {#each assets.slice(0, 24) as a (a.id)}
-            {@const u = fileUrl(a.thumbnailPath)}
-            <div
-              class="flex w-[6.5rem] min-w-0 flex-col rounded-lg border border-surface-800 bg-surface-950/60 p-1"
-            >
-              {#if u}
-                <img src={u} alt="" class="h-12 w-full rounded object-cover" />
-              {/if}
-              <span class="truncate px-0.5 text-[10px] text-surface-300">{a.title}</span>
+        <div class="flex min-h-0 min-w-0 flex-col gap-2 overflow-y-auto">
+          <!-- Coverage summary (plain language) -->
+          {#if coverage && (coverage.total ?? 0) > 0}
+            <div class="rounded-lg border border-surface-800 bg-surface-950/70 p-2 text-[10px] text-surface-300">
+              <p class="font-medium text-surface-100">
+                Cobertura visual: {(coverage.reused ?? 0) + (coverage.generated ?? 0)} de {coverage.total}
+              </p>
+              <ul class="mt-1 space-y-0.5 text-surface-500">
+                <li>{coverage.reused ?? 0} reutilizadas</li>
+                <li>{coverage.generated ?? 0} generadas</li>
+                <li>{coverage.waiting ?? 0} esperando</li>
+                <li>{coverage.needsReview ?? 0} para revisar</li>
+                <li>{coverage.uncovered ?? 0} sin imagen</li>
+              </ul>
             </div>
-          {:else}
-            <p class="text-[11px] text-surface-500">Biblioteca vacía.</p>
-          {/each}
+          {/if}
+          <div class="flex flex-wrap gap-1">
+            <button
+              type="button"
+              class="btn-secondary text-[10px]"
+              disabled={busy || intelBusy || !projectStore.mediaPath}
+              onclick={async () => {
+                if (!projectStore.mediaPath) return;
+                intelBusy = true;
+                error = null;
+                try {
+                  const res = (await api.visualDetectNeeds({
+                    mediaPath: projectStore.mediaPath,
+                    analysisRunId: projectStore.analysisRun?.id ?? null,
+                  })) as {
+                    projectKey?: string;
+                    coverage?: typeof coverage;
+                  };
+                  projectKey = res.projectKey ?? null;
+                  coverage = res.coverage ?? null;
+                  lastMessage = "Necesidades visuales detectadas";
+                } catch (e) {
+                  error = String(e);
+                } finally {
+                  intelBusy = false;
+                }
+              }}
+            >
+              Detectar necesidades
+            </button>
+            <button
+              type="button"
+              class="btn-primary text-[10px]"
+              disabled={busy || intelBusy || !projectKey}
+              onclick={async () => {
+                if (!projectKey || !projectStore.mediaPath) return;
+                intelBusy = true;
+                error = null;
+                try {
+                  // Always search library first; generation only if user confirms later path
+                  const res = (await api.visualCoverNeeds({
+                    projectKey,
+                    generateMissing: false,
+                    maxGenerate: 0,
+                  })) as { coverage?: typeof coverage; reused?: number };
+                  coverage = res.coverage ?? coverage;
+                  lastMessage = `Reutilizadas: ${res.reused ?? 0}. Sin generar (elige Completar si falta).`;
+                  const applied = (await api.visualApplyNeedsToPlan({
+                    mediaPath: projectStore.mediaPath,
+                    analysisRunId: projectStore.analysisRun?.id ?? null,
+                    projectKey,
+                  })) as { plan?: VisualPlan; added?: number };
+                  if (applied.plan) plan = applied.plan;
+                  syncPlanToPlayer(plan);
+                  lastMessage += ` · ${applied.added ?? 0} en el plan`;
+                } catch (e) {
+                  error = String(e);
+                } finally {
+                  intelBusy = false;
+                }
+              }}
+            >
+              Usar biblioteca
+            </button>
+            <button
+              type="button"
+              class="btn-secondary text-[10px]"
+              disabled={busy || intelBusy || !projectKey}
+              title="Solo si faltan imágenes. Usa mock/OmniRoute gratis; nunca pago por defecto."
+              onclick={async () => {
+                if (!projectKey || !projectStore.mediaPath) return;
+                intelBusy = true;
+                error = null;
+                try {
+                  const res = (await api.visualCoverNeeds({
+                    projectKey,
+                    generateMissing: true,
+                    maxGenerate: 3,
+                  })) as { coverage?: typeof coverage; processed?: number; queued?: number };
+                  coverage = res.coverage ?? coverage;
+                  lastMessage = `Generación: cola ${res.queued ?? 0}, procesados ${res.processed ?? 0}`;
+                  const applied = (await api.visualApplyNeedsToPlan({
+                    mediaPath: projectStore.mediaPath,
+                    analysisRunId: projectStore.analysisRun?.id ?? null,
+                    projectKey,
+                  })) as { plan?: VisualPlan };
+                  if (applied.plan) plan = applied.plan;
+                  syncPlanToPlayer(plan);
+                  reviewQueue = ((await api.visualListReviewQueue(20)) as typeof reviewQueue) ?? [];
+                  await refreshAssets();
+                } catch (e) {
+                  error = String(e);
+                } finally {
+                  intelBusy = false;
+                }
+              }}
+            >
+              Completar faltantes
+            </button>
+            <button
+              type="button"
+              class="btn-ghost text-[10px]"
+              disabled={intelBusy}
+              onclick={async () => {
+                try {
+                  await api.visualSeedThemeEconomy();
+                  lastMessage = "Tema economía sembrado (conceptos, sin imágenes)";
+                } catch (e) {
+                  error = String(e);
+                }
+              }}
+            >
+              Seed economía
+            </button>
+          </div>
+          {#if reviewQueue.length > 0}
+            <div class="space-y-1 rounded border border-amber-900/40 bg-amber-950/20 p-1.5">
+              <p class="text-[10px] font-medium text-amber-200">Revisión humana</p>
+              {#each reviewQueue.slice(0, 5) as c (c.id)}
+                <div class="flex items-center gap-1 text-[10px]">
+                  <span class="min-w-0 flex-1 truncate text-surface-400">{c.qaReason ?? c.id}</span>
+                  <button
+                    type="button"
+                    class="btn-primary px-1 py-0 text-[9px]"
+                    onclick={async () => {
+                      await api.visualApproveCandidate(c.id);
+                      reviewQueue = reviewQueue.filter((x) => x.id !== c.id);
+                      await refreshAssets();
+                    }}>OK</button
+                  >
+                  <button
+                    type="button"
+                    class="btn-ghost px-1 py-0 text-[9px]"
+                    onclick={async () => {
+                      await api.visualRejectCandidate(c.id);
+                      reviewQueue = reviewQueue.filter((x) => x.id !== c.id);
+                    }}>No</button
+                  >
+                </div>
+              {/each}
+            </div>
+          {/if}
+          <div class="flex min-w-0 flex-wrap gap-2">
+            {#each assets.slice(0, 24) as a (a.id)}
+              {@const u = fileUrl(a.thumbnailPath)}
+              <button
+                type="button"
+                class="flex w-[6.5rem] min-w-0 flex-col rounded-lg border border-surface-800 bg-surface-950/60 p-1 text-left hover:border-brand-500/40"
+                title="Colocar en el intervalo actual"
+                onclick={async () => {
+                  if (!projectStore.mediaPath) return;
+                  try {
+                    busy = true;
+                    const res = (await api.visualCreateManualPlacement({
+                      mediaPath: projectStore.mediaPath,
+                      analysisRunId: projectStore.analysisRun?.id ?? null,
+                      assetId: a.id,
+                      outputStart,
+                      outputEnd,
+                      displayMode,
+                      sourceDuration: projectStore.duration,
+                      label: a.title,
+                    })) as { plan?: VisualPlan; message?: string };
+                    plan = res.plan ?? plan;
+                    lastMessage = res.message || "Asset del plan";
+                    syncPlanToPlayer(plan);
+                  } catch (e) {
+                    error = String(e);
+                  } finally {
+                    busy = false;
+                  }
+                }}
+              >
+                {#if u}
+                  <img src={u} alt="" class="h-12 w-full rounded object-cover" />
+                {/if}
+                <span class="truncate px-0.5 text-[10px] text-surface-300">{a.title}</span>
+              </button>
+            {:else}
+              <p class="text-[11px] text-surface-500">
+                Biblioteca vacía. Importa imágenes o completa faltantes (mock offline).
+              </p>
+            {/each}
+          </div>
         </div>
       {:else if activeAux === "texto"}
         <div class="flex min-w-0 flex-col gap-2">

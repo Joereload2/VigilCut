@@ -128,6 +128,23 @@ pub fn run() {
             commands::visual::visual_save_plan,
             commands::visual::visual_load_plan,
             commands::visual::visual_render_plan,
+            // Intelligent visual library
+            commands::visual_intel::visual_seed_theme_economy,
+            commands::visual_intel::visual_list_concepts,
+            commands::visual_intel::visual_create_concept,
+            commands::visual_intel::visual_detect_needs,
+            commands::visual_intel::visual_list_needs,
+            commands::visual_intel::visual_coverage,
+            commands::visual_intel::visual_skip_need,
+            commands::visual_intel::visual_cover_needs,
+            commands::visual_intel::visual_worker_tick,
+            commands::visual_intel::visual_list_review_queue,
+            commands::visual_intel::visual_approve_candidate,
+            commands::visual_intel::visual_reject_candidate,
+            commands::visual_intel::visual_apply_needs_to_plan,
+            commands::visual_intel::visual_probe_image_provider,
+            commands::visual_intel::visual_cost_policy,
+            commands::visual_intel::visual_match_need,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

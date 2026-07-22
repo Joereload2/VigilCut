@@ -418,6 +418,84 @@ export async function visualListAssets(query?: string | null, limit = 100): Prom
   return invoke("visual_list_assets", { query: query ?? null, limit });
 }
 
+// ── Intelligent visual library ───────────────────────────────────────────
+
+export async function visualSeedThemeEconomy(): Promise<unknown> {
+  return invoke("visual_seed_theme_economy");
+}
+
+export async function visualListConcepts(themeId?: string | null, limit = 100): Promise<unknown> {
+  return invoke("visual_list_concepts", { themeId: themeId ?? null, limit });
+}
+
+export async function visualDetectNeeds(params: {
+  mediaPath: string;
+  analysisRunId?: string | null;
+  maxNeeds?: number;
+}): Promise<unknown> {
+  return invoke("visual_detect_needs", {
+    mediaPath: params.mediaPath,
+    analysisRunId: params.analysisRunId ?? null,
+    maxNeeds: params.maxNeeds ?? 24,
+  });
+}
+
+export async function visualListNeeds(projectKey: string): Promise<unknown> {
+  return invoke("visual_list_needs", { projectKey });
+}
+
+export async function visualCoverage(projectKey: string): Promise<unknown> {
+  return invoke("visual_coverage", { projectKey });
+}
+
+export async function visualCoverNeeds(params: {
+  projectKey: string;
+  generateMissing?: boolean;
+  maxGenerate?: number;
+}): Promise<unknown> {
+  return invoke("visual_cover_needs", {
+    projectKey: params.projectKey,
+    generateMissing: params.generateMissing ?? false,
+    maxGenerate: params.maxGenerate ?? 5,
+  });
+}
+
+export async function visualApplyNeedsToPlan(params: {
+  mediaPath: string;
+  analysisRunId?: string | null;
+  projectKey?: string | null;
+}): Promise<unknown> {
+  return invoke("visual_apply_needs_to_plan", {
+    mediaPath: params.mediaPath,
+    analysisRunId: params.analysisRunId ?? null,
+    projectKey: params.projectKey ?? null,
+  });
+}
+
+export async function visualListReviewQueue(limit = 50): Promise<unknown> {
+  return invoke("visual_list_review_queue", { limit });
+}
+
+export async function visualApproveCandidate(candidateId: string): Promise<unknown> {
+  return invoke("visual_approve_candidate", { candidateId });
+}
+
+export async function visualRejectCandidate(candidateId: string): Promise<unknown> {
+  return invoke("visual_reject_candidate", { candidateId });
+}
+
+export async function visualProbeImageProvider(): Promise<unknown> {
+  return invoke("visual_probe_image_provider");
+}
+
+export async function visualCostPolicy(): Promise<unknown> {
+  return invoke("visual_cost_policy");
+}
+
+export async function visualSkipNeed(needId: string): Promise<unknown> {
+  return invoke("visual_skip_need", { needId });
+}
+
 export async function visualImportImage(
   path: string,
   title?: string | null,
