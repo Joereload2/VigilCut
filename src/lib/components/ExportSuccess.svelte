@@ -15,15 +15,19 @@
       projectStore.statusMessage = exp?.path ?? "";
       return;
     }
+    const path = exp.path;
+    const parts = path.split(/[/\\]/);
+    parts.pop();
+    const dir = parts.join(path.includes("\\") ? "\\" : "/") || path;
     try {
+      // Prefer reveal without blocking the UI if the shell plugin stalls
       const { open } = await import("@tauri-apps/plugin-shell");
-      const path = exp.path;
-      const parts = path.split(/[/\\]/);
-      parts.pop();
-      const dir = parts.join(path.includes("\\") ? "\\" : "/");
-      await open(dir || path);
+      void open(dir).catch(() => {
+        projectStore.statusMessage = `Carpeta: ${dir}`;
+      });
+      projectStore.statusMessage = `Carpeta abierta · ${dir}`;
     } catch (e) {
-      projectStore.statusMessage = `Archivo: ${exp.path}`;
+      projectStore.statusMessage = `Archivo: ${path}`;
       console.error(e);
     }
   }
@@ -40,10 +44,14 @@
 </script>
 
 {#if projectStore.showExportSuccess && exp}
+  <!-- Cover only the work area; leave StatusBar fully visible at the bottom -->
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
-    class="absolute inset-0 z-[60] flex items-center justify-center bg-surface-950/70 p-4 backdrop-blur-sm"
+    class="absolute inset-x-0 top-0 bottom-8 z-[60] flex items-center justify-center bg-surface-950/70 p-4 backdrop-blur-sm"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="export-success-title"
     onclick={close}
   >
     <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -57,7 +65,9 @@
       >
         ✓
       </div>
-      <h2 class="mt-3 text-center text-lg font-semibold text-white">Video exportado</h2>
+      <h2 id="export-success-title" class="mt-3 text-center text-lg font-semibold text-white">
+        Video exportado
+      </h2>
       <p class="mt-1 text-center text-sm text-keep/90">
         Tu video original no fue modificado.
       </p>
@@ -79,7 +89,7 @@
       </div>
 
       <p
-        class="mt-3 truncate rounded-lg bg-surface-950 px-2 py-1.5 font-mono text-[10px] text-surface-500"
+        class="mt-3 break-all rounded-lg bg-surface-950 px-2 py-1.5 font-mono text-[10px] text-surface-500"
         title={exp.path}
       >
         {exp.path}
@@ -92,7 +102,7 @@
         <button type="button" class="btn-secondary w-full py-2" onclick={another}>
           Nuevo video
         </button>
-        <button type="button" class="btn-ghost w-full py-2 text-surface-400" onclick={close}>
+        <button type="button" class="btn-primary w-full py-2.5 font-semibold" onclick={close}>
           Seguir editando
         </button>
       </div>
