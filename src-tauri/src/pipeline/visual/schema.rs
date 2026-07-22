@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use crate::error::{AppError, AppResult};
 
-pub const SCHEMA_VERSION: i32 = 2;
+pub const SCHEMA_VERSION: i32 = 3;
 
 pub fn migrate(conn: &Connection) -> AppResult<()> {
     conn.execute_batch(
@@ -57,6 +57,82 @@ pub fn migrate(conn: &Connection) -> AppResult<()> {
         .map_err(|e| AppError::Message(e.to_string()))?;
     }
 
+    let ver: i32 = conn
+        .query_row(
+            "SELECT value FROM schema_meta WHERE key = 'version'",
+            [],
+            |r| {
+                let s: String = r.get(0)?;
+                Ok(s.parse::<i32>().unwrap_or(0))
+            },
+        )
+        .unwrap_or(2);
+
+    if ver < 3 {
+        migrate_v3(conn)?;
+        conn.execute(
+            "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('version','3')",
+            [],
+        )
+        .map_err(|e| AppError::Message(e.to_string()))?;
+    }
+
+    Ok(())
+}
+
+fn migrate_v3(conn: &Connection) -> AppResult<()> {
+    let alters = [
+        "ALTER TABLE generation_jobs ADD COLUMN stage TEXT NOT NULL DEFAULT 'queued'",
+        "ALTER TABLE generation_jobs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE generation_jobs ADD COLUMN cost_kind TEXT NOT NULL DEFAULT 'unknown'",
+        "ALTER TABLE generation_jobs ADD COLUMN free_verified INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE generation_jobs ADD COLUMN prompt_strategy TEXT",
+        "ALTER TABLE generation_jobs ADD COLUMN origin TEXT NOT NULL DEFAULT 'video_need'",
+        "ALTER TABLE generated_candidates ADD COLUMN origin TEXT NOT NULL DEFAULT 'video_need'",
+        "ALTER TABLE generated_candidates ADD COLUMN reject_reason TEXT",
+        "ALTER TABLE generated_candidates ADD COLUMN width INTEGER",
+        "ALTER TABLE generated_candidates ADD COLUMN height INTEGER",
+        "ALTER TABLE generated_candidates ADD COLUMN mime_type TEXT",
+        "ALTER TABLE generated_candidates ADD COLUMN cost_kind TEXT",
+        "ALTER TABLE generated_candidates ADD COLUMN free_verified INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE generated_candidates ADD COLUMN provider TEXT",
+        "ALTER TABLE generated_candidates ADD COLUMN model TEXT",
+    ];
+    for sql in alters {
+        let _ = conn.execute(sql, []);
+    }
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS daily_feed_settings (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            enabled INTEGER NOT NULL DEFAULT 0,
+            max_per_day INTEGER NOT NULL DEFAULT 5,
+            interval_minutes INTEGER NOT NULL DEFAULT 30,
+            last_cycle_at TEXT,
+            consecutive_failures INTEGER NOT NULL DEFAULT 0,
+            paused_until TEXT,
+            updated_at TEXT NOT NULL
+        );
+        INSERT OR IGNORE INTO daily_feed_settings(id, enabled, max_per_day, interval_minutes, consecutive_failures, updated_at)
+        VALUES (1, 0, 5, 30, 0, datetime('now'));
+
+        CREATE TABLE IF NOT EXISTS daily_metrics (
+            day TEXT PRIMARY KEY,
+            checks INTEGER NOT NULL DEFAULT 0,
+            free_routes INTEGER NOT NULL DEFAULT 0,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            approved INTEGER NOT NULL DEFAULT 0,
+            rejected INTEGER NOT NULL DEFAULT 0,
+            needs_review INTEGER NOT NULL DEFAULT 0,
+            rate_limits INTEGER NOT NULL DEFAULT 0,
+            failures INTEGER NOT NULL DEFAULT 0,
+            reused INTEGER NOT NULL DEFAULT 0,
+            concepts_covered INTEGER NOT NULL DEFAULT 0,
+            paid_spend REAL NOT NULL DEFAULT 0
+        );
+        "#,
+    )
+    .map_err(|e| AppError::Message(e.to_string()))?;
     Ok(())
 }
 
@@ -258,7 +334,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(v, "2");
+        assert_eq!(v, "3");
         let n: i64 = conn
             .query_row("SELECT COUNT(*) FROM visual_concepts", [], |r| r.get(0))
             .unwrap();

@@ -37,14 +37,32 @@ pub fn build_prompt(need: &VisualNeed) -> (String, String) {
     (prompt, negative)
 }
 
-/// Enqueue generation for an uncovered need (idempotent).
+/// Enqueue generation for an uncovered need (idempotent v1 key).
 pub fn queue_generation_for_need(
     need: &mut VisualNeed,
     opportunistic: bool,
 ) -> AppResult<Option<String>> {
+    let idem = format!("need:{}:v1", need.id);
+    queue_generation_with_key(need, opportunistic, &idem, "video_need")
+}
+
+/// Enqueue with explicit idempotency key (regenerate uses v2, v3, …).
+pub fn queue_generation_with_key(
+    need: &mut VisualNeed,
+    opportunistic: bool,
+    idem: &str,
+    origin: &str,
+) -> AppResult<Option<String>> {
     let policy = CostPolicy::from_env();
     let provider = select_provider(policy.paid_providers_enabled);
     let is_paid = !provider.is_free_tier();
+    let cost_kind = if provider.name() == "mock" {
+        "local"
+    } else if is_paid {
+        "paid"
+    } else {
+        "free_configured"
+    };
 
     match can_enqueue_generation(&policy, &need.project_key, is_paid, opportunistic)? {
         CostGate::Deny { reason } => {
@@ -57,7 +75,6 @@ pub fn queue_generation_for_need(
         CostGate::Allow { .. } => {}
     }
 
-    let idem = format!("need:{}:v1", need.id);
     let conn = open_db()?;
     if let Ok(existing) = conn.query_row(
         "SELECT id, status FROM generation_jobs WHERE idempotency_key = ?1",
@@ -74,6 +91,20 @@ pub fn queue_generation_for_need(
         return Ok(Some(existing.0));
     }
 
+    // Block second active job for same need
+    let active: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM generation_jobs WHERE need_id=?1 AND status IN ('queued','running')",
+            params![need.id],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    if active > 0 {
+        return Err(AppError::Invalid(
+            "Ya hay una generación en curso para esta necesidad.".into(),
+        ));
+    }
+
     let (prompt, negative) = build_prompt(need);
     let now = chrono::Utc::now().to_rfc3339();
     let id = uuid::Uuid::new_v4().to_string();
@@ -81,8 +112,8 @@ pub fn queue_generation_for_need(
         r#"INSERT INTO generation_jobs (
             id, idempotency_key, need_id, concept_id, status, provider, model,
             prompt, negative_prompt, attempt, max_attempts, last_error, is_paid,
-            opportunistic, created_at, updated_at
-        ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,0,?10,NULL,?11,?12,?13,?14)"#,
+            opportunistic, created_at, updated_at, stage, cost_kind, free_verified, origin
+        ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,0,?10,NULL,?11,?12,?13,?14,'queued',?15,0,?16)"#,
         params![
             id,
             idem,
@@ -98,6 +129,8 @@ pub fn queue_generation_for_need(
             opportunistic as i64,
             now,
             now,
+            cost_kind,
+            origin,
         ],
     )
     .map_err(|e| AppError::Message(e.to_string()))?;
@@ -148,13 +181,19 @@ pub async fn process_next_job() -> AppResult<Option<String>> {
         let conn = open_db()?;
         let now = chrono::Utc::now().to_rfc3339();
         conn.execute(
-            "UPDATE generation_jobs SET status=?1, attempt=?2, updated_at=?3 WHERE id=?4",
+            "UPDATE generation_jobs SET status=?1, attempt=?2, stage='preparing', updated_at=?3 WHERE id=?4",
             params![JobStatus::Running.as_str(), (attempt + 1) as i64, now, id],
         )
         .map_err(|e| AppError::Message(e.to_string()))?;
     }
 
+    if super::supervision::is_cancel_requested(&id) {
+        mark_job(&id, JobStatus::Cancelled, Some("cancelled by user"))?;
+        return Ok(Some(id));
+    }
+
     let provider = select_provider(policy.paid_providers_enabled);
+    let _ = super::supervision::set_job_stage(&id, "waiting_provider");
     let req = GenerationRequest {
         prompt: prompt.clone(),
         negative_prompt: negative.clone(),
@@ -165,9 +204,22 @@ pub async fn process_next_job() -> AppResult<Option<String>> {
         job_id: id.clone(),
     };
 
+    let _ = super::supervision::set_job_stage(&id, "generating");
+    if super::supervision::is_cancel_requested(&id) {
+        mark_job(&id, JobStatus::Cancelled, Some("cancelled by user"))?;
+        return Ok(Some(id));
+    }
+
     match provider.generate(&req).await {
         Ok(result) => {
+            if super::supervision::is_cancel_requested(&id) {
+                // Drop incomplete if possible
+                let _ = std::fs::remove_file(&result.local_path);
+                mark_job(&id, JobStatus::Cancelled, Some("cancelled by user"))?;
+                return Ok(Some(id));
+            }
             increment_generation_counter()?;
+            let _ = super::supervision::set_job_stage(&id, "file_review");
             let cand_id = uuid::Uuid::new_v4().to_string();
             let cand_now = chrono::Utc::now().to_rfc3339();
             {
@@ -176,8 +228,9 @@ pub async fn process_next_job() -> AppResult<Option<String>> {
                     r#"INSERT INTO generated_candidates (
                         id, job_id, need_id, local_path, sha256, perceptual_hash, status,
                         technical_score, semantic_score, qa_decision, qa_reason, approved_asset_id,
-                        created_at, updated_at
-                    ) VALUES (?1,?2,?3,?4,NULL,NULL,?5,NULL,NULL,NULL,NULL,NULL,?6,?7)"#,
+                        created_at, updated_at, origin, width, height, mime_type, cost_kind,
+                        free_verified, provider, model
+                    ) VALUES (?1,?2,?3,?4,NULL,NULL,?5,NULL,NULL,NULL,NULL,NULL,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)"#,
                     params![
                         cand_id,
                         id,
@@ -186,11 +239,31 @@ pub async fn process_next_job() -> AppResult<Option<String>> {
                         CandidateStatus::AutomatedReview.as_str(),
                         cand_now,
                         cand_now,
+                        "video_need",
+                        result.width as i64,
+                        result.height as i64,
+                        result.mime_type,
+                        result.cost_kind.as_str(),
+                        result.free_verified as i64,
+                        result.provider,
+                        result.model,
                     ],
                 )
                 .map_err(|e| AppError::Message(e.to_string()))?;
+                let _ = conn.execute(
+                    "UPDATE generation_jobs SET cost_kind=?1, free_verified=?2, prompt_strategy=?3, model=?4, updated_at=?5 WHERE id=?6",
+                    params![
+                        result.cost_kind.as_str(),
+                        result.free_verified as i64,
+                        result.prompt_strategy,
+                        result.model,
+                        cand_now,
+                        id
+                    ],
+                );
             }
 
+            let _ = super::supervision::set_job_stage(&id, "evaluating");
             let hints = need_id
                 .as_ref()
                 .and_then(|nid| get_need(nid).ok())
@@ -420,16 +493,30 @@ pub async fn worker_tick(max_jobs: u32) -> AppResult<u32> {
     Ok(n)
 }
 
-/// Human approve a candidate → library asset.
+/// Human approve a candidate → library asset (idempotent: second call returns same asset).
 pub fn human_approve_candidate(candidate_id: &str) -> AppResult<MediaAsset> {
     let conn = open_db()?;
-    let (path, need_id, job_id): (String, Option<String>, String) = conn
+    let (path, need_id, job_id, status, existing_asset): (
+        String,
+        Option<String>,
+        String,
+        String,
+        Option<String>,
+    ) = conn
         .query_row(
-            "SELECT local_path, need_id, job_id FROM generated_candidates WHERE id = ?1",
+            "SELECT local_path, need_id, job_id, status, approved_asset_id FROM generated_candidates WHERE id = ?1",
             params![candidate_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
         )
         .map_err(|e| AppError::NotFound(e.to_string()))?;
+    if let Some(aid) = existing_asset.filter(|s| !s.is_empty()) {
+        return crate::pipeline::visual::library::get_asset_by_id(&aid);
+    }
+    if status == "rejected" || status == "discarded" {
+        return Err(AppError::Invalid(
+            "Este candidato fue rechazado y no se puede aprobar.".into(),
+        ));
+    }
     let path = std::path::PathBuf::from(path);
     if !path.is_file() {
         return Err(AppError::NotFound(path.display().to_string()));
@@ -472,16 +559,34 @@ pub fn human_approve_candidate(candidate_id: &str) -> AppResult<MediaAsset> {
 }
 
 pub fn human_reject_candidate(candidate_id: &str) -> AppResult<()> {
+    human_reject_candidate_with_reason(candidate_id, None)
+}
+
+pub fn human_reject_candidate_with_reason(
+    candidate_id: &str,
+    reason: Option<&str>,
+) -> AppResult<()> {
     let conn = open_db()?;
     conn.execute(
-        "UPDATE generated_candidates SET status=?1, updated_at=?2 WHERE id=?3",
+        "UPDATE generated_candidates SET status=?1, reject_reason=?2, updated_at=?3 WHERE id=?4",
         params![
             CandidateStatus::Rejected.as_str(),
+            reason,
             chrono::Utc::now().to_rfc3339(),
             candidate_id
         ],
     )
     .map_err(|e| AppError::Message(e.to_string()))?;
+    // Free the need for regenerate
+    if let Ok(c) = super::supervision::get_candidate(candidate_id) {
+        if let Some(nid) = c.need_id {
+            if let Ok(mut n) = get_need(&nid) {
+                n.coverage = NeedCoverage::Uncovered;
+                n.updated_at = chrono::Utc::now().to_rfc3339();
+                let _ = update_need(&n);
+            }
+        }
+    }
     Ok(())
 }
 

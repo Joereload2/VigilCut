@@ -3,6 +3,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+// CostKind needs Serialize/Deserialize for API responses.
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderKind {
@@ -22,6 +24,52 @@ pub struct GenerationRequest {
     pub job_id: String,
 }
 
+/// How we present cost to the user — never claim "free" without distinction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CostKind {
+    #[default]
+    Unknown,
+    /// Free tier verified by probe / explicit free provider response
+    FreeVerified,
+    /// Config says free (OMNIROUTE_FREE_TIER) but not verified
+    FreeConfigured,
+    Local,
+    Paid,
+}
+
+impl CostKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::FreeVerified => "free_verified",
+            Self::FreeConfigured => "free_configured",
+            Self::Local => "local",
+            Self::Paid => "paid",
+        }
+    }
+
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "free_verified" => Self::FreeVerified,
+            "free_configured" => Self::FreeConfigured,
+            "local" => Self::Local,
+            "paid" => Self::Paid,
+            _ => Self::Unknown,
+        }
+    }
+
+    pub fn label_es(self) -> &'static str {
+        match self {
+            Self::FreeVerified => "Gratis verificado",
+            Self::FreeConfigured => "Gratis configurado, no verificado",
+            Self::Local => "Generación local",
+            Self::Paid => "Pagado",
+            Self::Unknown => "Coste desconocido",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct GenerationResult {
     pub local_path: PathBuf,
@@ -32,6 +80,10 @@ pub struct GenerationResult {
     pub height: u32,
     pub is_paid: bool,
     pub bytes: u64,
+    pub cost_kind: CostKind,
+    pub free_verified: bool,
+    /// How negative prompt was applied
+    pub prompt_strategy: String,
 }
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -57,8 +109,12 @@ pub enum ProviderError {
 pub struct ProviderProbe {
     pub provider: String,
     pub model: String,
+    /// True only after an image-capable endpoint is confirmed — never from /models alone.
     pub supports_image: bool,
     pub free_tier: bool,
+    /// Free claim verified by probe or known free mock
+    pub free_verified: bool,
+    pub cost_kind: CostKind,
     pub ok: bool,
     pub latency_ms: u64,
     pub error: Option<String>,

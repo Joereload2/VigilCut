@@ -62,6 +62,9 @@ impl MockImageProvider {
             height: h,
             is_paid: false,
             bytes,
+            cost_kind: super::provider::CostKind::Local,
+            free_verified: true,
+            prompt_strategy: "mock_ignores_negative".into(),
         })
     }
 
@@ -71,10 +74,12 @@ impl MockImageProvider {
             model: "mock-gradient-v1".into(),
             supports_image: true,
             free_tier: true,
+            free_verified: true,
+            cost_kind: super::provider::CostKind::Local,
             ok: true,
             latency_ms: 1,
             error: None,
-            notes: Some("offline synthetic PNG".into()),
+            notes: Some("offline synthetic PNG — generation local, free verified".into()),
         })
     }
 }

@@ -12,9 +12,14 @@ use crate::pipeline::time_map::TimeMap;
 use crate::pipeline::visual::concepts::{
     insert_concept, list_concepts, seed_economy_theme, upsert_theme,
 };
+use crate::pipeline::visual::generation::daily_feed;
 use crate::pipeline::visual::generation::provider::select_provider;
+use crate::pipeline::visual::generation::supervision::{
+    cancel_job, queue_regenerate, supervision_snapshot,
+};
 use crate::pipeline::visual::generation::worker::{
-    cover_project_needs, human_approve_candidate, human_reject_candidate, list_pending_review,
+    cover_project_needs, human_approve_candidate, human_reject_candidate,
+    human_reject_candidate_with_reason, list_pending_review, queue_generation_for_need,
     worker_tick,
 };
 use crate::pipeline::visual::intelligent_match::{apply_best_match, match_need, MatchOptions};
@@ -182,9 +187,151 @@ pub fn visual_approve_candidate(candidate_id: String) -> AppResult<serde_json::V
 }
 
 #[tauri::command]
-pub fn visual_reject_candidate(candidate_id: String) -> AppResult<serde_json::Value> {
-    human_reject_candidate(&candidate_id)?;
+pub fn visual_reject_candidate(
+    candidate_id: String,
+    reason: Option<String>,
+) -> AppResult<serde_json::Value> {
+    if let Some(r) = reason {
+        human_reject_candidate_with_reason(&candidate_id, Some(&r))?;
+    } else {
+        human_reject_candidate(&candidate_id)?;
+    }
     Ok(serde_json::json!({ "ok": true }))
+}
+
+#[tauri::command]
+pub fn visual_supervision(project_key: String) -> AppResult<serde_json::Value> {
+    Ok(serde_json::to_value(supervision_snapshot(&project_key)?)?)
+}
+
+#[tauri::command]
+pub async fn visual_generate_need(need_id: String) -> AppResult<serde_json::Value> {
+    let mut need = get_need(&need_id)?;
+    // Search library first
+    if apply_best_match(&mut need, &MatchOptions::default()) {
+        update_need(&need)?;
+        return Ok(serde_json::json!({
+            "action": "reused",
+            "need": need,
+            "message": "Se reutilizó una imagen de la biblioteca",
+        }));
+    }
+    let job_id = queue_generation_for_need(&mut need, false)?;
+    // Process immediately (one tick) so UI updates without separate button
+    let processed = worker_tick(1).await.unwrap_or(0);
+    Ok(serde_json::json!({
+        "action": "queued",
+        "jobId": job_id,
+        "processed": processed,
+        "need": get_need(&need_id)?,
+        "snapshot": supervision_snapshot(&need.project_key)?,
+    }))
+}
+
+#[tauri::command]
+pub fn visual_cancel_job(job_id: String) -> AppResult<serde_json::Value> {
+    Ok(serde_json::to_value(cancel_job(&job_id)?)?)
+}
+
+#[tauri::command]
+pub async fn visual_regenerate_need(need_id: String) -> AppResult<serde_json::Value> {
+    let job_id = queue_regenerate(&need_id)?;
+    let processed = worker_tick(1).await.unwrap_or(0);
+    let need = get_need(&need_id)?;
+    Ok(serde_json::json!({
+        "jobId": job_id,
+        "processed": processed,
+        "need": need,
+        "snapshot": supervision_snapshot(&need.project_key)?,
+    }))
+}
+
+#[tauri::command]
+pub async fn visual_approve_and_use(
+    candidate_id: String,
+    media_path: Option<String>,
+    analysis_run_id: Option<String>,
+    place: Option<bool>,
+    analysis: State<'_, AnalysisCache>,
+    visual: State<'_, VisualSessionState>,
+) -> AppResult<serde_json::Value> {
+    let asset = human_approve_candidate(&candidate_id)?;
+    let place = place.unwrap_or(true);
+    let mut placement_added = false;
+    if place {
+        if let Some(mp) = media_path {
+            // Attach as placement if we have a need with times
+            let cand =
+                crate::pipeline::visual::generation::supervision::get_candidate(&candidate_id)?;
+            if let Some(nid) = cand.need_id {
+                let need = get_need(&nid)?;
+                if let (Some(s), Some(e)) = (need.output_start, need.output_end) {
+                    let edl = edl_helper(&analysis, analysis_run_id.as_deref(), &mp)
+                        .unwrap_or_else(|_| {
+                            crate::models::edl::Edl::from_remove_spans(&mp, 60.0, &[])
+                        });
+                    let mut g = visual
+                        .lock()
+                        .map_err(|e| AppError::Message(e.to_string()))?;
+                    let fp = edl_fingerprint(&edl.keep_ranges());
+                    if g.plan.is_none() {
+                        g.plan = Some(crate::models::visual::VisualPlan::new(&fp, &mp, fp.clone()));
+                    }
+                    if let Some(plan) = g.plan.as_mut() {
+                        let exists = plan
+                            .placements
+                            .iter()
+                            .any(|p| p.asset_id == asset.id && (p.output_start - s).abs() < 0.2);
+                        if !exists {
+                            let mut pl = VisualPlacement::manual(
+                                &asset.id,
+                                s,
+                                e,
+                                PlacementMode::Fullframe,
+                                PlacementLayout::for_mode(PlacementMode::Fullframe),
+                                "cover",
+                                Some(need.label.clone()),
+                            );
+                            pl.provenance = "library_generated".into();
+                            plan.placements.push(pl);
+                            plan.touch();
+                            let _ = save_visual_plan(plan, None);
+                            placement_added = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(serde_json::json!({
+        "asset": asset,
+        "placementAdded": placement_added,
+        "message": if placement_added {
+            "Imagen aprobada y en el plan"
+        } else {
+            "Imagen aprobada y en la biblioteca"
+        },
+    }))
+}
+
+#[tauri::command]
+pub fn visual_daily_feed_settings() -> AppResult<serde_json::Value> {
+    daily_feed::settings_json()
+}
+
+#[tauri::command]
+pub fn visual_daily_feed_set_enabled(enabled: bool) -> AppResult<serde_json::Value> {
+    Ok(serde_json::to_value(daily_feed::set_enabled(enabled)?)?)
+}
+
+#[tauri::command]
+pub async fn visual_daily_feed_cycle() -> AppResult<serde_json::Value> {
+    daily_feed::run_daily_cycle().await
+}
+
+#[tauri::command]
+pub fn visual_daily_week_summary() -> AppResult<serde_json::Value> {
+    daily_feed::week_summary()
 }
 
 #[tauri::command]

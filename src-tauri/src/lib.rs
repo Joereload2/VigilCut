@@ -145,6 +145,15 @@ pub fn run() {
             commands::visual_intel::visual_probe_image_provider,
             commands::visual_intel::visual_cost_policy,
             commands::visual_intel::visual_match_need,
+            commands::visual_intel::visual_supervision,
+            commands::visual_intel::visual_generate_need,
+            commands::visual_intel::visual_cancel_job,
+            commands::visual_intel::visual_regenerate_need,
+            commands::visual_intel::visual_approve_and_use,
+            commands::visual_intel::visual_daily_feed_settings,
+            commands::visual_intel::visual_daily_feed_set_enabled,
+            commands::visual_intel::visual_daily_feed_cycle,
+            commands::visual_intel::visual_daily_week_summary,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
