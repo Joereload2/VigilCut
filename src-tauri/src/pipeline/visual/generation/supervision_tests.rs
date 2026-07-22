@@ -20,6 +20,8 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         set_library_root_override(Some(dir.clone()));
         std::env::set_var("VIGILCUT_IMAGE_PROVIDER", "mock");
+        // Keep human review so we exercise approve path
+        std::env::set_var("VIGILCUT_REQUIRE_HUMAN_QA", "1");
         std::env::remove_var("OMNIROUTE_BASE_URL");
 
         let mut need = VisualNeed::from_label("sup-proj", "concepto_unico_sup_xyz");
@@ -87,6 +89,7 @@ mod tests {
 
         set_library_root_override(None);
         std::env::remove_var("VIGILCUT_IMAGE_PROVIDER");
+        std::env::remove_var("VIGILCUT_REQUIRE_HUMAN_QA");
         let _ = std::fs::remove_dir_all(dir);
         let _ = job2;
         let _ = NeedCoverage::Uncovered;

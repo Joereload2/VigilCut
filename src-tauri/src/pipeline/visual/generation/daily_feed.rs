@@ -117,8 +117,10 @@ pub async fn run_daily_cycle() -> AppResult<serde_json::Value> {
         return Ok(serde_json::json!({ "ok": false, "reason": "disabled" }));
     }
     if let Some(until) = &settings.paused_until {
-        if until.as_str() > chrono::Utc::now().to_rfc3339().as_str() {
-            return Ok(serde_json::json!({ "ok": false, "reason": "paused", "until": until }));
+        if let Ok(until_dt) = chrono::DateTime::parse_from_rfc3339(until) {
+            if until_dt > chrono::Utc::now() {
+                return Ok(serde_json::json!({ "ok": false, "reason": "paused", "until": until }));
+            }
         }
     }
 

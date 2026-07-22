@@ -37,6 +37,9 @@ pub fn build_prompt(need: &VisualNeed) -> (String, String) {
     (prompt, negative)
 }
 
+/// Serialize enqueue per process (reduces double-click races).
+static ENQUEUE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Enqueue generation for an uncovered need (idempotent v1 key).
 pub fn queue_generation_for_need(
     need: &mut VisualNeed,
@@ -53,6 +56,7 @@ pub fn queue_generation_with_key(
     idem: &str,
     origin: &str,
 ) -> AppResult<Option<String>> {
+    let _g = ENQUEUE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let policy = CostPolicy::from_env();
     let provider = select_provider(policy.paid_providers_enabled);
     let is_paid = !provider.is_free_tier();
@@ -146,11 +150,15 @@ pub fn queue_generation_with_key(
 pub async fn process_next_job() -> AppResult<Option<String>> {
     let job = {
         let conn = open_db()?;
+        // Prefer video needs over daily_feed
         conn.query_row(
-            r#"SELECT id, need_id, prompt, negative_prompt, attempt, max_attempts, is_paid, status
+            r#"SELECT id, need_id, prompt, negative_prompt, attempt, max_attempts, is_paid, status,
+                      COALESCE(origin,'video_need')
                FROM generation_jobs
                WHERE status = 'queued'
-               ORDER BY created_at ASC LIMIT 1"#,
+               ORDER BY CASE COALESCE(origin,'video_need') WHEN 'video_need' THEN 0 ELSE 1 END,
+                        created_at ASC
+               LIMIT 1"#,
             [],
             |r| {
                 Ok((
@@ -162,12 +170,14 @@ pub async fn process_next_job() -> AppResult<Option<String>> {
                     r.get::<_, i64>(5)? as u32,
                     r.get::<_, i64>(6)? != 0,
                     r.get::<_, String>(7)?,
+                    r.get::<_, String>(8)?,
                 ))
             },
         )
         .ok()
     };
-    let Some((id, need_id, prompt, negative, attempt, max_attempts, is_paid, _)) = job else {
+    let Some((id, need_id, prompt, negative, attempt, max_attempts, is_paid, _, job_origin)) = job
+    else {
         return Ok(None);
     };
 
@@ -222,6 +232,7 @@ pub async fn process_next_job() -> AppResult<Option<String>> {
             let _ = super::supervision::set_job_stage(&id, "file_review");
             let cand_id = uuid::Uuid::new_v4().to_string();
             let cand_now = chrono::Utc::now().to_rfc3339();
+            let origin = job_origin.clone();
             {
                 let conn = open_db()?;
                 conn.execute(
@@ -239,7 +250,7 @@ pub async fn process_next_job() -> AppResult<Option<String>> {
                         CandidateStatus::AutomatedReview.as_str(),
                         cand_now,
                         cand_now,
-                        "video_need",
+                        origin,
                         result.width as i64,
                         result.height as i64,
                         result.mime_type,
@@ -273,13 +284,24 @@ pub async fn process_next_job() -> AppResult<Option<String>> {
                     hard_exclusions: n.hard_exclusions,
                     negative_contexts: n.forbidden_contexts,
                 });
+            // AI-generated images require human review by default (policy).
+            let require_human = std::env::var("VIGILCUT_REQUIRE_HUMAN_QA")
+                .map(|s| s != "0" && !s.eq_ignore_ascii_case("false"))
+                .unwrap_or(true);
             let mut check =
                 review_image(&result.local_path, hints.as_ref(), &QaThresholds::default())?;
             check.candidate_id = Some(cand_id.clone());
+            if require_human && check.decision == "approve" {
+                check.decision = "needs_human".into();
+                check.reason = format!(
+                    "{} — revisión humana requerida para imágenes generadas",
+                    check.reason
+                );
+            }
             persist_qa_check(&check)?;
 
             match check.decision.as_str() {
-                "approve" => {
+                "approve" if !require_human => {
                     let asset = promote_candidate(
                         &cand_id,
                         &result.local_path,
@@ -319,7 +341,7 @@ pub async fn process_next_job() -> AppResult<Option<String>> {
                         }
                     }
                 }
-                "needs_human" => {
+                "needs_human" | "approve" => {
                     {
                         let conn = open_db()?;
                         conn.execute(
