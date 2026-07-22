@@ -18,23 +18,39 @@
 
 ## Visual library (unit)
 
-Cubierto en `cargo test --lib`:
+Cubierto en `cargo test --lib` / `npm run test:unit:visual`:
 
 - `pipeline::time_map` — source↔output mapping  
 - `pipeline::transcript_engine` / `models::transcript` — SRT/TXT projections  
 - `pipeline::semantic` — deterministic concepts  
 - `pipeline::visual::match_rank` — ranking + penalties  
 - `pipeline::visual::library` — import, SHA dedupe, folder, usage, missing scan  
+- `pipeline::visual::concepts` / `needs` / `intelligent_match`  
+- `pipeline::visual::generation` — mock, cost gates, OmniRoute paid-off  
+- `pipeline::visual::qa` — technical QA  
+- `pipeline::visual::intel_flow_tests` — need → match → mock gen → QA  
 
-Override de tests: `set_library_root_override` / `VIGILCUT_LIBRARY_ROOT`.
+Override de tests: `set_library_root_override` / `VIGILCUT_LIBRARY_ROOT` + `lock_library_for_test`.
 
 ## Smoke visual (FFmpeg)
 
 ```powershell
 cargo test --manifest-path src-tauri/Cargo.toml --test smoke_visual -- --nocapture
+cargo test --manifest-path src-tauri/Cargo.toml --test smoke_visual_intel -- --nocapture
 ```
 
-Valida: import PNG → VisualPlan placement → overlay encode → manifiesto → usage post-éxito → original intacto; y rechazo de plan vacío.
+- `smoke_visual`: import PNG → VisualPlan → overlay encode → manifiesto → usage  
+- `smoke_visual_intel`: match-first + mock generation + cost gate (sin red)
+
+## Quality gates
+
+```powershell
+npm run test:fmt
+npm run test:clippy
+npm run test:unit
+```
+
+Ver también `docs/visual-library/qa-ci.md`.
 
 ## Qué no cubre (aún)
 
