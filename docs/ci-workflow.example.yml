@@ -80,9 +80,12 @@ jobs:
         shell: pwsh
         run: |
           choco install ffmpeg -y --no-progress
+          Get-Command ffmpeg | Format-List
           ffmpeg -version
           if ($LASTEXITCODE -ne 0) { throw "ffmpeg not on PATH after install" }
-          # Copy into src-tauri/binaries when possible (tests prefer sidecar, else PATH)
+          # Prove lavfi + a video encoder exist (smoke fixtures depend on this)
+          ffmpeg -hide_banner -f lavfi -i color=c=black:s=160x120:d=0.2 -f null - 2>&1 | Out-Host
+          if ($LASTEXITCODE -ne 0) { throw "ffmpeg lavfi color source failed" }
           npm ci --ignore-scripts
           npm run setup:ffmpeg
           if (-not (Test-Path src-tauri/binaries/ffmpeg.exe)) {

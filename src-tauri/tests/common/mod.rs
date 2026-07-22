@@ -62,16 +62,31 @@ pub fn ensure_ffmpeg() {
 
 fn run_ffmpeg(args: &[&str]) {
     ensure_ffmpeg();
-    let mut cmd = Command::new(resolve_ffmpeg());
+    let bin = resolve_ffmpeg();
+    let mut cmd = Command::new(&bin);
     cmd.args(args);
+    // CREATE_NO_WINDOW can break some FFmpeg builds on headless CI runners.
+    // Keep it only for interactive local Windows sessions.
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(CREATE_NO_WINDOW);
+        let is_ci = std::env::var_os("CI").is_some()
+            || std::env::var_os("GITHUB_ACTIONS").is_some();
+        if !is_ci {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
     }
-    let out = cmd.output().expect("spawn ffmpeg");
+    let out = cmd.output().unwrap_or_else(|e| {
+        panic!("spawn ffmpeg failed ({}): {e}", bin.display());
+    });
     if !out.status.success() {
-        panic!("ffmpeg failed:\n{}", String::from_utf8_lossy(&out.stderr));
+        panic!(
+            "ffmpeg failed (bin={}, status={:?}):\n--- stderr ---\n{}\n--- stdout ---\n{}",
+            bin.display(),
+            out.status.code(),
+            String::from_utf8_lossy(&out.stderr),
+            String::from_utf8_lossy(&out.stdout)
+        );
     }
 }
 
@@ -81,31 +96,93 @@ pub fn make_talking_head_fixture(path: &Path) {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).ok();
     }
-    // lavfi: color video + sine audio; mute middle second so silencedetect finds a gap
-    run_ffmpeg(&[
-        "-y",
-        "-f",
-        "lavfi",
-        "-i",
-        "color=c=black:s=320x240:d=3:r=25",
-        "-f",
-        "lavfi",
-        "-i",
-        "sine=frequency=880:sample_rate=44100:duration=3",
-        "-af",
-        "volume=enable='between(t,1,2)':volume=0",
-        "-c:v",
-        "libx264",
-        "-pix_fmt",
-        "yuv420p",
-        "-preset",
-        "ultrafast",
-        "-c:a",
-        "aac",
-        "-shortest",
-        &path.to_string_lossy(),
-    ]);
-    assert!(path.is_file() && path.metadata().unwrap().len() > 1000);
+    let out = path.to_string_lossy().into_owned();
+    // lavfi color + sine; mute middle second so silencedetect finds a gap.
+    // Try libx264 first; fall back to mpeg4 (broader CI availability).
+    let attempts: [&[&str]; 2] = [
+        &[
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=320x240:d=3:r=25",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=880:sample_rate=44100:duration=3",
+            "-af",
+            "volume=enable='between(t,1,2)':volume=0",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-preset",
+            "ultrafast",
+            "-c:a",
+            "aac",
+            "-shortest",
+            out.as_str(),
+        ],
+        &[
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=320x240:d=3:r=25",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=880:sample_rate=44100:duration=3",
+            "-af",
+            "volume=enable='between(t,1,2)':volume=0",
+            "-c:v",
+            "mpeg4",
+            "-q:v",
+            "5",
+            "-c:a",
+            "aac",
+            "-shortest",
+            out.as_str(),
+        ],
+    ];
+    let mut last_err = String::new();
+    for args in attempts {
+        let bin = resolve_ffmpeg();
+        let mut cmd = Command::new(&bin);
+        cmd.args(args);
+        #[cfg(windows)]
+        {
+            let is_ci = std::env::var_os("CI").is_some()
+                || std::env::var_os("GITHUB_ACTIONS").is_some();
+            if !is_ci {
+                use std::os::windows::process::CommandExt;
+                cmd.creation_flags(CREATE_NO_WINDOW);
+            }
+        }
+        match cmd.output() {
+            Ok(out) if out.status.success() => {
+                assert!(path.is_file() && path.metadata().unwrap().len() > 500);
+                return;
+            }
+            Ok(out) => {
+                last_err = format!(
+                    "bin={} status={:?}\nstderr:\n{}\nstdout:\n{}",
+                    bin.display(),
+                    out.status.code(),
+                    String::from_utf8_lossy(&out.stderr),
+                    String::from_utf8_lossy(&out.stdout)
+                );
+            }
+            Err(e) => last_err = format!("spawn {}: {e}", bin.display()),
+        }
+    }
+    panic!("make_talking_head_fixture failed after codec fallbacks:\n{last_err}");
 }
 
 /// Temp dir under target/ so CI and local leave a predictable footprint.
