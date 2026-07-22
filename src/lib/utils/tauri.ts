@@ -500,6 +500,10 @@ export async function visualGenerateNeed(needId: string): Promise<unknown> {
   return invoke("visual_generate_need", { needId });
 }
 
+export async function visualSearchLibraryForNeed(needId: string): Promise<unknown> {
+  return invoke("visual_search_library_for_need", { needId });
+}
+
 export async function visualCancelJob(jobId: string): Promise<unknown> {
   return invoke("visual_cancel_job", { jobId });
 }
