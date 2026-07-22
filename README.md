@@ -19,6 +19,9 @@ Documentación:
 - [docs/HARDENING_1_1.md](docs/HARDENING_1_1.md) — endurecimiento 1.1 (seguridad, modos, tests)  
 - [docs/VISUAL_LIBRARY_DESIGN.md](docs/VISUAL_LIBRARY_DESIGN.md) — diseño enriquecimiento visual  
 - [docs/VISUAL_LIBRARY_IMPLEMENTATION_REPORT.md](docs/VISUAL_LIBRARY_IMPLEMENTATION_REPORT.md) — reporte implementación  
+- [docs/visual-library/architecture.md](docs/visual-library/architecture.md) — biblioteca inteligente (conceptos, generación, QA)  
+- [docs/visual-library/omniroute.md](docs/visual-library/omniroute.md) — OmniRoute opcional  
+- [`.env.example`](.env.example) — variables OmniRoute / costes / Supabase  
 - [docs/ROADMAP.md](docs/ROADMAP.md) — roadmap  
 - [docs/BACKLOG_NEXT.md](docs/BACKLOG_NEXT.md) — backlog post-MVP  
 

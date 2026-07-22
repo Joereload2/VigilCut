@@ -36,11 +36,16 @@ B-roll is **composition** state (`VisualPlacement` + issues + spatial zones), no
 
 ## Out of scope (MVP)
 
-- Cloud, Supabase, remote image download  
-- Embeddings / mandatory LLM  
+- Full Story Builder UI (contracts only — see `models/story_contracts.rs`)  
+- Embeddings / mandatory LLM vision  
 - Full NLE multi-track editor  
 - Permanent delete of assets from UI  
 - Dynamic plugin system  
+- Silent paid generation  
+
+## Intelligent library (2026-07-22)
+
+See `docs/visual-library/architecture.md`. Adds: VisualConcept, VisualNeed, generation queue (OmniRoute replaceable), QA, cost policy, optional Supabase migrations. Generation is never required; search-before-generate is mandatory.
 
 ## Architecture
 
