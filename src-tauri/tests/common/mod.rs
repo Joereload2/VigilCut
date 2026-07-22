@@ -17,18 +17,52 @@ pub fn bundled_ffmpeg() -> PathBuf {
         })
 }
 
+/// Prefer sidecar under `src-tauri/binaries/`; fall back to `ffmpeg` on PATH (CI).
+pub fn resolve_ffmpeg() -> PathBuf {
+    let bundled = bundled_ffmpeg();
+    if bundled.is_file() {
+        return bundled;
+    }
+    // CI often installs system FFmpeg via choco/apt without running setup:ffmpeg.
+    which_ffmpeg().unwrap_or(bundled)
+}
+
+fn which_ffmpeg() -> Option<PathBuf> {
+    let name = if cfg!(windows) {
+        "ffmpeg.exe"
+    } else {
+        "ffmpeg"
+    };
+    // PATH lookup without shell
+    let path = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path) {
+        let candidate = dir.join(name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+        // Windows: also accept bare "ffmpeg" if present
+        if cfg!(windows) {
+            let bare = dir.join("ffmpeg");
+            if bare.is_file() {
+                return Some(bare);
+            }
+        }
+    }
+    None
+}
+
 pub fn ensure_ffmpeg() {
-    let ff = bundled_ffmpeg();
+    let ff = resolve_ffmpeg();
     assert!(
         ff.is_file(),
-        "bundled ffmpeg missing at {} — run npm run setup:ffmpeg",
-        ff.display()
+        "ffmpeg not found (tried {} and PATH) — run npm run setup:ffmpeg or install ffmpeg",
+        bundled_ffmpeg().display()
     );
 }
 
 fn run_ffmpeg(args: &[&str]) {
     ensure_ffmpeg();
-    let mut cmd = Command::new(bundled_ffmpeg());
+    let mut cmd = Command::new(resolve_ffmpeg());
     cmd.args(args);
     #[cfg(windows)]
     {

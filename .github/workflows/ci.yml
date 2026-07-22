@@ -29,9 +29,16 @@ jobs:
         shell: pwsh
         run: |
           if (-not (Test-Path .env.example)) { throw ".env.example missing" }
-          $txt = Get-Content .env.example -Raw
-          if ($txt -match 'service_role' -or $txt -match 'sk-[a-zA-Z0-9]{20,}') {
-            throw "Possible secret material in .env.example"
+          # Only fail on assignment-looking secrets, not educational comments
+          # (e.g. "Never put service_role" is allowed; SUPABASE_SERVICE_ROLE=xxx is not).
+          $lines = Get-Content .env.example | Where-Object { $_ -notmatch '^\s*#' -and $_.Trim() -ne '' }
+          foreach ($line in $lines) {
+            if ($line -match '(?i)^\s*[A-Z0-9_]*(SERVICE_ROLE|SECRET|PRIVATE_KEY)\s*=\s*\S+') {
+              throw "Secret-like assignment in .env.example: $line"
+            }
+            if ($line -match '(?i)^\s*[A-Z0-9_]*API_KEY\s*=\s*(sk-|eyJ)[A-Za-z0-9_\-]{10,}') {
+              throw "API key material in .env.example: $line"
+            }
           }
           Write-Host "OK .env.example"
 
@@ -61,16 +68,26 @@ jobs:
     needs: [rust]
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-      - name: Install FFmpeg
+      - name: Install FFmpeg (system PATH + optional sidecar)
         shell: pwsh
         run: |
           choco install ffmpeg -y --no-progress
           ffmpeg -version
           if ($LASTEXITCODE -ne 0) { throw "ffmpeg not on PATH after install" }
+          # Copy into src-tauri/binaries when possible (tests prefer sidecar, else PATH)
+          npm ci --ignore-scripts
+          npm run setup:ffmpeg
+          if (-not (Test-Path src-tauri/binaries/ffmpeg.exe)) {
+            Write-Host "sidecar missing — tests will use PATH ffmpeg via resolve_ffmpeg()"
+          }
       - name: Smoke pipeline
         run: cargo test --manifest-path src-tauri/Cargo.toml --test smoke_pipeline -- --nocapture
       - name: Smoke clipping
@@ -88,6 +105,10 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -97,6 +118,8 @@ jobs:
         run: |
           choco install ffmpeg -y --no-progress
           ffmpeg -version
+          npm ci --ignore-scripts
+          npm run setup:ffmpeg
       - name: E2E factory
         run: cargo test --manifest-path src-tauri/Cargo.toml --test e2e_factory -- --nocapture
       - name: E2E clipping
