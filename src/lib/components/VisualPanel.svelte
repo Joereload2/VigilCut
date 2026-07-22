@@ -2,24 +2,31 @@
   import { convertFileSrc } from "@tauri-apps/api/core";
   import { projectStore } from "$lib/stores/project.svelte";
   import * as api from "$lib/utils/tauri";
+  import VideoPreview from "./VideoPreview.svelte";
   import VisualPlaceForm from "./visual/VisualPlaceForm.svelte";
-  import VisualTrack from "./visual/VisualTrack.svelte";
-  import PlacementInspector from "./visual/PlacementInspector.svelte";
+  import SupervisedTimeline from "./visual/SupervisedTimeline.svelte";
+  import HorizontalProps from "./visual/HorizontalProps.svelte";
   import type {
     Asset,
+    CompositionIssue,
     DisplayMode,
-    ProtectedRange,
     Suggestion,
     VisualPlacement,
     VisualPlan,
   } from "./visual/types";
 
-  type ToolTab = "colocar" | "plan" | "texto" | "mas";
+  type AuxId = "props" | "exceptions" | "library" | "texto" | "config" | "colocar";
 
   let busy = $state(false);
   let error = $state<string | null>(null);
   let lastMessage = $state("");
-  let tool = $state<ToolTab>("colocar");
+  /** Active tool in the right column (always one; no hidden panels). */
+  let activeAux = $state<AuxId>("colocar");
+  /** Pre-resultado tras aplicar imágenes (mismo proyecto, sin pedir otro MP4). */
+  let previewPath = $state<string | null>(null);
+  /** Cut/source used as overlay base (never a second unrelated pick). */
+  let resolvedBasePath = $state<string | null>(null);
+  let previewPhase = $state<"idle" | "preparing" | "rendering" | "ready">("idle");
 
   let displayMode = $state<DisplayMode>("completa");
   let outputStart = $state(0);
@@ -42,7 +49,8 @@
       projectStore.duration ??
       60,
   );
-  const playhead = $derived(projectStore.currentTime);
+  /** Single edit timeline (output) — same clock as live overlays on the main player. */
+  const playhead = $derived(projectStore.outputClock());
   const placements = $derived(plan?.placements ?? []);
   const protectedRanges = $derived(plan?.protectedRanges ?? []);
   const selectedPlacement = $derived(
@@ -51,16 +59,288 @@
   const selectedThumb = $derived.by(() => {
     if (!selectedPlacement) return null;
     const a = assets.find((x) => x.id === selectedPlacement.assetId);
-    return a?.thumbnailPath ?? null;
+    return a?.thumbnailPath ?? a?.managedPath ?? null;
   });
+
+  function imagePathFor(assetId: string, placement?: VisualPlacement): string | null {
+    if (placement?.thumbnailPath) return placement.thumbnailPath;
+    const a = assets.find((x) => x.id === assetId);
+    return a?.managedPath ?? a?.thumbnailPath ?? null;
+  }
+
+  function syncPlanToPlayer(p: VisualPlan | null) {
+    if (!p) {
+      projectStore.setVisualPlan([]);
+      return;
+    }
+    const list = (p.placements ?? []).map((pl) => ({
+      id: pl.id,
+      assetId: pl.assetId,
+      outputStart: pl.outputStart,
+      outputEnd: pl.outputEnd,
+      mode: pl.mode,
+      status: pl.status,
+      fit: pl.fit,
+      layout: pl.layout,
+      label: pl.label,
+      imagePath: imagePathFor(pl.assetId, pl),
+      relatedText: pl.relatedText,
+      confidence: pl.confidence,
+      reviewStatus: pl.reviewStatus,
+      manualOverride: pl.manualOverride,
+    }));
+    // Drop legacy auto face/safe_area demos unless user enabled zone display
+    const zones = (p.spatialZones ?? []).filter((z) => {
+      if (projectStore.visualShowZones) return true;
+      // Keep only user/manual zones by default
+      return z.kind === "manual" || !!z.label?.toLowerCase().includes("manual");
+    });
+    projectStore.setVisualPlan(
+      list,
+      (p.protectedRanges ?? []).map((r) => ({
+        id: r.id,
+        outputStart: r.outputStart,
+        outputEnd: r.outputEnd,
+        reason: r.reason,
+      })),
+      {
+        spatialZones: zones,
+        issues: p.issues ?? [],
+      },
+    );
+  }
+
+  $effect(() => {
+    syncPlanToPlayer(plan);
+    void assets.length;
+  });
+
+  $effect(() => {
+    projectStore.visualSelectedId = selectedPlacementId;
+  });
+
+  // Spatial drag from main preview → composition model (debounced write)
+  $effect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const handler = (ev: Event) => {
+      const d = (ev as CustomEvent<{ id: string; x: number; y: number; w: number; h?: number }>)
+        .detail;
+      if (!d?.id) return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        selectedPlacementId = d.id;
+        void updateSelected({
+          positionX: d.x,
+          positionY: d.y,
+          sizeW: d.w,
+          sizeH: d.h,
+          manualOverride: true,
+        });
+      }, 120);
+    };
+    window.addEventListener("vigilcut:visual-layout", handler);
+    return () => {
+      if (timer) clearTimeout(timer);
+      window.removeEventListener("vigilcut:visual-layout", handler);
+    };
+  });
+
+  const issues = $derived(plan?.issues ?? []);
+  const exceptionCount = $derived(
+    issues.filter((i) => i.severity === "warn" || i.severity === "error").length +
+      placements.filter((p) => p.reviewStatus === "conflict").length,
+  );
+
+  function imagePathForPlacement(pl: VisualPlacement): string | null {
+    return imagePathFor(pl.assetId, pl);
+  }
+
+  async function movePlacementLocal(id: string, s: number, e: number) {
+    // Optimistic UI while dragging
+    if (plan?.placements) {
+      plan = {
+        ...plan,
+        placements: plan.placements.map((p) =>
+          p.id === id ? { ...p, outputStart: s, outputEnd: e } : p,
+        ),
+      };
+    }
+  }
+
+  async function snapPlacement(id: string, s: number, e: number) {
+    try {
+      const anchors: number[] = [0, duration];
+      for (const seg of transcriptSegs) {
+        const os =
+          projectStore.localKeepRanges().length > 0
+            ? projectStore.sourceToEdited(seg.span.start)
+            : seg.span.start;
+        const oe =
+          projectStore.localKeepRanges().length > 0
+            ? projectStore.sourceToEdited(seg.span.end)
+            : seg.span.end;
+        anchors.push(os, oe);
+      }
+      for (const p of placements) {
+        if (p.id !== id) {
+          anchors.push(p.outputStart, p.outputEnd);
+        }
+      }
+      const p = (await api.visualSnapPlacement({
+        placementId: id,
+        outputStart: s,
+        outputEnd: e,
+        anchors,
+        threshold: 0.2,
+      })) as VisualPlan;
+      plan = p;
+      syncPlanToPlayer(plan);
+    } catch {
+      await updateSelectedTimes(id, s, e);
+    }
+  }
+
+  async function updateSelectedTimes(id: string, s: number, e: number) {
+    try {
+      const p = (await api.visualUpdatePlacement({
+        placementId: id,
+        outputStart: s,
+        outputEnd: e,
+        manualOverride: true,
+      })) as VisualPlan;
+      plan = p;
+      syncPlanToPlayer(plan);
+    } catch (err) {
+      error = String(err);
+    }
+  }
+
+  async function applyIssueSuggestion(iss: CompositionIssue) {
+    if (!selectedPlacementId) return;
+    try {
+      const p = (await api.visualUpdatePlacement({
+        placementId: selectedPlacementId,
+        positionX: iss.suggestedX ?? undefined,
+        positionY: iss.suggestedY ?? undefined,
+        sizeW: iss.suggestedW ?? undefined,
+        manualOverride: true,
+      })) as VisualPlan;
+      plan = p;
+      lastMessage = "Posición alternativa aplicada";
+    } catch (err) {
+      error = String(err);
+    }
+  }
 
   function fileUrl(path?: string | null) {
     if (!path) return null;
     try {
-      return convertFileSrc(path.replace(/\\/g, "/"));
+      // Keep native Windows separators — same as VideoPreview
+      return convertFileSrc(path);
     } catch {
-      return null;
+      try {
+        return convertFileSrc(path.replace(/\\/g, "/"));
+      } catch {
+        return null;
+      }
     }
+  }
+
+  function sidePath(mediaPath: string, suffix: string): string {
+    const parts = mediaPath.split(/[/\\]/);
+    const file = parts.pop() ?? "video.mp4";
+    const dir = parts.join(mediaPath.includes("\\") ? "\\" : "/") || ".";
+    const sep = mediaPath.includes("\\") ? "\\" : "/";
+    const base = file.replace(/\.[^.]+$/, "") || "vigilcut";
+    return `${dir}${sep}${base}${suffix}`;
+  }
+
+  const baseLabel = $derived.by(() => {
+    const p = resolvedBasePath ?? projectStore.lastExport?.path ?? projectStore.mediaPath;
+    if (!p) return "—";
+    return p.split(/[/\\]/).pop() ?? p;
+  });
+
+  function isVisualResultPath(path: string): boolean {
+    return /-con-imagenes(-\d+)?\.mp4$/i.test(path);
+  }
+
+  /** Same project only: last cut, or auto-cut current media, or the uploaded file. Never another picker. */
+  async function ensureProjectBaseVideo(): Promise<string> {
+    const media = projectStore.mediaPath;
+    if (!media) throw new Error("Abre un video primero");
+
+    // Reuse the base we already prepared for this session (avoid double overlays).
+    if (resolvedBasePath && !isVisualResultPath(resolvedBasePath)) {
+      return resolvedBasePath;
+    }
+
+    const prev = projectStore.lastExport?.path;
+    if (prev && !isVisualResultPath(prev)) {
+      resolvedBasePath = prev;
+      return prev;
+    }
+
+    const hasKeep =
+      projectStore.keepRanges.length > 0 ||
+      projectStore.segments.some((s) => s.decision !== "cut");
+    const hasCuts =
+      projectStore.segments.some((s) => s.decision === "cut") ||
+      (projectStore.cutDuration ?? 0) > 0.2;
+
+    // No silence cuts → overlays go on the video you uploaded (one file only).
+    if (!hasCuts || !hasKeep || projectStore.segments.length === 0) {
+      resolvedBasePath = media;
+      return media;
+    }
+
+    // Build the cut of THIS video automatically (no save dialog, no other file).
+    previewPhase = "preparing";
+    lastMessage = "Preparando el corte de tu video…";
+    projectStore.statusMessage = lastMessage;
+    const cutOut = sidePath(media, "-corte.mp4");
+    const result = await api.exportVideo({
+      mediaPath: media,
+      outputPath: cutOut,
+      keepRanges:
+        projectStore.keepRanges.length > 0 ? projectStore.keepRanges : undefined,
+      segments: projectStore.segments,
+      exportOptions: projectStore.project?.preset.export,
+      colorOptions: projectStore.project?.preset.color,
+      audioOptions: projectStore.audioEnhance,
+      hasAudio: projectStore.media?.hasAudio ?? true,
+    });
+    projectStore.recordExportSuccess(result.outputPath, result.duration, { silent: true });
+    resolvedBasePath = result.outputPath;
+    return result.outputPath;
+  }
+
+  async function openPreviewFolder() {
+    if (!previewPath || !api.isTauri()) return;
+    try {
+      const { open } = await import("@tauri-apps/plugin-shell");
+      const parts = previewPath.split(/[/\\]/);
+      parts.pop();
+      const dir = parts.join(previewPath.includes("\\") ? "\\" : "/") || previewPath;
+      await open(dir);
+    } catch (e) {
+      lastMessage = previewPath;
+      console.error(e);
+    }
+  }
+
+  async function exportAgreedResult() {
+    if (!previewPath) {
+      error = "Primero genera el pre-resultado";
+      return;
+    }
+    // Already written next to the project video; confirm + open folder / mark success.
+    projectStore.recordExportSuccess(
+      previewPath,
+      projectStore.keptDuration || projectStore.duration || 0,
+    );
+    lastMessage = `Exportado: ${previewPath.split(/[/\\]/).pop()}`;
+    await openPreviewFolder();
   }
 
   async function refreshAssets() {
@@ -97,7 +377,8 @@
   }
 
   function usePlayhead() {
-    const t = projectStore.currentTime || 0;
+    // Place on the same timeline shown in the main player (output clock)
+    const t = projectStore.outputClock() || 0;
     outputStart = Math.max(0, t - 0.2);
     outputEnd = Math.min(duration, t + 3.8);
   }
@@ -133,15 +414,45 @@
       })) as { plan?: VisualPlan; message?: string; placement?: VisualPlacement };
       plan = res.plan ?? plan;
       if (res.placement) selectedPlacementId = res.placement.id;
-      lastMessage = res.message || "Placement añadido";
+      lastMessage = res.message || "Imagen en la línea de tiempo (vista principal)";
       projectStore.statusMessage = lastMessage;
+      // Stay on the single result timeline so overlays appear immediately
+      if (projectStore.previewMode !== "edited" && projectStore.localKeepRanges().length > 0) {
+        projectStore.previewMode = "edited";
+      }
+      // Jump playhead into the placement so fullscreen/overlay is visible now
+      if (projectStore.localKeepRanges().length > 0) {
+        projectStore.currentTime = projectStore.editedToSource(outputStart + 0.05);
+      } else {
+        projectStore.currentTime = outputStart + 0.05;
+      }
+      projectStore.isPlaying = false;
       await refreshAssets();
+      syncPlanToPlayer(plan);
+      openAuxTab("props");
     } catch (e) {
       error = String(e);
     } finally {
       busy = false;
     }
   }
+
+  function openAuxTab(id: AuxId) {
+    activeAux = id;
+  }
+
+  const toolNav = $derived([
+    { id: "colocar" as AuxId, label: "Colocar" },
+    { id: "props" as AuxId, label: "Propiedades" },
+    {
+      id: "exceptions" as AuxId,
+      label: "Excepciones",
+      badge: exceptionCount > 0 ? exceptionCount : undefined,
+    },
+    { id: "library" as AuxId, label: "Biblioteca" },
+    { id: "texto" as AuxId, label: "Texto" },
+    { id: "config" as AuxId, label: "Config" },
+  ]);
 
   async function protectRange() {
     if (!projectStore.mediaPath) return;
@@ -171,6 +482,12 @@
     positionX?: number;
     positionY?: number;
     sizeW?: number;
+    sizeH?: number;
+    fit?: string;
+    reviewStatus?: string;
+    manualOverride?: boolean;
+    restoreAi?: boolean;
+    opacity?: number;
   }) {
     if (!selectedPlacementId) return;
     try {
@@ -179,6 +496,7 @@
         ...patch,
       })) as VisualPlan;
       plan = p;
+      syncPlanToPlayer(plan);
     } catch (e) {
       error = String(e);
     }
@@ -190,44 +508,58 @@
       const p = (await api.visualRemovePlacement(selectedPlacementId)) as VisualPlan;
       plan = p;
       selectedPlacementId = null;
-      lastMessage = "Placement eliminado";
+      lastMessage = "Imagen quitada de la línea de tiempo";
+      syncPlanToPlayer(plan);
     } catch (e) {
       error = String(e);
     }
   }
 
+  /**
+   * Final bake only — live preview already shows images on the main video.
+   * One project video → export MP4 with overlays burned in.
+   */
   async function renderPlan() {
-    if (!projectStore.mediaPath || !api.isTauri()) return;
-    const cut =
-      projectStore.lastExport?.path ||
-      (await (async () => {
-        const { open } = await import("@tauri-apps/plugin-dialog");
-        const p = await open({
-          multiple: false,
-          filters: [{ name: "Video cortado", extensions: ["mp4"] }],
-          title: "MP4 cortado (timeline de salida)",
-        });
-        return typeof p === "string" ? p : null;
-      })());
-    if (!cut) {
-      error = "Exporta primero el video en Silencios o elige el MP4 editado";
+    if (!projectStore.mediaPath || !api.isTauri()) {
+      error = "Abre un video en VigilCut";
       return;
     }
-    const parts = cut.split(/[/\\]/);
-    parts.pop();
-    const dir = parts.join(cut.includes("\\") ? "\\" : "/") || ".";
-    const sep = cut.includes("\\") ? "\\" : "/";
-    const out = `${dir}${sep}visual-enriched.mp4`;
+    const active = placements.filter((p) => p.status === "active").length;
+    if (active === 0) {
+      error = "Añade al menos una imagen en la pista";
+      return;
+    }
     busy = true;
+    projectStore.busy = true;
+    error = null;
+    previewPath = null;
+    previewPhase = "preparing";
     try {
-      const path = await api.visualRenderPlan(cut, out, projectStore.mediaPath);
-      lastMessage = `Render → ${path}`;
+      const base = await ensureProjectBaseVideo();
+      previewPhase = "rendering";
+      lastMessage = `Exportando ${active} imagen(es) en el MP4 final…`;
       projectStore.statusMessage = lastMessage;
-      projectStore.recordExportSuccess(path, projectStore.keptDuration);
+      projectStore.setProgress(20, "Export visual…", "visual");
+      const out = sidePath(projectStore.mediaPath, "-con-imagenes.mp4");
+      const path = await api.visualRenderPlan(base, out, projectStore.mediaPath);
+      previewPath = path;
+      previewPhase = "ready";
+      projectStore.setVisualPreview(path, projectStore.keptDuration || duration);
+      // recordExportSuccess clears busy + shows modal + status line
+      projectStore.recordExportSuccess(path, projectStore.keptDuration || duration, {
+        silent: false,
+      });
+      lastMessage = `Exportado: ${path.split(/[/\\]/).pop()}`;
+      openAuxTab("props");
     } catch (e) {
       error = String(e);
+      previewPhase = "idle";
+      projectStore.error = String(e);
+      projectStore.statusMessage = "Error al exportar";
     } finally {
       busy = false;
+      projectStore.busy = false;
+      projectStore.clearProgress();
     }
   }
 
@@ -299,207 +631,215 @@
       usePlayhead();
     }
   });
+
+  // New video → reset visual pre-result (still the same project when path stable)
+  $effect(() => {
+    const media = projectStore.mediaPath;
+    if (!media) {
+      previewPath = null;
+      resolvedBasePath = null;
+      previewPhase = "idle";
+    }
+  });
 </script>
 
-<div class="panel flex min-h-0 flex-col overflow-hidden border-sky-800/30">
-  <!-- Header: primary path -->
-  <div class="border-b border-surface-800 px-3 py-2">
-    <div class="text-sm font-semibold text-surface-100">Visual · B-roll</div>
-    <div class="text-[10px] text-surface-500">
-      Pausar → + Imagen → modo → ajustar → Render
-    </div>
-    <div class="mt-2 flex flex-wrap gap-1">
-      {#each [
-        { id: "colocar" as ToolTab, label: "Colocar" },
-        { id: "plan" as ToolTab, label: `Plan (${placements.length})` },
-        { id: "texto" as ToolTab, label: "Texto" },
-        { id: "mas" as ToolTab, label: "Más" },
-      ] as t}
-        <button
-          type="button"
-          class="rounded-lg px-2.5 py-1 text-[10px] font-semibold
-            {tool === t.id
-            ? 'bg-sky-600 text-white'
-            : 'bg-surface-900 text-surface-400 hover:text-surface-200'}"
-          onclick={() => (tool = t.id)}
-        >
-          {t.label}
-        </button>
-      {/each}
-    </div>
-  </div>
-
-  {#if error}
-    <div class="border-b border-cut/30 bg-cut/10 px-3 py-1.5 text-[11px] text-cut">{error}</div>
-  {/if}
-  {#if lastMessage}
-    <div class="border-b border-surface-800 px-3 py-1 text-[10px] text-surface-400">{lastMessage}</div>
-  {/if}
-
-  <div class="min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
-    <!-- Always-visible track -->
-    <VisualTrack
-      duration={duration}
-      currentTime={playhead}
-      {placements}
-      {protectedRanges}
-      selectedId={selectedPlacementId}
-      onSelect={(id) => {
-        selectedPlacementId = id;
-        tool = "plan";
-      }}
-    />
-
-    {#if tool === "colocar"}
-      <VisualPlaceForm
-        bind:outputStart
-        bind:outputEnd
-        bind:displayMode
-        {duration}
-        {busy}
-        onPlaceFile={placeImageFile}
-        onProtect={protectRange}
-        onChangeStart={(v) => (outputStart = v)}
-        onChangeEnd={(v) => (outputEnd = v)}
-        onChangeMode={(m) => (displayMode = m)}
-        onUsePlayhead={usePlayhead}
-      />
-      <PlacementInspector
-        placement={selectedPlacement}
-        thumbPath={selectedThumb}
-        {busy}
-        onUpdate={updateSelected}
-        onRemove={removeSelected}
-      />
-      {#if placements.length > 0}
-        <button type="button" class="btn-primary w-full text-xs" disabled={busy} onclick={renderPlan}>
-          Render plan ({placements.filter((p) => p.status === "active").length} imágenes)
-        </button>
-      {/if}
-    {:else if tool === "plan"}
-      <PlacementInspector
-        placement={selectedPlacement}
-        thumbPath={selectedThumb}
-        {busy}
-        onUpdate={updateSelected}
-        onRemove={removeSelected}
-      />
-      <ul class="space-y-1">
-        {#each placements as pl (pl.id)}
-          {@const a = assets.find((x) => x.id === pl.assetId)}
-          {@const u = fileUrl(a?.thumbnailPath)}
-          <li>
-            <button
-              type="button"
-              class="flex w-full items-center gap-2 rounded-lg border px-2 py-1.5 text-left text-[10px]
-                {selectedPlacementId === pl.id
-                ? 'border-sky-500 bg-sky-950/40'
-                : 'border-surface-800 bg-surface-950/50'}"
-              onclick={() => (selectedPlacementId = pl.id)}
-            >
-              {#if u}
-                <img src={u} alt="" class="h-8 w-8 rounded object-cover" />
-              {/if}
-              <span class="min-w-0 flex-1 truncate text-surface-200"
-                >{pl.label || pl.assetId}</span
-              >
-              <span class="font-mono text-surface-500"
-                >{pl.outputStart.toFixed(1)}–{pl.outputEnd.toFixed(1)}</span
-              >
-            </button>
-          </li>
-        {:else}
-          <li class="text-[10px] text-surface-500">Sin placements. Usa la pestaña Colocar.</li>
-        {/each}
-      </ul>
-      {#if protectedRanges.length}
-        <div class="text-[10px] text-surface-400">
-          <div class="mb-1 font-semibold">Zonas protegidas</div>
-          {#each protectedRanges as pr (pr.id)}
-            <div class="flex items-center justify-between gap-2 py-0.5">
-              <span class="font-mono"
-                >{pr.outputStart.toFixed(1)}–{pr.outputEnd.toFixed(1)} · {pr.reason}</span
-              >
-              <button
-                type="button"
-                class="btn-ghost text-[9px] text-cut"
-                onclick={async () => {
-                  try {
-                    plan = (await api.visualRemoveProtectedRange(pr.id)) as VisualPlan;
-                  } catch (e) {
-                    error = String(e);
-                  }
-                }}>Quitar</button
-              >
-            </div>
-          {/each}
-        </div>
-      {/if}
-      <button type="button" class="btn-primary w-full text-xs" disabled={busy} onclick={renderPlan}>
-        Render plan
-      </button>
-    {:else if tool === "texto"}
-      <div class="space-y-2">
-        <p class="text-[10px] text-surface-500">
-          Opcional: ayuda a sugerir conceptos. El placement manual no lo necesita.
-        </p>
-        <div class="flex flex-wrap gap-1">
-          <button
-            type="button"
-            class="btn-secondary text-[10px]"
-            disabled={busy || preferBusyWhisper}
-            onclick={runWhisper}
-          >
-            {whisperOk ? "Transcribir Whisper" : "Whisper…"}
-          </button>
-          <button type="button" class="btn-ghost text-[10px]" disabled={busy} onclick={pickSrt}
-            >Importar SRT</button
-          >
-        </div>
-        {#if whisperOk}
-          <span class="text-[9px] text-keep">Whisper listo · {whisperKind}</span>
-        {/if}
-        <div class="max-h-48 space-y-1 overflow-y-auto text-[10px]">
-          {#each transcriptSegs.slice(0, 40) as seg}
-            <button
-              type="button"
-              class="block w-full rounded px-1 py-0.5 text-left hover:bg-surface-800"
-              onclick={() => {
-                // Map source-ish to place form (approx output if no cuts)
-                outputStart = seg.span.start;
-                outputEnd = Math.min(duration, seg.span.end + 1);
-                tool = "colocar";
-              }}
-            >
-              <span class="font-mono text-surface-600"
-                >{seg.span.start.toFixed(1)}–{seg.span.end.toFixed(1)}</span
-              >
-              {seg.text}
-            </button>
-          {:else}
-            <p class="text-surface-600">Sin texto todavía.</p>
-          {/each}
-        </div>
-      </div>
-    {:else}
-      <div class="space-y-2 text-[10px] text-surface-400">
-        <p>Biblioteca: {assets.length} imágenes</p>
-        <ul class="max-h-40 space-y-1 overflow-y-auto">
-          {#each assets.slice(0, 12) as a (a.id)}
-            {@const u = fileUrl(a.thumbnailPath)}
-            <li class="flex items-center gap-2">
-              {#if u}<img src={u} alt="" class="h-7 w-7 rounded object-cover" />{/if}
-              <span class="truncate">{a.title}</span>
-            </li>
-          {/each}
-        </ul>
-        {#if suggestions.length}
-          <p class="font-semibold text-surface-300">Sugerencias auto: {suggestions.length}</p>
-        {/if}
-        <p class="text-surface-600">
-          EDL = cortes · VisualPlan = overlays. Originales intactos.
-        </p>
+<!--
+  Layout per wireframe:
+  - Left ~70%: video preview (top) + timeline (bottom ~30% of window height)
+  - Right ~30%: tools / others (always fully visible, scroll inside)
+-->
+<div
+  class="grid h-full min-h-0 w-full min-w-0 max-w-full gap-1.5 overflow-hidden"
+  style="box-sizing:border-box; height:100%; width:100%; grid-template-columns: minmax(0, 7fr) minmax(12rem, 3fr); grid-template-rows: minmax(0, 1fr);"
+>
+  <!-- LEFT 70%: video + timeline -->
+  <div class="flex min-h-0 min-w-0 flex-col gap-1 overflow-hidden">
+    {#if error}
+      <div class="shrink-0 break-words rounded-lg border border-cut/30 bg-cut/10 px-2 py-0.5 text-[10px] text-cut">
+        {error}
       </div>
     {/if}
+
+    <!-- Video takes most of the left column -->
+    <div class="min-h-0 w-full min-w-0 flex-1 overflow-hidden" style="min-height: 8rem">
+      <VideoPreview compact />
+    </div>
+
+    <!-- Timeline ~50% smaller: fixed compact band, not stretching -->
+    <div
+      class="w-full min-w-0 shrink-0 overflow-hidden"
+      style="height: clamp(88px, 14vh, 120px); box-sizing: border-box"
+    >
+      <SupervisedTimeline
+        duration={duration}
+        {placements}
+        {protectedRanges}
+        transcript={transcriptSegs}
+        {issues}
+        selectedId={selectedPlacementId}
+        imagePathFor={imagePathForPlacement}
+        onSelect={(id) => {
+          selectedPlacementId = id;
+          openAuxTab("props");
+        }}
+        onMove={movePlacementLocal}
+        onSnapMove={snapPlacement}
+      />
+    </div>
   </div>
+
+  <!-- RIGHT 30%: simple tool switcher (no ×, no “+ Abrir panel”) -->
+  <aside
+    class="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-surface-800 bg-surface-900/60"
+    style="box-sizing:border-box"
+    aria-label="Herramientas Visual"
+  >
+    <div class="shrink-0 border-b border-surface-800 p-2">
+      <div class="mb-1 text-[11px] font-semibold text-surface-200">Herramientas</div>
+      <div class="grid grid-cols-2 gap-1" role="tablist">
+        {#each toolNav as t (t.id)}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeAux === t.id}
+            class="rounded-lg px-2 py-1.5 text-left text-[11px] font-semibold transition
+              {activeAux === t.id
+              ? 'bg-sky-600 text-white'
+              : 'bg-surface-800 text-surface-300 hover:bg-surface-700'}"
+            onclick={() => openAuxTab(t.id)}
+          >
+            {t.label}
+            {#if t.badge}
+              <span class="ml-1 rounded-full bg-warning/30 px-1 text-[9px] text-warning"
+                >{t.badge}</span
+              >
+            {/if}
+          </button>
+        {/each}
+      </div>
+    </div>
+
+    <div class="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-2">
+      {#if activeAux === "props"}
+        <HorizontalProps
+          placement={selectedPlacement}
+          thumbPath={selectedThumb}
+          {issues}
+          {busy}
+          onUpdate={updateSelected}
+          onRemove={removeSelected}
+          onApplySuggestion={applyIssueSuggestion}
+          onExport={placements.length > 0 ? renderPlan : undefined}
+        />
+      {:else if activeAux === "exceptions"}
+        <div class="space-y-1 text-[11px]">
+          <p class="text-surface-500">Solo excepciones — la IA resolvió el resto.</p>
+          {#each issues.filter((i) => i.severity !== "info") as iss (iss.id)}
+            <button
+              type="button"
+              class="flex w-full min-w-0 items-start gap-2 rounded-lg border border-amber-800/40 bg-amber-950/20 px-2 py-1.5 text-left hover:bg-amber-950/40"
+              onclick={() => {
+                selectedPlacementId = iss.placementId;
+                openAuxTab("props");
+              }}
+            >
+              <span class="shrink-0 font-mono text-[9px] text-amber-400">{iss.severity}</span>
+              <span class="min-w-0 flex-1 text-amber-50/90">{iss.message}</span>
+            </button>
+          {:else}
+            <p class="text-keep">Sin excepciones visuales.</p>
+          {/each}
+        </div>
+      {:else if activeAux === "colocar"}
+        <VisualPlaceForm
+          bind:outputStart
+          bind:outputEnd
+          bind:displayMode
+          {duration}
+          {busy}
+          onPlaceFile={placeImageFile}
+          onProtect={protectRange}
+          onChangeStart={(v) => (outputStart = v)}
+          onChangeEnd={(v) => (outputEnd = v)}
+          onChangeMode={(m) => (displayMode = m)}
+          onUsePlayhead={usePlayhead}
+        />
+      {:else if activeAux === "library"}
+        <div class="flex min-w-0 flex-wrap gap-2">
+          {#each assets.slice(0, 24) as a (a.id)}
+            {@const u = fileUrl(a.thumbnailPath)}
+            <div
+              class="flex w-[6.5rem] min-w-0 flex-col rounded-lg border border-surface-800 bg-surface-950/60 p-1"
+            >
+              {#if u}
+                <img src={u} alt="" class="h-12 w-full rounded object-cover" />
+              {/if}
+              <span class="truncate px-0.5 text-[10px] text-surface-300">{a.title}</span>
+            </div>
+          {:else}
+            <p class="text-[11px] text-surface-500">Biblioteca vacía.</p>
+          {/each}
+        </div>
+      {:else if activeAux === "texto"}
+        <div class="flex min-w-0 flex-col gap-2">
+          <div class="flex flex-wrap gap-1">
+            <button
+              type="button"
+              class="btn-secondary text-[10px]"
+              disabled={busy || preferBusyWhisper}
+              onclick={runWhisper}
+            >
+              {whisperOk ? "Whisper" : "Whisper…"}
+            </button>
+            <button type="button" class="btn-ghost text-[10px]" disabled={busy} onclick={pickSrt}
+              >SRT</button
+            >
+          </div>
+          <div class="flex min-w-0 flex-col gap-0.5 text-[10px]">
+            {#each transcriptSegs.slice(0, 40) as seg}
+              <button
+                type="button"
+                class="w-full truncate rounded bg-surface-800 px-1.5 py-0.5 text-left hover:bg-surface-700"
+                onclick={() => {
+                  outputStart = seg.span.start;
+                  outputEnd = Math.min(duration, seg.span.end + 1);
+                  openAuxTab("colocar");
+                }}
+              >
+                <span class="font-mono text-surface-500">{seg.span.start.toFixed(1)}s</span>
+                {seg.text}
+              </button>
+            {:else}
+              <p class="text-surface-600">Sin texto.</p>
+            {/each}
+          </div>
+        </div>
+      {:else if activeAux === "config"}
+        <div class="space-y-2 text-[11px] text-surface-400">
+          <label class="flex cursor-pointer items-center gap-1.5">
+            <input
+              type="checkbox"
+              class="rounded"
+              checked={projectStore.visualShowZones}
+              onchange={() => (projectStore.visualShowZones = !projectStore.visualShowZones)}
+            />
+            Zonas protegidas en preview
+          </label>
+          {#if placements.length > 0}
+            <button
+              type="button"
+              class="btn-primary w-full text-[10px]"
+              disabled={busy}
+              onclick={renderPlan}
+            >
+              {previewPhase === "rendering" ? "Exportando…" : "Exportar con imágenes"}
+            </button>
+          {/if}
+          {#if lastMessage}
+            <p class="text-[10px] text-surface-500">{lastMessage}</p>
+          {/if}
+        </div>
+      {/if}
+    </div>
+  </aside>
 </div>

@@ -7,20 +7,30 @@
   import ActionBar from "$lib/components/ActionBar.svelte";
   import ExportSuccess from "$lib/components/ExportSuccess.svelte";
   import ClippingPanel from "$lib/components/ClippingPanel.svelte";
-  import ModeNav from "$lib/components/ModeNav.svelte";
   import ShortPlayer from "$lib/components/ShortPlayer.svelte";
   import RightDock from "$lib/components/RightDock.svelte";
+  import Timeline from "$lib/components/Timeline.svelte";
   import VisualPanel from "$lib/components/VisualPanel.svelte";
+  import AuxTabShell from "$lib/components/AuxTabShell.svelte";
   import { projectStore } from "$lib/stores/project.svelte";
   import type { FfmpegStatus, JobProgress } from "$lib/types";
   import * as api from "$lib/utils/tauri";
 
   let ffmpeg = $state<FfmpegStatus | null>(null);
   let version = $state("0.1.0");
-  /** Top-level work mode — always visible when a video is open */
+  /** Top-level work mode — tabs in TopBar, no left sidebar */
   let workspaceTab = $state<"silence" | "clips" | "visual">("silence");
   let toast = $state<string | null>(null);
   let toastTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Silence mode: closable bottom dock (was right sidebar). */
+  type SilenceAux = "resumen" | "supervision" | "timeline" | "lote" | "ajustes";
+  let silenceOpen = $state<SilenceAux[]>(["supervision", "resumen"]);
+  let silenceActive = $state<SilenceAux | null>("supervision");
+
+  type ClipsAux = "candidatos" | "export";
+  let clipsOpen = $state<ClipsAux[]>(["candidatos"]);
+  let clipsActive = $state<ClipsAux | null>("candidatos");
 
   function showToast(msg: string) {
     toast = msg;
@@ -105,7 +115,6 @@
       }
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
-        // Ctrl+Shift+Enter = elegir destino; Ctrl+Enter = 1-clic al lado del origen
         void exportVideo(e.shiftKey);
       }
     };
@@ -117,34 +126,25 @@
     };
   });
 
-  // Surface store errors as toast
   $effect(() => {
     const err = projectStore.error;
     if (err) showToast(err);
   });
 
   async function openFile() {
-    if (api.isTauri()) {
-      try {
-        const { open } = await import("@tauri-apps/plugin-dialog");
-        const selected = await open({
-          multiple: false,
-          filters: [
-            {
-              name: "Video",
-              extensions: ["mp4", "mov", "mkv", "webm", "avi", "m4v", "wmv"],
-            },
-          ],
-        });
-        if (selected && typeof selected === "string") {
-          await projectStore.openMedia(selected);
-        }
-      } catch (e) {
-        projectStore.error = String(e);
-      }
-    } else {
-      const path = prompt("Ruta al video:", "");
-      if (path) await projectStore.openMedia(path);
+    if (!api.isTauri()) {
+      projectStore.statusMessage = "Abre la app de escritorio para cargar videos";
+      return;
+    }
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const p = await open({
+        multiple: false,
+        filters: [{ name: "Video", extensions: ["mp4", "mov", "mkv", "webm", "m4v"] }],
+      });
+      if (typeof p === "string") await projectStore.openMedia(p);
+    } catch (e) {
+      projectStore.error = String(e);
     }
   }
 
@@ -152,7 +152,6 @@
     window.dispatchEvent(new CustomEvent("vigilcut:listen-result"));
   }
 
-  /** Factory default: same folder as source, no save dialog. */
   function defaultExportPath(mediaPath: string): string {
     const parts = mediaPath.split(/[/\\]/);
     const file = parts.pop() ?? "video.mp4";
@@ -167,11 +166,9 @@
     if (projectStore.keepRanges.length > 0) return true;
     if ((projectStore.estimate?.estimatedDuration ?? 0) > 0.05) return true;
     if (projectStore.keepCount > 0) return true;
-    // pending-as-keep still yields exportable speech blocks
     return projectStore.segments.some((s) => s.decision !== "cut");
   }
 
-  /** @param saveAs — true = choose path (rare); false = 1-click next to source */
   async function exportVideo(saveAs = false) {
     if (!projectStore.mediaPath || projectStore.segments.length === 0) return;
     if (projectStore.mediaPath.startsWith("demo://")) {
@@ -209,21 +206,17 @@
       projectStore.clearProgress();
       projectStore.statusMessage = "Exportando video…";
       projectStore.progressPercent = 5;
-      // EDL-first: prefer keepRanges from engine; segments only as override surface
       const result = await api.exportVideo({
         mediaPath: projectStore.mediaPath,
         outputPath: out,
         keepRanges:
-          projectStore.keepRanges.length > 0
-            ? projectStore.keepRanges
-            : undefined,
+          projectStore.keepRanges.length > 0 ? projectStore.keepRanges : undefined,
         segments: projectStore.segments,
         exportOptions: projectStore.project?.preset.export,
         colorOptions: projectStore.project?.preset.color,
         audioOptions: projectStore.audioEnhance,
         hasAudio: projectStore.media?.hasAudio ?? true,
       });
-      // Multi-artifact factory pack (chapters, shorts, events, edl, manifest)
       if (projectStore.analysisRun?.id) {
         try {
           await api.writeExportArtifacts(projectStore.analysisRun.id, result.outputPath);
@@ -247,26 +240,48 @@
     }
   }
 
-  async function cancelBusyJob() {
-    try {
-      await api.cancelJob();
-      projectStore.statusMessage = "Cancelando…";
-    } catch (e) {
-      console.warn(e);
-    }
+  const silenceCatalog = $derived([
+    { id: "resumen" as SilenceAux, label: "Resumen" },
+    {
+      id: "supervision" as SilenceAux,
+      label: "Excepciones",
+      badge:
+        projectStore.pendingExceptionCount > 0
+          ? projectStore.pendingExceptionCount
+          : undefined,
+      alert: projectStore.pendingExceptionCount > 0,
+    },
+    { id: "timeline" as SilenceAux, label: "Tramos" },
+    { id: "lote" as SilenceAux, label: "Lote" },
+    { id: "ajustes" as SilenceAux, label: "Ajustes" },
+  ]);
+
+  function openSilence(id: SilenceAux) {
+    if (!silenceOpen.includes(id)) silenceOpen = [...silenceOpen, id];
+    silenceActive = id;
+  }
+  function closeSilence(id: SilenceAux) {
+    silenceOpen = silenceOpen.filter((x) => x !== id);
+    if (silenceActive === id) silenceActive = silenceOpen.at(-1) ?? null;
   }
 </script>
 
-<div class="relative flex h-full flex-col bg-surface-950 text-surface-100">
+<!-- Shell: fills #app; StatusBar shrink-0 always fully visible -->
+<div
+  class="relative flex h-full min-h-0 min-w-0 w-full max-w-full flex-1 flex-col overflow-hidden bg-surface-950 text-surface-100"
+  style="box-sizing:border-box"
+>
   <TopBar
     {ffmpeg}
     {version}
+    mode={workspaceTab}
+    onMode={(m) => (workspaceTab = m)}
     onOpen={openFile}
     onReanalyze={() => projectStore.reanalyze()}
   />
 
   {#if !projectStore.mediaPath}
-    <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
+    <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <Welcome
         onOpen={openFile}
         onGoSilence={() => {
@@ -287,82 +302,97 @@
       />
     </div>
   {:else}
-    <div class="flex min-h-0 flex-1 overflow-hidden">
-      <ModeNav mode={workspaceTab} onMode={(m) => (workspaceTab = m)} />
-
+    <!--
+      Priority: tools + timeline always fully on screen.
+      Video is compact (scaled), not full native size — frees vertical space.
+    -->
+    <!--
+      Full window width (no empty "others" column).
+      Vertical: compact video → timeline fills free space (tline) → tools → status.
+    -->
+    <main
+      class="flex min-h-0 min-w-0 w-full max-w-full flex-1 flex-col gap-1 overflow-hidden p-1.5 sm:p-2"
+      style="box-sizing:border-box"
+    >
       {#if workspaceTab === "silence"}
-        <!-- 3-zone layout: [ModeNav] | stage (video+actions) | RightDock tabs -->
-        <main
-          class="grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-hidden p-2 md:grid-cols-[minmax(0,1fr)_minmax(300px,360px)]"
-        >
-          <div class="flex min-h-0 min-w-0 flex-col gap-2 overflow-hidden">
-            <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-              <VideoPreview />
-            </div>
-            <div class="shrink-0">
-              <ActionBar
-                onApply={() => exportVideo(false)}
-                onApplyAs={() => exportVideo(true)}
-                onListenResult={listenResult}
-              />
-            </div>
-          </div>
-          <div class="flex min-h-[280px] min-w-0 flex-col overflow-hidden md:min-h-0">
-            <RightDock />
-          </div>
-        </main>
-      {:else if workspaceTab === "clips"}
-        <!-- SHORTS: ModeNav (left) | 9:16 live player | candidate list -->
-        <main
-          class="grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-hidden p-2 md:grid-cols-[minmax(0,1fr)_minmax(280px,400px)]"
-        >
-          <div
-            class="flex min-h-[420px] min-w-0 flex-col overflow-hidden rounded-2xl border border-amber-700/40 bg-gradient-to-b from-surface-900 via-surface-950 to-black"
+        <div class="w-full min-w-0 max-w-full shrink-0">
+          <VideoPreview compact />
+        </div>
+        <div class="min-h-0 w-full min-w-0 max-w-full flex-1 overflow-hidden rounded-xl border border-surface-800">
+          <Timeline />
+        </div>
+        <div class="w-full min-w-0 max-w-full shrink-0">
+          <ActionBar
+            onApply={() => exportVideo(false)}
+            onApplyAs={() => exportVideo(true)}
+            onListenResult={listenResult}
+          />
+        </div>
+        <div class="w-full min-w-0 max-w-full shrink-0">
+          <AuxTabShell
+            tabs={silenceCatalog.filter((t) => silenceOpen.includes(t.id))}
+            openIds={silenceOpen}
+            activeId={silenceActive}
+            catalog={silenceCatalog}
+            expanded={!!silenceActive && silenceOpen.length > 0}
+            onOpen={(id) => openSilence(id as SilenceAux)}
+            onClose={(id) => closeSilence(id as SilenceAux)}
+            onActivate={(id) => (silenceActive = id as SilenceAux)}
           >
-            <div
-              class="flex shrink-0 items-center justify-between gap-2 border-b border-amber-900/40 px-3 py-2"
-            >
-              <span class="text-xs font-semibold text-amber-100/95"
-                >Vista 9:16 · short seleccionado</span
-              >
-              <span class="text-[10px] text-surface-500">lista a la derecha = clasificar</span>
-            </div>
-            <div class="min-h-0 flex-1">
-              <ShortPlayer />
-            </div>
-          </div>
-          <aside class="flex min-h-[300px] min-w-0 flex-col overflow-hidden">
-            <ClippingPanel />
-          </aside>
-        </main>
-      {:else}
-        <!-- VISUAL: preview + visual library panel -->
-        <main
-          class="grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-hidden p-2 md:grid-cols-[minmax(0,1fr)_minmax(300px,380px)]"
+            <RightDock forceTab={silenceActive} embedded />
+          </AuxTabShell>
+        </div>
+      {:else if workspaceTab === "clips"}
+        <div
+          class="mx-auto w-full min-w-0 max-w-full shrink-0 overflow-hidden rounded-xl border border-amber-700/40 bg-surface-950"
+          style="height: clamp(140px, 22vh, 200px); max-width: min(100%, 18rem); box-sizing: border-box"
         >
-          <div class="flex min-h-0 min-w-0 flex-col gap-2 overflow-hidden">
-            <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-              <VideoPreview />
-            </div>
-            <p class="shrink-0 px-1 text-[10px] text-surface-500">
-              Pausar → Colocar imagen (completa / parcial / flotante) → ajustar en la pista → Render
-              plan sobre el MP4 cortado
-            </p>
-          </div>
-          <aside class="flex min-h-[280px] min-w-0 flex-col overflow-hidden">
-            <VisualPanel />
-          </aside>
-        </main>
+          <ShortPlayer />
+        </div>
+        <div class="min-h-0 w-full min-w-0 max-w-full flex-1 overflow-hidden">
+          <AuxTabShell
+            tabs={[
+              { id: "candidatos", label: "Candidatos" },
+              { id: "export", label: "Export" },
+            ].filter((t) => clipsOpen.includes(t.id as ClipsAux))}
+            openIds={clipsOpen}
+            activeId={clipsActive}
+            catalog={[
+              { id: "candidatos", label: "Candidatos" },
+              { id: "export", label: "Export" },
+            ]}
+            expanded={!!clipsActive && clipsOpen.length > 0}
+            onOpen={(id) => {
+              if (!clipsOpen.includes(id as ClipsAux)) clipsOpen = [...clipsOpen, id as ClipsAux];
+              clipsActive = id as ClipsAux;
+            }}
+            onClose={(id) => {
+              clipsOpen = clipsOpen.filter((x) => x !== id);
+              if (clipsActive === id) clipsActive = clipsOpen.at(-1) ?? null;
+            }}
+            onActivate={(id) => (clipsActive = id as ClipsAux)}
+          >
+            <ClippingPanel />
+          </AuxTabShell>
+        </div>
+      {:else}
+        <!-- Visual: 70% video+timeline | 30% tools (layout inside VisualPanel) -->
+        <div class="min-h-0 w-full min-w-0 max-w-full flex-1 overflow-hidden">
+          <VisualPanel />
+        </div>
       {/if}
-    </div>
+    </main>
   {/if}
 
+  <!-- Always fully visible — never inside a clipped overflow region -->
+  <!-- Status always last in flex stack = always visible (never under full-screen overlays) -->
   <StatusBar />
 
+  <!-- Success dialog: does not cover StatusBar (bottom inset) -->
   <ExportSuccess onNewVideo={openFile} />
 
   {#if toast}
-    <div class="absolute bottom-14 left-1/2 z-[60] w-[min(92vw,420px)] -translate-x-1/2">
+    <div class="absolute bottom-14 left-1/2 z-[60] w-[min(92vw,420px)] max-w-full -translate-x-1/2 px-2">
       <div
         class="flex items-start gap-2 rounded-xl border border-cut/50 bg-cut/95 px-4 py-3 text-sm text-white shadow-2xl"
       >
@@ -380,9 +410,10 @@
     </div>
   {/if}
 
-  {#if projectStore.busy}
+  <!-- Busy overlay: only while processing; never blocks StatusBar -->
+  {#if projectStore.busy && !projectStore.showExportSuccess}
     <div
-      class="pointer-events-none absolute inset-0 z-50 flex items-start justify-center bg-surface-950/40 pt-24 backdrop-blur-[1px]"
+      class="pointer-events-none absolute inset-x-0 top-0 bottom-8 z-50 flex items-start justify-center bg-surface-950/40 pt-24 backdrop-blur-[1px]"
     >
       <div
         class="pointer-events-auto w-[min(92vw,360px)] rounded-xl border border-surface-700 bg-surface-900 px-5 py-4 shadow-xl"
@@ -393,32 +424,24 @@
             >{projectStore.statusMessage || "Procesando…"}</span
           >
         </div>
-        <!-- Always show a bar while busy so long jobs (Whisper) feel alive -->
         <div class="mt-3 h-2 overflow-hidden rounded-full bg-surface-800">
           <div
-            class="h-full rounded-full bg-vigil-500 transition-all duration-300
-              {projectStore.progressPercent == null ? 'animate-pulse' : ''}"
-            style="width: {projectStore.progressPercent != null
-              ? Math.min(100, Math.max(3, projectStore.progressPercent))
-              : 35}%"
+            class="h-full rounded-full bg-vigil-500 transition-all duration-300"
+            style="width: {Math.max(8, projectStore.progressPercent ?? 15)}%"
           ></div>
         </div>
-        <div class="mt-1 flex justify-between font-mono text-[10px] text-surface-500">
-          <span class="truncate">
-            {#if projectStore.progressStage}{projectStore.progressStage}{:else}trabajando…{/if}
-          </span>
-          <span>
-            {#if projectStore.progressPercent != null}
-              {Math.round(projectStore.progressPercent)}%
-            {:else}
-              …
-            {/if}
-          </span>
-        </div>
+        {#if projectStore.progressStage}
+          <p class="mt-1 text-[10px] text-surface-500">{projectStore.progressStage}</p>
+        {/if}
         <button
           type="button"
-          class="btn-ghost mt-3 w-full text-xs text-cut hover:bg-cut/10"
-          onclick={cancelBusyJob}
+          class="btn-ghost mt-3 w-full text-xs"
+          onclick={() => {
+            void api.cancelJob().catch(() => {});
+            projectStore.busy = false;
+            projectStore.clearProgress();
+            projectStore.statusMessage = "Cancelado";
+          }}
         >
           Cancelar
         </button>

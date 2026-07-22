@@ -8,11 +8,19 @@
 
   type TabId = "resumen" | "supervision" | "timeline" | "lote" | "ajustes";
 
+  interface Props {
+    /** When embedded under AuxTabShell, hide internal tab chrome */
+    embedded?: boolean;
+    forceTab?: TabId | null;
+  }
+  let { embedded = false, forceTab = null }: Props = $props();
+
   let tab = $state<TabId>("resumen");
 
   const pending = $derived(projectStore.pendingExceptionCount);
   const stats = $derived(projectStore.analysisRun?.stats);
   const segs = $derived(projectStore.segments.length);
+  const activeTab = $derived((forceTab ?? tab) as TabId);
 
   const tabs = $derived.by(() => {
     const list: { id: TabId; label: string; badge?: number; alert?: boolean }[] = [
@@ -31,42 +39,44 @@
   });
 </script>
 
-<aside
-  class="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-xl border border-surface-800 bg-surface-900/60"
-  aria-label="Panel lateral"
+<div
+  class="flex h-full min-h-0 w-full min-w-0 max-w-full flex-col overflow-hidden
+    {embedded ? '' : 'rounded-xl border border-surface-800 bg-surface-900/60'}"
+  style="box-sizing:border-box"
+  aria-label="Herramientas de supervisión"
 >
-  <!-- Sticky tab bar — always reachable -->
-  <div
-    class="flex shrink-0 gap-0.5 overflow-x-auto border-b border-surface-800 bg-surface-950/90 p-1"
-    role="tablist"
-  >
-    {#each tabs as t (t.id)}
-      <button
-        type="button"
-        role="tab"
-        aria-selected={tab === t.id}
-        class="relative shrink-0 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition
-          {tab === t.id
-          ? 'bg-surface-800 text-white'
-          : 'text-surface-400 hover:bg-surface-800/50 hover:text-surface-200'}"
-        onclick={() => (tab = t.id)}
-      >
-        {t.label}
-        {#if t.badge !== undefined && t.badge !== 0}
-          <span
-            class="ml-1 inline-flex min-w-[1.1rem] items-center justify-center rounded-full px-1 text-[9px] font-bold
-              {t.alert ? 'bg-warning/25 text-warning' : 'bg-surface-700 text-surface-300'}"
-          >
-            {t.badge}
-          </span>
-        {/if}
-      </button>
-    {/each}
-  </div>
+  {#if !embedded}
+    <div
+      class="flex shrink-0 gap-0.5 overflow-x-auto border-b border-surface-800 bg-surface-950/90 p-1"
+      role="tablist"
+    >
+      {#each tabs as t (t.id)}
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === t.id}
+          class="relative shrink-0 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition
+            {activeTab === t.id
+            ? 'bg-surface-800 text-white'
+            : 'text-surface-400 hover:bg-surface-800/50 hover:text-surface-200'}"
+          onclick={() => (tab = t.id)}
+        >
+          {t.label}
+          {#if t.badge !== undefined && t.badge !== 0}
+            <span
+              class="ml-1 inline-flex min-w-[1.1rem] items-center justify-center rounded-full px-1 text-[9px] font-bold
+                {t.alert ? 'bg-warning/25 text-warning' : 'bg-surface-700 text-surface-300'}"
+            >
+              {t.badge}
+            </span>
+          {/if}
+        </button>
+      {/each}
+    </div>
+  {/if}
 
-  <!-- Scrollable body -->
-  <div class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-    {#if tab === "resumen"}
+  <div class="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
+    {#if activeTab === "resumen"}
       <div class="space-y-3 p-3">
         <div>
           <div class="text-sm font-semibold text-surface-100">Resumen del corte</div>
@@ -157,11 +167,11 @@
           >
         </div>
       </div>
-    {:else if tab === "supervision"}
+    {:else if activeTab === "supervision"}
       <div class="flex min-h-full flex-col p-2">
         <ExceptionQueue />
       </div>
-    {:else if tab === "timeline"}
+    {:else if activeTab === "timeline"}
       <div class="space-y-2 p-2">
         <div class="px-1">
           <div class="text-sm font-semibold text-surface-100">Timeline diagnóstico</div>
@@ -171,7 +181,7 @@
         </div>
         <Timeline />
       </div>
-    {:else if tab === "lote"}
+    {:else if activeTab === "lote"}
       <div class="p-2">
         <BatchPanel />
       </div>
@@ -182,4 +192,4 @@
       </div>
     {/if}
   </div>
-</aside>
+</div>

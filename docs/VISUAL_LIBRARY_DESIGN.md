@@ -15,11 +15,24 @@ A **local** path:
 ```
 Video → Transcript (source times) → Semantic events
      → Library match → Suggestions → Human accept/reject
-     → VisualPlan (output times) → Preview/render overlays
+     → VisualPlan (composition ops on output timeline)
+     → Live preview + FFmpeg bake (same model)
      → Artifacts + usage history
 ```
 
 Separate from EDL (what survives of the source). VisualPlan answers **what image appears when on the final timeline**.
+
+### Supervision UI (not a full NLE)
+
+Philosophy: **AI proposes, human only reviews exceptions.**
+
+| Surface | Responsibility |
+|---------|----------------|
+| **Timeline** (output clock) | When: video/cuts, transcript, B-roll blocks, waveform — shared playhead/zoom |
+| **Preview** | Spatial: fullscreen vs overlay, drag, resize, fit, protected zones |
+| **Inspector** | Props, warnings, accept / restore AI / remove |
+
+B-roll is **composition** state (`VisualPlacement` + issues + spatial zones), not Segment legacy.
 
 ## Out of scope (MVP)
 

@@ -2,32 +2,43 @@
   import { projectStore } from "$lib/stores/project.svelte";
   import type { FfmpegStatus } from "$lib/types";
   import { formatTime } from "$lib/types";
+  import ModeTabs from "$lib/components/ModeTabs.svelte";
 
   interface Props {
     ffmpeg: FfmpegStatus | null;
     version: string;
     onOpen: () => void;
     onReanalyze: () => void;
+    mode?: "silence" | "clips" | "visual";
+    onMode?: (m: "silence" | "clips" | "visual") => void;
   }
 
-  let { ffmpeg, version, onOpen, onReanalyze }: Props = $props();
+  let {
+    ffmpeg,
+    version,
+    onOpen,
+    onReanalyze,
+    mode = "silence",
+    onMode,
+  }: Props = $props();
 
   const hasProject = $derived(!!projectStore.mediaPath);
 </script>
 
 <header
-  class="flex h-12 shrink-0 items-center gap-2 border-b border-surface-800 bg-surface-950 px-3 sm:gap-3 sm:px-4"
+  class="flex h-12 min-w-0 w-full max-w-full shrink-0 items-center gap-1.5 overflow-x-hidden border-b border-surface-800 bg-surface-950 px-3 sm:gap-2 sm:px-4"
+  style="box-sizing:border-box"
 >
-  <div class="flex shrink-0 items-center gap-2">
+  <div class="flex shrink-0 items-center gap-1.5">
     <div
       class="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-vigil-500 to-emerald-700 text-sm font-bold text-white"
     >
       V
     </div>
-    <div class="hidden sm:block">
+    <div class="hidden md:block">
       <div class="text-sm font-semibold leading-none">VigilCut</div>
       <div
-        class="mt-0.5 max-w-[180px] truncate text-[10px] text-surface-500"
+        class="mt-0.5 max-w-[120px] truncate text-[10px] text-surface-500"
         title={projectStore.fileName ?? ""}
       >
         {projectStore.fileName ?? `v${version}`}
@@ -35,15 +46,19 @@
     </div>
   </div>
 
-  <div class="mx-1 hidden h-6 w-px bg-surface-800 sm:block"></div>
-
-  <button class="btn-primary" onclick={onOpen} disabled={projectStore.busy}>
-    {hasProject ? "Otro video" : "Abrir video"}
+  <button class="btn-primary shrink-0 text-xs sm:text-sm" onclick={onOpen} disabled={projectStore.busy}>
+    {hasProject ? "Otro" : "Abrir"}
   </button>
+
+  {#if hasProject && onMode}
+    <div class="min-w-0 max-w-[min(100%,28rem)] flex-1 sm:flex-none">
+      <ModeTabs {mode} onMode={onMode} />
+    </div>
+  {/if}
 
   {#if hasProject}
     <button
-      class="btn-secondary hidden sm:inline-flex"
+      class="btn-secondary hidden shrink-0 lg:inline-flex"
       onclick={onReanalyze}
       disabled={projectStore.busy}
       title="Vuelve a detectar silencios"
@@ -52,7 +67,7 @@
     </button>
   {/if}
 
-  <div class="flex-1"></div>
+  <div class="min-w-0 flex-1"></div>
 
   {#if projectStore.media}
     <div class="hidden items-center gap-3 text-xs text-surface-400 lg:flex">

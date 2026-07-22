@@ -40,11 +40,70 @@ class ProjectStore {
   isPlaying = $state(false);
   /**
    * original = fuente completa
-   * edited   = previsualiza el resultado (salta tramos CUT)
+   * edited   = resultado (salta tramos CUT) — timeline única de edición
+   * visual   = (legacy) MP4 bakeado; preferir overlays en vivo sobre edited
    */
-  previewMode = $state<"original" | "edited">("edited");
+  previewMode = $state<"original" | "edited" | "visual">("edited");
   keepRanges = $state<[number, number][]>([]);
   estimate = $state<ExportEstimate | null>(null);
+  /** Last baked visual export path (export only; live preview uses overlays). */
+  visualPreviewPath = $state<string | null>(null);
+  visualPreviewDuration = $state<number | null>(null);
+
+  /**
+   * Live VisualPlan state — images composited on the main player (no second video).
+   * Kept in the project store so VideoPreview + timeline share one source of truth.
+   */
+  visualPlacements = $state<
+    {
+      id: string;
+      assetId: string;
+      outputStart: number;
+      outputEnd: number;
+      mode: string;
+      status: string;
+      fit?: string;
+      layout?: { x: number; y: number; w: number; h: number; opacity: number };
+      label?: string | null;
+      imagePath?: string | null;
+      relatedText?: string | null;
+      confidence?: number;
+      reviewStatus?: string;
+      manualOverride?: boolean;
+    }[]
+  >([]);
+  visualProtectedRanges = $state<
+    { id: string; outputStart: number; outputEnd: number; reason: string }[]
+  >([]);
+  visualSpatialZones = $state<
+    {
+      id: string;
+      kind: string;
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      label?: string | null;
+      severity?: string;
+      outputStart?: number | null;
+      outputEnd?: number | null;
+    }[]
+  >([]);
+  visualIssues = $state<
+    {
+      id: string;
+      placementId: string;
+      kind: string;
+      severity: string;
+      message: string;
+      suggestedX?: number | null;
+      suggestedY?: number | null;
+      suggestedW?: number | null;
+    }[]
+  >([]);
+  visualSelectedId = $state<string | null>(null);
+  /** Draw spatial protected zones on preview (off by default — less clutter). */
+  visualShowZones = $state(false);
 
   /** @deprecated use previewMode === 'edited' */
   get skipCutsPreview() {
@@ -52,6 +111,90 @@ class ProjectStore {
   }
   set skipCutsPreview(v: boolean) {
     this.previewMode = v ? "edited" : "original";
+  }
+
+  /** Clock on the single edit timeline (output / cut result). */
+  outputClock(): number {
+    if (this.previewMode === "visual") return this.currentTime;
+    if (this.localKeepRanges().length > 0) {
+      return this.sourceToEdited(this.currentTime);
+    }
+    return this.currentTime;
+  }
+
+  setVisualPlan(
+    placements: {
+      id: string;
+      assetId: string;
+      outputStart: number;
+      outputEnd: number;
+      mode: string;
+      status: string;
+      fit?: string;
+      layout?: { x: number; y: number; w: number; h: number; opacity: number };
+      label?: string | null;
+      imagePath?: string | null;
+      relatedText?: string | null;
+      confidence?: number;
+      reviewStatus?: string;
+      manualOverride?: boolean;
+    }[],
+    protectedRanges?: { id: string; outputStart: number; outputEnd: number; reason: string }[],
+    extras?: {
+      spatialZones?: {
+        id: string;
+        kind: string;
+        x: number;
+        y: number;
+        w: number;
+        h: number;
+        label?: string | null;
+        severity?: string;
+        outputStart?: number | null;
+        outputEnd?: number | null;
+      }[];
+      issues?: {
+        id: string;
+        placementId: string;
+        kind: string;
+        severity: string;
+        message: string;
+        suggestedX?: number | null;
+        suggestedY?: number | null;
+        suggestedW?: number | null;
+      }[];
+    },
+  ) {
+    this.visualPlacements = placements;
+    if (protectedRanges) this.visualProtectedRanges = protectedRanges;
+    if (extras?.spatialZones) this.visualSpatialZones = extras.spatialZones;
+    if (extras?.issues) this.visualIssues = extras.issues;
+  }
+
+  setVisualPreview(path: string, duration?: number | null) {
+    // Export artifact only — keep playing the same edited timeline with live overlays.
+    this.visualPreviewPath = path;
+    this.visualPreviewDuration =
+      duration != null && duration > 0 ? duration : this.keptDuration || this.duration || null;
+    this.previewMode = "edited";
+    this.statusMessage = "Resultado exportado (imágenes quemadas en el MP4)";
+  }
+
+  clearVisualPreview() {
+    this.visualPreviewPath = null;
+    this.visualPreviewDuration = null;
+    if (this.previewMode === "visual") {
+      this.previewMode = "edited";
+    }
+  }
+
+  clearVisualPlan() {
+    this.visualPlacements = [];
+    this.visualProtectedRanges = [];
+    this.visualSpatialZones = [];
+    this.visualIssues = [];
+    this.visualSelectedId = null;
+    this.clearVisualPreview();
   }
 
   busy = $state(false);
@@ -156,6 +299,7 @@ class ProjectStore {
     this.touchedIds = [];
     this.lastExport = null;
     this.showExportSuccess = false;
+    this.clearVisualPreview();
     if (!this.segments.length) {
       this.selectedSegmentId = null;
       return;
@@ -391,19 +535,34 @@ class ProjectStore {
     this.toggleAndAdvance(id);
   }
 
-  recordExportSuccess(path: string, duration: number) {
+  recordExportSuccess(path: string, duration: number, opts?: { silent?: boolean }) {
     this.lastExport = {
       path,
       duration,
       keptDuration: this.keptDuration,
       cutDuration: this.cutDuration,
     };
-    this.showExportSuccess = true;
-    this.statusMessage = "Exportación lista";
+    // Always release processing UI so export never leaves the app "hung"
+    this.busy = false;
+    this.clearProgress();
+    if (!opts?.silent) {
+      this.showExportSuccess = true;
+      this.statusMessage = `Exportación lista · ${path.split(/[/\\]/).pop() ?? path}`;
+    } else {
+      this.statusMessage = "Corte listo (base visual)";
+    }
   }
 
   dismissExportSuccess() {
     this.showExportSuccess = false;
+    this.busy = false;
+    this.clearProgress();
+    if (this.lastExport?.path) {
+      const name = this.lastExport.path.split(/[/\\]/).pop() ?? this.lastExport.path;
+      this.statusMessage = `Listo · último export: ${name}`;
+    } else {
+      this.statusMessage = "Listo";
+    }
   }
 
   resetProject() {
@@ -420,6 +579,14 @@ class ProjectStore {
     this.estimate = null;
     this.lastExport = null;
     this.showExportSuccess = false;
+    this.visualPreviewPath = null;
+    this.visualPreviewDuration = null;
+    this.visualPlacements = [];
+    this.visualProtectedRanges = [];
+    this.visualSpatialZones = [];
+    this.visualIssues = [];
+    this.visualSelectedId = null;
+    this.previewMode = "edited";
     this.analysisRun = null;
     this.error = null;
     this.statusMessage = "Listo";

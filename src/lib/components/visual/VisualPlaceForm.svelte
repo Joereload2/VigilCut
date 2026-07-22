@@ -30,6 +30,22 @@
   }: Props = $props();
 
   const maxT = $derived(Math.max(duration, 1));
+  /** Default placement length when start changes. */
+  const DEFAULT_LEN = 1;
+
+  function setStart(raw: number) {
+    const s = Math.max(0, Math.min(maxT - 0.1, Number.isFinite(raw) ? raw : 0));
+    onChangeStart(s);
+    // Fin always at least Inicio + 1s (clamped to duration)
+    const e = Math.min(maxT, s + DEFAULT_LEN);
+    onChangeEnd(Math.max(s + 0.25, e));
+  }
+
+  function setEnd(raw: number) {
+    const e = Number.isFinite(raw) ? raw : outputStart + DEFAULT_LEN;
+    // Fin must stay after Inicio
+    onChangeEnd(Math.max(outputStart + 0.25, Math.min(maxT, e)));
+  }
 </script>
 
 <section class="space-y-2 rounded-xl border border-sky-800/40 bg-sky-950/20 p-3">
@@ -48,7 +64,8 @@
         step="0.1"
         class="mt-0.5 w-full rounded border border-surface-700 bg-surface-950 px-2 py-1 font-mono text-surface-100"
         value={outputStart.toFixed(1)}
-        onchange={(e) => onChangeStart(parseFloat((e.currentTarget as HTMLInputElement).value) || 0)}
+        oninput={(e) => setStart(parseFloat((e.currentTarget as HTMLInputElement).value))}
+        onchange={(e) => setStart(parseFloat((e.currentTarget as HTMLInputElement).value))}
       />
     </label>
     <label class="block text-surface-400">
@@ -60,7 +77,8 @@
         step="0.1"
         class="mt-0.5 w-full rounded border border-surface-700 bg-surface-950 px-2 py-1 font-mono text-surface-100"
         value={outputEnd.toFixed(1)}
-        onchange={(e) => onChangeEnd(parseFloat((e.currentTarget as HTMLInputElement).value) || 0)}
+        oninput={(e) => setEnd(parseFloat((e.currentTarget as HTMLInputElement).value))}
+        onchange={(e) => setEnd(parseFloat((e.currentTarget as HTMLInputElement).value))}
       />
     </label>
   </div>

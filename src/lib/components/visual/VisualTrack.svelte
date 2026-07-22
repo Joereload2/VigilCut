@@ -31,7 +31,7 @@
 
 <section class="rounded-xl border border-surface-800 bg-surface-950/80 p-2">
   <div class="mb-1 flex justify-between text-[10px] text-surface-500">
-    <span>Pista visual (salida)</span>
+    <span>Timeline visual</span>
     <span class="font-mono">{currentTime.toFixed(1)}s / {dur.toFixed(0)}s</span>
   </div>
   <div class="relative h-10 overflow-hidden rounded-lg bg-surface-900 ring-1 ring-surface-800">
