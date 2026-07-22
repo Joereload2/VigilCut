@@ -6,6 +6,7 @@
   import VisualPlaceForm from "./visual/VisualPlaceForm.svelte";
   import SupervisedTimeline from "./visual/SupervisedTimeline.svelte";
   import HorizontalProps from "./visual/HorizontalProps.svelte";
+  import ImageGenerationPanel from "./visual/ImageGenerationPanel.svelte";
   import type {
     Asset,
     CompositionIssue,
@@ -15,7 +16,7 @@
     VisualPlan,
   } from "./visual/types";
 
-  type AuxId = "props" | "exceptions" | "library" | "texto" | "config" | "colocar";
+  type AuxId = "props" | "exceptions" | "library" | "imagenes" | "texto" | "config" | "colocar";
 
   let busy = $state(false);
   let error = $state<string | null>(null);
@@ -464,6 +465,7 @@
       badge: exceptionCount > 0 ? exceptionCount : undefined,
     },
     { id: "library" as AuxId, label: "Biblioteca" },
+    { id: "imagenes" as AuxId, label: "Imágenes IA" },
     { id: "texto" as AuxId, label: "Texto" },
     { id: "config" as AuxId, label: "Config" },
   ]);
@@ -777,6 +779,21 @@
           onChangeEnd={(v) => (outputEnd = v)}
           onChangeMode={(m) => (displayMode = m)}
           onUsePlayhead={usePlayhead}
+        />
+      {:else if activeAux === "imagenes"}
+        <ImageGenerationPanel
+          bind:projectKey
+          onMessage={(m) => {
+            lastMessage = m;
+            projectStore.statusMessage = m;
+          }}
+          onError={(e) => {
+            error = e;
+          }}
+          onPlanUpdated={(p) => {
+            plan = p as VisualPlan;
+            syncPlanToPlayer(plan);
+          }}
         />
       {:else if activeAux === "library"}
         <div class="flex min-h-0 min-w-0 flex-col gap-2 overflow-y-auto">

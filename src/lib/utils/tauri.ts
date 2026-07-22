@@ -480,10 +480,6 @@ export async function visualApproveCandidate(candidateId: string): Promise<unkno
   return invoke("visual_approve_candidate", { candidateId });
 }
 
-export async function visualRejectCandidate(candidateId: string): Promise<unknown> {
-  return invoke("visual_reject_candidate", { candidateId });
-}
-
 export async function visualProbeImageProvider(): Promise<unknown> {
   return invoke("visual_probe_image_provider");
 }
@@ -494,6 +490,66 @@ export async function visualCostPolicy(): Promise<unknown> {
 
 export async function visualSkipNeed(needId: string): Promise<unknown> {
   return invoke("visual_skip_need", { needId });
+}
+
+export async function visualSupervision(projectKey: string): Promise<unknown> {
+  return invoke("visual_supervision", { projectKey });
+}
+
+export async function visualGenerateNeed(needId: string): Promise<unknown> {
+  return invoke("visual_generate_need", { needId });
+}
+
+export async function visualCancelJob(jobId: string): Promise<unknown> {
+  return invoke("visual_cancel_job", { jobId });
+}
+
+export async function visualRegenerateNeed(needId: string): Promise<unknown> {
+  return invoke("visual_regenerate_need", { needId });
+}
+
+export async function visualApproveAndUse(params: {
+  candidateId: string;
+  mediaPath?: string | null;
+  analysisRunId?: string | null;
+  place?: boolean;
+}): Promise<unknown> {
+  return invoke("visual_approve_and_use", {
+    candidateId: params.candidateId,
+    mediaPath: params.mediaPath ?? null,
+    analysisRunId: params.analysisRunId ?? null,
+    place: params.place ?? true,
+  });
+}
+
+export async function visualRejectCandidate(
+  candidateId: string,
+  reason?: string | null,
+): Promise<unknown> {
+  return invoke("visual_reject_candidate", {
+    candidateId,
+    reason: reason ?? null,
+  });
+}
+
+export async function visualWorkerTick(maxJobs = 3): Promise<unknown> {
+  return invoke("visual_worker_tick", { maxJobs });
+}
+
+export async function visualDailyFeedSettings(): Promise<unknown> {
+  return invoke("visual_daily_feed_settings");
+}
+
+export async function visualDailyFeedSetEnabled(enabled: boolean): Promise<unknown> {
+  return invoke("visual_daily_feed_set_enabled", { enabled });
+}
+
+export async function visualDailyFeedCycle(): Promise<unknown> {
+  return invoke("visual_daily_feed_cycle");
+}
+
+export async function visualDailyWeekSummary(): Promise<unknown> {
+  return invoke("visual_daily_week_summary");
 }
 
 export async function visualImportImage(
