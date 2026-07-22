@@ -61,46 +61,102 @@ pub fn detect_needs_from_semantics(
 pub fn save_needs(needs: &[VisualNeed]) -> AppResult<()> {
     let conn = open_db()?;
     for n in needs {
-        conn.execute(
-            r#"INSERT OR REPLACE INTO visual_needs (
-                id, project_key, media_path, semantic_event_id, concept_id, label, terms,
-                required_contexts, forbidden_contexts, hard_exclusions, desired_aspect,
-                approx_duration_secs, source_start, source_end, output_start, output_end,
-                priority, coverage, matched_asset_id, match_score, match_reasons,
-                generation_job_id, created_at, updated_at
-            ) VALUES (
-                ?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24
-            )"#,
-            params![
-                n.id,
-                n.project_key,
-                n.media_path,
-                n.semantic_event_id,
-                n.concept_id,
-                n.label,
-                json_vec(&n.terms),
-                json_vec(&n.required_contexts),
-                json_vec(&n.forbidden_contexts),
-                json_vec(&n.hard_exclusions),
-                n.desired_aspect,
-                n.approx_duration_secs,
-                n.source_start,
-                n.source_end,
-                n.output_start,
-                n.output_end,
-                n.priority,
-                n.coverage.as_str(),
-                n.matched_asset_id,
-                n.match_score,
-                json_vec(&n.match_reasons),
-                n.generation_job_id,
-                n.created_at,
-                n.updated_at,
-            ],
-        )
-        .map_err(|e| AppError::Message(e.to_string()))?;
+        insert_need_row(&conn, n)?;
     }
     Ok(())
+}
+
+fn insert_need_row(conn: &rusqlite::Connection, n: &VisualNeed) -> AppResult<()> {
+    conn.execute(
+        r#"INSERT OR REPLACE INTO visual_needs (
+            id, project_key, media_path, semantic_event_id, concept_id, label, terms,
+            required_contexts, forbidden_contexts, hard_exclusions, desired_aspect,
+            approx_duration_secs, source_start, source_end, output_start, output_end,
+            priority, coverage, matched_asset_id, match_score, match_reasons,
+            generation_job_id, created_at, updated_at
+        ) VALUES (
+            ?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24
+        )"#,
+        params![
+            n.id,
+            n.project_key,
+            n.media_path,
+            n.semantic_event_id,
+            n.concept_id,
+            n.label,
+            json_vec(&n.terms),
+            json_vec(&n.required_contexts),
+            json_vec(&n.forbidden_contexts),
+            json_vec(&n.hard_exclusions),
+            n.desired_aspect,
+            n.approx_duration_secs,
+            n.source_start,
+            n.source_end,
+            n.output_start,
+            n.output_end,
+            n.priority,
+            n.coverage.as_str(),
+            n.matched_asset_id,
+            n.match_score,
+            json_vec(&n.match_reasons),
+            n.generation_job_id,
+            n.created_at,
+            n.updated_at,
+        ],
+    )
+    .map_err(|e| AppError::Message(e.to_string()))?;
+    Ok(())
+}
+
+/// Merge newly detected needs without destroying in-flight jobs or approved coverage.
+/// - Preserves needs that have active jobs, matched assets, or non-uncovered coverage.
+/// - Adds new labels not already present (by label key).
+/// - Updates timing/priority on still-uncovered needs with same label.
+pub fn merge_detected_needs(
+    project_key: &str,
+    detected: Vec<VisualNeed>,
+) -> AppResult<Vec<VisualNeed>> {
+    let existing = list_needs(project_key).unwrap_or_default();
+    let mut by_label: std::collections::HashMap<String, VisualNeed> = existing
+        .into_iter()
+        .map(|n| (n.label.to_lowercase(), n))
+        .collect();
+
+    for mut d in detected {
+        let key = d.label.to_lowercase();
+        if let Some(prev) = by_label.get(&key) {
+            let protected = prev.generation_job_id.is_some()
+                || prev.matched_asset_id.is_some()
+                || !matches!(
+                    prev.coverage,
+                    NeedCoverage::Uncovered | NeedCoverage::Skipped
+                );
+            if protected {
+                // Keep previous; optionally refresh times if still uncovered only — skip
+                continue;
+            }
+            // Merge timing into new detection but keep id
+            d.id = prev.id.clone();
+            d.created_at = prev.created_at.clone();
+            d.coverage = prev.coverage;
+            d.matched_asset_id = prev.matched_asset_id.clone();
+            d.generation_job_id = prev.generation_job_id.clone();
+            d.match_score = prev.match_score;
+            d.match_reasons = prev.match_reasons.clone();
+            d.updated_at = chrono::Utc::now().to_rfc3339();
+            by_label.insert(key, d);
+        } else {
+            by_label.insert(key, d);
+        }
+    }
+
+    let conn = open_db()?;
+    let out: Vec<VisualNeed> = by_label.into_values().collect();
+    for n in &out {
+        insert_need_row(&conn, n)?;
+    }
+    // Return sorted like list_needs
+    list_needs(project_key)
 }
 
 pub fn list_needs(project_key: &str) -> AppResult<Vec<VisualNeed>> {
@@ -181,4 +237,38 @@ pub fn skip_need(id: &str) -> AppResult<VisualNeed> {
     n.updated_at = chrono::Utc::now().to_rfc3339();
     update_need(&n)?;
     Ok(n)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pipeline::visual::library::set_library_root_override;
+
+    #[test]
+    fn merge_preserves_covered_need() {
+        let _lock = crate::pipeline::visual::library::lock_library_for_test();
+        let dir = std::env::temp_dir().join(format!("vc-merge-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        set_library_root_override(Some(dir.clone()));
+
+        let mut existing = VisualNeed::from_label("pk", "inflacion");
+        existing.coverage = NeedCoverage::Covered;
+        existing.matched_asset_id = Some("asset-1".into());
+        existing.generation_job_id = Some("job-1".into());
+        save_needs(std::slice::from_ref(&existing)).unwrap();
+
+        let mut fresh = VisualNeed::from_label("pk", "inflacion");
+        fresh.priority = 99;
+        let mut other = VisualNeed::from_label("pk", "nuevo_concepto");
+        other.priority = 10;
+
+        let merged = merge_detected_needs("pk", vec![fresh, other]).unwrap();
+        let inf = merged.iter().find(|n| n.label == "inflacion").unwrap();
+        assert_eq!(inf.matched_asset_id.as_deref(), Some("asset-1"));
+        assert_eq!(inf.coverage, NeedCoverage::Covered);
+        assert!(merged.iter().any(|n| n.label == "nuevo_concepto"));
+
+        set_library_root_override(None);
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

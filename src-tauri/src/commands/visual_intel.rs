@@ -24,8 +24,8 @@ use crate::pipeline::visual::generation::worker::{
 };
 use crate::pipeline::visual::intelligent_match::{apply_best_match, match_need, MatchOptions};
 use crate::pipeline::visual::needs::{
-    coverage_for_project, detect_needs_from_semantics, get_need, list_needs, save_needs, skip_need,
-    update_need,
+    coverage_for_project, detect_needs_from_semantics, get_need, list_needs, merge_detected_needs,
+    save_needs, skip_need, update_need,
 };
 use crate::pipeline::visual::save_visual_plan;
 
@@ -119,19 +119,41 @@ pub fn visual_detect_needs(
     })?;
     let semantics = extract_semantic_events(tr, &project_key, &time_map);
     drop(g);
-    let needs = detect_needs_from_semantics(
+    let detected = detect_needs_from_semantics(
         &project_key,
         Some(&media_path),
         &semantics,
         max_needs.unwrap_or(24),
     );
-    save_needs(&needs)?;
+    // Non-destructive: keep needs with jobs/coverage in progress
+    let needs = merge_detected_needs(&project_key, detected)?;
     let summary = CoverageSummary::from_needs(&needs);
     Ok(serde_json::json!({
         "projectKey": project_key,
         "needs": needs,
         "coverage": summary,
         "semanticCount": semantics.len(),
+    }))
+}
+
+/// Search library only (no generation) for a need.
+#[tauri::command]
+pub fn visual_search_library_for_need(need_id: String) -> AppResult<serde_json::Value> {
+    let mut need = get_need(&need_id)?;
+    let ranked = match_need(&need, &MatchOptions::default());
+    let matched = apply_best_match(&mut need, &MatchOptions::default());
+    if matched {
+        update_need(&need)?;
+    }
+    Ok(serde_json::json!({
+        "matched": matched,
+        "need": need,
+        "candidates": ranked,
+        "message": if matched {
+            "Se encontró una imagen en la biblioteca"
+        } else {
+            "No hay imagen adecuada en la biblioteca"
+        },
     }))
 }
 
