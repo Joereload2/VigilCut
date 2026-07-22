@@ -29,6 +29,11 @@ cargo test --test smoke_clipping -- --nocapture
 if ($LASTEXITCODE -ne 0) { Pop-Location; exit $LASTEXITCODE }
 
 Write-Host ""
+Write-Host "==> SMOKE visual (library + FFmpeg overlay)"
+cargo test --test smoke_visual -- --nocapture
+if ($LASTEXITCODE -ne 0) { Pop-Location; exit $LASTEXITCODE }
+
+Write-Host ""
 Write-Host "==> E2E factory (export + artifacts + batch)"
 cargo test --test e2e_factory -- --nocapture
 if ($LASTEXITCODE -ne 0) { Pop-Location; exit $LASTEXITCODE }

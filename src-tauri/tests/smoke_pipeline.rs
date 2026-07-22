@@ -23,6 +23,7 @@ async fn smoke_analyze_synthetic_video_produces_edl_and_segments() {
         padding: 0.05,
         threshold: 0.5,
         prefer_silero: false, // force ffmpeg path — deterministic in CI without ONNX quirks
+        prefer_whisper: false,
     };
 
     let run = run_silence_analysis(&media, &policy)
@@ -101,6 +102,7 @@ async fn smoke_policy_auto_cut_removes_mid_silence() {
         padding: 0.02,
         threshold: 0.5,
         prefer_silero: false,
+        prefer_whisper: false,
     };
     let run = run_silence_analysis(&media, &aggressive)
         .await

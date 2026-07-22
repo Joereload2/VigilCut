@@ -26,6 +26,7 @@ async fn e2e_export_mp4_and_meta_folder_layout() {
         padding: 0.05,
         threshold: 0.5,
         prefer_silero: false,
+        prefer_whisper: false,
     };
 
     let mut run = run_silence_analysis(&media, &policy)
