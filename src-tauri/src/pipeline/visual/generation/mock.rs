@@ -1,8 +1,6 @@
 //! Offline mock image generator — solid placeholder PNG for tests and no-network mode.
 
-use super::provider::{
-    GenerationRequest, GenerationResult, ProviderError, ProviderProbe,
-};
+use super::provider::{GenerationRequest, GenerationResult, ProviderError, ProviderProbe};
 
 #[derive(Debug, Clone, Default)]
 pub struct MockImageProvider;
@@ -20,8 +18,8 @@ impl MockImageProvider {
         &self,
         req: &GenerationRequest,
     ) -> Result<GenerationResult, ProviderError> {
-        let w = req.width.max(64).min(2048);
-        let h = req.height.max(64).min(2048);
+        let w = req.width.clamp(64, 2048);
+        let h = req.height.clamp(64, 2048);
         // Deterministic color from prompt hash
         let mut hash: u32 = 2166136261;
         for b in req.prompt.bytes() {
@@ -53,9 +51,7 @@ impl MockImageProvider {
         image::DynamicImage::ImageRgb8(img)
             .save(&path)
             .map_err(|e| ProviderError::Other(e.to_string()))?;
-        let bytes = std::fs::metadata(&path)
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
 
         Ok(GenerationResult {
             local_path: path,
@@ -89,6 +85,7 @@ mod tests {
     use crate::pipeline::visual::library::set_library_root_override;
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn mock_writes_png() {
         let _lock = crate::pipeline::visual::library::lock_library_for_test();
         let dir = std::env::temp_dir().join(format!("vc-mock-{}", uuid::Uuid::new_v4()));

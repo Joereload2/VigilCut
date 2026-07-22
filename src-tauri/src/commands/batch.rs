@@ -6,9 +6,9 @@ use crate::error::{AppError, AppResult};
 use crate::models::batch::{BatchJob, BatchStatus};
 use crate::models::edl::PolicyConfig;
 use crate::models::exception_mode::ExceptionHandlingMode;
+use crate::models::segment::SilenceDetectionOptions;
 use crate::pipeline::batch_worker::{list_videos_in_dir, run_batch_job};
 use crate::pipeline::engine::policy_from_silence_options;
-use crate::models::segment::SilenceDetectionOptions;
 use crate::state::AppState;
 
 fn update_job(app: &AppHandle, job: &BatchJob) {
@@ -187,7 +187,7 @@ pub fn list_batch_jobs(state: State<'_, AppState>) -> AppResult<Vec<BatchJob>> {
         .lock()
         .map_err(|e| AppError::Message(e.to_string()))?;
     let mut jobs: Vec<_> = map.values().cloned().collect();
-    jobs.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    jobs.sort_by_key(|a| std::cmp::Reverse(a.created_at));
     Ok(jobs)
 }
 
@@ -205,9 +205,7 @@ pub fn queue_inbox_batch(
     let inbox = PathBuf::from(&inbox_dir);
     let videos = list_videos_in_dir(&inbox)?;
     if videos.is_empty() {
-        return Err(AppError::Invalid(format!(
-            "No videos found in {inbox_dir}"
-        )));
+        return Err(AppError::Invalid(format!("No videos found in {inbox_dir}")));
     }
     let out = output_dir.unwrap_or_else(|| {
         inbox

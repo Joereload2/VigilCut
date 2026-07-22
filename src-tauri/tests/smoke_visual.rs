@@ -9,14 +9,12 @@ mod common;
 use std::path::Path;
 
 use image::{Rgb, RgbImage};
-use vigilcut_lib::models::visual::{
-    PlacementMode, VisualPlacement, VisualPlan,
-};
+use vigilcut_lib::models::visual::LicenseStatus;
+use vigilcut_lib::models::visual::{PlacementMode, VisualPlacement, VisualPlan};
 use vigilcut_lib::pipeline::visual::library::{
     get_asset_by_id, import_image, list_usage, set_library_root_override,
 };
 use vigilcut_lib::pipeline::visual::render::render_visual_plan;
-use vigilcut_lib::models::visual::LicenseStatus;
 
 fn write_png(path: &Path, color: [u8; 3]) {
     if let Some(p) = path.parent() {
@@ -49,7 +47,11 @@ async fn smoke_visual_overlay_render_atomic_and_manifest() {
     )
     .expect("import image");
     assert!(Path::new(&asset.managed_path).is_file());
-    assert_eq!(std::fs::metadata(&png).unwrap().len(), orig_meta, "original must stay intact");
+    assert_eq!(
+        std::fs::metadata(&png).unwrap().len(),
+        orig_meta,
+        "original must stay intact"
+    );
 
     let mut plan = VisualPlan::new("smoke-run", cut.to_string_lossy(), "fp-smoke");
     plan.placements.push(VisualPlacement::manual(

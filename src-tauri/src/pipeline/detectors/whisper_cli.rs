@@ -152,7 +152,13 @@ fn tail_err(bytes: &[u8], max: usize) -> String {
     if t.len() <= max {
         t.to_string()
     } else {
-        t.chars().rev().take(max).collect::<String>().chars().rev().collect()
+        t.chars()
+            .rev()
+            .take(max)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect()
     }
 }
 
@@ -418,7 +424,11 @@ pub async fn try_generate_srt_with_progress(
 }
 
 /// Parse tqdm percent or segment timestamps from whisper verbose output.
-fn parse_whisper_progress_line(line: &str, duration_est: f64, last_pct: f64) -> Option<(String, f64)> {
+fn parse_whisper_progress_line(
+    line: &str,
+    duration_est: f64,
+    last_pct: f64,
+) -> Option<(String, f64)> {
     // Download / tqdm: " 45%|████..."
     if let Some(idx) = line.find('%') {
         let head = &line[..idx];
@@ -435,7 +445,10 @@ fn parse_whisper_progress_line(line: &str, duration_est: f64, last_pct: f64) -> 
             if (0.0..=100.0).contains(&p) {
                 // Map download 0-100 into UI 22-35
                 let mapped = 22.0 + (p / 100.0) * 13.0;
-                return Some((format!("Descargando / cargando modelo… {p:.0}%"), mapped.max(last_pct)));
+                return Some((
+                    format!("Descargando / cargando modelo… {p:.0}%"),
+                    mapped.max(last_pct),
+                ));
             }
         }
     }

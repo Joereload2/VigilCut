@@ -45,9 +45,7 @@ pub fn validate_export_request(input: &Path, output: &Path) -> AppResult<()> {
         ))
     })?;
     if meta.len() == 0 {
-        return Err(AppError::Invalid(
-            "El archivo de entrada está vacío".into(),
-        ));
+        return Err(AppError::Invalid("El archivo de entrada está vacío".into()));
     }
     if paths_same_file(input, output) {
         return Err(AppError::Invalid(
@@ -83,11 +81,7 @@ pub fn unique_output_path(desired: &Path) -> PathBuf {
             return candidate;
         }
     }
-    parent.join(format!(
-        "{stem}-{}.{}",
-        uuid::Uuid::new_v4().simple(),
-        ext
-    ))
+    parent.join(format!("{stem}-{}.{}", uuid::Uuid::new_v4().simple(), ext))
 }
 
 /// Temp path next to final output (same volume → atomic rename on Windows/Unix).

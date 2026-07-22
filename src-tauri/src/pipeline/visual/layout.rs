@@ -166,11 +166,7 @@ impl PlacementGeom {
                 width: 100.0,
                 height: 100.0,
                 opacity: self.opacity,
-                object_fit: if self.fit_contain {
-                    "contain"
-                } else {
-                    "cover"
-                },
+                object_fit: if self.fit_contain { "contain" } else { "cover" },
                 fullframe: true,
             };
         }
@@ -184,11 +180,7 @@ impl PlacementGeom {
             width,
             height,
             opacity: self.opacity,
-            object_fit: if self.fit_contain {
-                "contain"
-            } else {
-                "cover"
-            },
+            object_fit: if self.fit_contain { "contain" } else { "cover" },
             fullframe: false,
         }
     }
@@ -325,7 +317,15 @@ mod tests {
         );
         let g = PlacementGeom::from_placement(&pl);
         let r = g.box_px(1280, 720);
-        assert_eq!(r, RectPx { x: 0, y: 0, w: 1280, h: 720 });
+        assert_eq!(
+            r,
+            RectPx {
+                x: 0,
+                y: 0,
+                w: 1280,
+                h: 720
+            }
+        );
         let css = g.css_top_left_percent();
         assert!(css.fullframe);
         assert!((css.width - 100.0).abs() < 1e-6);

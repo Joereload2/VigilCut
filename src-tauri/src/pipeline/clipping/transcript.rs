@@ -47,10 +47,7 @@ pub fn cues_from_speech_events(events: &[Event]) -> Vec<TranscriptCue> {
         .iter()
         .filter(|e| e.event_type == TYPE_AUDIO_SPEECH)
         .map(|e| {
-            let text = format!(
-                "[habla {:.1}s–{:.1}s]",
-                e.span.start, e.span.end
-            );
+            let text = format!("[habla {:.1}s–{:.1}s]", e.span.start, e.span.end);
             TranscriptCue {
                 id: e.id.clone(),
                 span: e.span,
@@ -95,7 +92,11 @@ pub fn cues_to_semantic_units(
 }
 
 fn make_unit(start: f64, end: f64, texts: &[String], ids: &[String]) -> SemanticUnit {
-    let text = texts.join(" ").split_whitespace().collect::<Vec<_>>().join(" ");
+    let text = texts
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     let energy = (text.chars().filter(|c| c.is_alphanumeric()).count() as f64
         / text.len().max(1) as f64)
         .clamp(0.2, 1.0);

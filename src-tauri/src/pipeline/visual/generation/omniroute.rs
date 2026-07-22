@@ -5,9 +5,7 @@ use std::time::Duration;
 use base64::Engine;
 use serde::Deserialize;
 
-use super::provider::{
-    GenerationRequest, GenerationResult, ProviderError, ProviderProbe,
-};
+use super::provider::{GenerationRequest, GenerationResult, ProviderError, ProviderProbe};
 
 const MAX_DOWNLOAD_BYTES: u64 = 25 * 1024 * 1024;
 const DEFAULT_TIMEOUT_SECS: u64 = 90;
@@ -28,7 +26,9 @@ impl OmniRouteImageProvider {
             .unwrap_or_else(|_| "http://localhost:20128/v1".into());
         let model = std::env::var("OMNIROUTE_IMAGE_MODEL")
             .unwrap_or_else(|_| "black-forest-labs/FLUX.1-schnell".into());
-        let api_key = std::env::var("OMNIROUTE_API_KEY").ok().filter(|s| !s.is_empty());
+        let api_key = std::env::var("OMNIROUTE_API_KEY")
+            .ok()
+            .filter(|s| !s.is_empty());
         let free_tier = std::env::var("OMNIROUTE_FREE_TIER")
             .map(|s| s != "0" && !s.eq_ignore_ascii_case("false"))
             .unwrap_or(true);
@@ -67,10 +67,7 @@ impl OmniRouteImageProvider {
             }
         }
 
-        let model = req
-            .model
-            .clone()
-            .unwrap_or_else(|| self.model.clone());
+        let model = req.model.clone().unwrap_or_else(|| self.model.clone());
         let url = format!("{}/images/generations", self.base_url);
         let body = serde_json::json!({
             "model": model,
@@ -117,16 +114,13 @@ impl OmniRouteImageProvider {
             builder = builder.bearer_auth(k);
         }
 
-        let resp = builder
-            .send()
-            .await
-            .map_err(|e| {
-                if e.is_timeout() {
-                    ProviderError::Timeout
-                } else {
-                    ProviderError::Unavailable(e.to_string())
-                }
-            })?;
+        let resp = builder.send().await.map_err(|e| {
+            if e.is_timeout() {
+                ProviderError::Timeout
+            } else {
+                ProviderError::Unavailable(e.to_string())
+            }
+        })?;
 
         let status = resp.status().as_u16();
         if status == 429 {
@@ -192,7 +186,9 @@ impl OmniRouteImageProvider {
     async fn download_url(&self, url: &str) -> Result<Vec<u8>, ProviderError> {
         // Only http(s)
         if !(url.starts_with("https://") || url.starts_with("http://")) {
-            return Err(ProviderError::InvalidResponse("url scheme not allowed".into()));
+            return Err(ProviderError::InvalidResponse(
+                "url scheme not allowed".into(),
+            ));
         }
         let client = reqwest::Client::builder()
             .timeout(self.timeout)

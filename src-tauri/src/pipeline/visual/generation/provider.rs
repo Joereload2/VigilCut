@@ -94,7 +94,10 @@ impl ImageProvider {
         }
     }
 
-    pub async fn generate(&self, req: &GenerationRequest) -> Result<GenerationResult, ProviderError> {
+    pub async fn generate(
+        &self,
+        req: &GenerationRequest,
+    ) -> Result<GenerationResult, ProviderError> {
         match self {
             Self::Mock(p) => p.generate(req).await,
             Self::OmniRoute(p) => p.generate(req).await,
@@ -117,7 +120,7 @@ pub fn select_provider(_allow_paid: bool) -> ImageProvider {
     let base = std::env::var("OMNIROUTE_BASE_URL").ok();
     let has_omni = base.as_ref().map(|b| !b.is_empty()).unwrap_or(false);
     if force_mock || !has_omni {
-        return ImageProvider::Mock(super::mock::MockImageProvider::default());
+        return ImageProvider::Mock(super::mock::MockImageProvider);
     }
     ImageProvider::OmniRoute(super::omniroute::OmniRouteImageProvider::from_env())
 }

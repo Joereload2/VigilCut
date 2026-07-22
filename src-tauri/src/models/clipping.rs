@@ -13,11 +13,11 @@ use super::event::Span;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum DurationProfile {
-    Micro,     // 10–20s
+    Micro, // 10–20s
     #[default]
-    Short,     // 20–40s
-    Standard,  // 40–60s
-    Extended,  // 60–90s
+    Short, // 20–40s
+    Standard, // 40–60s
+    Extended, // 60–90s
     Custom,
 }
 
@@ -245,14 +245,9 @@ impl ClipCandidate {
         let start = start.max(0.0);
         let end = end.max(start + 0.1);
         if (start - self.start).abs() > 0.01 || (end - self.end).abs() > 0.01 {
-            if !matches!(
-                self.status,
-                ClipReviewStatus::Approved | ClipReviewStatus::Rejected
-            ) {
-                self.status = ClipReviewStatus::Modified;
-            } else {
-                self.status = ClipReviewStatus::Modified;
-            }
+            // Always mark as modified when the human moves the span
+            // (including after prior approve/reject — span was still edited).
+            self.status = ClipReviewStatus::Modified;
         }
         self.start = start;
         self.end = end;

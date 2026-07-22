@@ -10,9 +10,7 @@ use crate::pipeline::safe_paths::{
     cleanup_temp, finalize_atomic, temp_export_path, unique_output_path, validate_export_output,
     validate_export_request,
 };
-use crate::pipeline::visual::layout::{
-    geom_json, PlacementGeom, DEFAULT_FRAME_H, DEFAULT_FRAME_W,
-};
+use crate::pipeline::visual::layout::{geom_json, PlacementGeom, DEFAULT_FRAME_H, DEFAULT_FRAME_W};
 use crate::pipeline::visual::library::{list_assets, record_usage};
 
 /// Overlay placements onto an already-cut longform video (output timeline).

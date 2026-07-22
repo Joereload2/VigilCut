@@ -23,15 +23,15 @@ use crate::models::edl::Edl;
 use crate::models::event::Span;
 use crate::models::transcript::{Transcript, TranscriptStatus};
 use crate::models::visual::{
-    edl_fingerprint, PlacementLayout, PlacementMode, ProtectedRange, ReviewStatus, LicenseStatus,
-    SuggestionStatus, VisualPlan, VisualPlacement, VisualSuggestion,
-};
-use crate::pipeline::visual::compose::{
-    evaluate_composition, restore_suggested, snap_placement_edges,
+    edl_fingerprint, LicenseStatus, PlacementLayout, PlacementMode, ProtectedRange, ReviewStatus,
+    SuggestionStatus, VisualPlacement, VisualPlan, VisualSuggestion,
 };
 use crate::pipeline::semantic::extract_semantic_events;
 use crate::pipeline::time_map::TimeMap;
 use crate::pipeline::transcript_engine::write_transcript_artifacts;
+use crate::pipeline::visual::compose::{
+    evaluate_composition, restore_suggested, snap_placement_edges,
+};
 use crate::pipeline::visual::library::{get_asset_by_id, import_image, list_active_assets};
 use crate::pipeline::visual::match_rank::{rank_suggestions, MatchConfig};
 use uuid::Uuid;
@@ -376,13 +376,7 @@ pub fn create_manual_placement(
     let asset = if let Some(id) = asset_id.filter(|s| !s.is_empty()) {
         get_asset_by_id(id)?
     } else if let Some(p) = image_path {
-        import_image(
-            p,
-            label.clone(),
-            vec![],
-            vec![],
-            LicenseStatus::Owned,
-        )?
+        import_image(p, label.clone(), vec![], vec![], LicenseStatus::Owned)?
     } else {
         return Err(AppError::Invalid(
             "Indica asset_id o image_path para el placement manual.".into(),
@@ -755,9 +749,8 @@ pub fn invalidate_if_edl_changed(state: &VisualState, edl: &Edl) -> AppResult<bo
         return Ok(false);
     }
     if let Some(plan) = g.plan.as_mut() {
-        plan.warnings.push(
-            "EDL cambió: VisualPlan invalidado. Vuelve a generar sugerencias.".into(),
-        );
+        plan.warnings
+            .push("EDL cambió: VisualPlan invalidado. Vuelve a generar sugerencias.".into());
         plan.placements.clear();
         plan.version += 1;
         plan.updated_at = chrono::Utc::now().to_rfc3339();
@@ -784,9 +777,8 @@ pub fn export_session_transcript(
     stem: &str,
 ) -> AppResult<Vec<(String, String)>> {
     let g = state.lock().map_err(|e| AppError::Message(e.to_string()))?;
-    let tr = g
-        .transcript
-        .as_ref()
-        .ok_or_else(|| AppError::Invalid("No hay transcripción en sesión. Genera sugerencias primero.".into()))?;
+    let tr = g.transcript.as_ref().ok_or_else(|| {
+        AppError::Invalid("No hay transcripción en sesión. Genera sugerencias primero.".into())
+    })?;
     write_transcript_artifacts(tr, out_dir, stem)
 }

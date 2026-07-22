@@ -37,11 +37,7 @@ impl TimeMap {
     pub fn identity(duration: f64) -> Self {
         let d = duration.max(0.0);
         Self {
-            ranges: if d > 0.0 {
-                vec![(0.0, d, 0.0)]
-            } else {
-                vec![]
-            },
+            ranges: if d > 0.0 { vec![(0.0, d, 0.0)] } else { vec![] },
             source_duration: d,
             output_duration: d,
         }
@@ -97,13 +93,11 @@ impl TimeMap {
 
     /// Primary output span covering the longest surviving part of the source span.
     pub fn primary_output_span(&self, span: Span) -> Option<Span> {
-        self.map_source_span(span)
-            .into_iter()
-            .max_by(|x, y| {
-                x.duration()
-                    .partial_cmp(&y.duration())
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
+        self.map_source_span(span).into_iter().max_by(|x, y| {
+            x.duration()
+                .partial_cmp(&y.duration())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
     }
 
     pub fn is_fully_removed(&self, span: Span) -> bool {

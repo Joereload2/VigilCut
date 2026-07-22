@@ -126,7 +126,15 @@ pub fn extract_semantic_events(
 
 fn tokenize(text: &str) -> Vec<String> {
     text.to_lowercase()
-        .split(|c: char| !c.is_alphanumeric() && c != 'á' && c != 'é' && c != 'í' && c != 'ó' && c != 'ú' && c != 'ñ')
+        .split(|c: char| {
+            !c.is_alphanumeric()
+                && c != 'á'
+                && c != 'é'
+                && c != 'í'
+                && c != 'ó'
+                && c != 'ú'
+                && c != 'ñ'
+        })
         .map(|s| s.trim())
         .filter(|s| s.chars().count() >= 3)
         .filter(|s| !STOP_ES.contains(s))
@@ -138,9 +146,15 @@ const CONCEPT_SEED: &[(&str, &[&str])] = &[
     ("inflacion", &["inflación", "inflacion", "precios", "ipc"]),
     ("alimentos", &["alimentos", "comida", "mercado", "canasta"]),
     ("economia", &["economía", "economia", "mercados", "pib"]),
-    ("tecnologia", &["tecnología", "tecnologia", "software", "app", "ia"]),
+    (
+        "tecnologia",
+        &["tecnología", "tecnologia", "software", "app", "ia"],
+    ),
     ("salud", &["salud", "médico", "medico", "hospital"]),
-    ("educacion", &["educación", "educacion", "escuela", "universidad"]),
+    (
+        "educacion",
+        &["educación", "educacion", "escuela", "universidad"],
+    ),
     ("trabajo", &["trabajo", "empleo", "oficina", "empresa"]),
     ("viaje", &["viaje", "turismo", "aeropuerto", "hotel"]),
 ];
@@ -161,6 +175,9 @@ mod tests {
         ));
         let map = TimeMap::identity(60.0);
         let ev = extract_semantic_events(&tr, "run1", &map);
-        assert!(ev.iter().any(|e| e.label.contains("inflacion") || e.terms.iter().any(|t| t.contains("inflación") || t.contains("alimentos"))));
+        assert!(ev.iter().any(|e| e.label.contains("inflacion")
+            || e.terms
+                .iter()
+                .any(|t| t.contains("inflación") || t.contains("alimentos"))));
     }
 }

@@ -52,17 +52,9 @@ async fn e2e_clipping_finds_and_exports_vertical() {
     }
 
     let out_dir = ws.join("out");
-    let results = export_approved_clips(
-        &media,
-        &mut run.candidates,
-        &[],
-        &out_dir,
-        None,
-        320,
-        240,
-    )
-    .await
-    .expect("export clips");
+    let results = export_approved_clips(&media, &mut run.candidates, &[], &out_dir, None, 320, 240)
+        .await
+        .expect("export clips");
 
     assert!(
         results.iter().any(|r| r.ok),

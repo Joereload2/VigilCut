@@ -4,9 +4,7 @@ use rusqlite::params;
 
 use crate::error::{AppError, AppResult};
 use crate::models::visual::SemanticEvent;
-use crate::models::visual_intel::{
-    CoverageSummary, NeedCoverage, VisualNeed,
-};
+use crate::models::visual_intel::{CoverageSummary, NeedCoverage, VisualNeed};
 use crate::pipeline::visual::library::open_db;
 
 fn json_vec(v: &[String]) -> String {

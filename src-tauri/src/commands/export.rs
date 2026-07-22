@@ -61,15 +61,17 @@ pub async fn export_video(
     let audio = audio_options.unwrap_or_default();
     let has_audio = has_audio.unwrap_or(true);
 
-    let explicit = keep_ranges.map(|ranges| {
-        ranges
-            .into_iter()
-            .map(|r| (r[0], r[1]))
-            .collect::<Vec<_>>()
-    });
+    let explicit =
+        keep_ranges.map(|ranges| ranges.into_iter().map(|r| (r[0], r[1])).collect::<Vec<_>>());
 
     jobs.check()?;
-    progress::emit(&app, "export", "ranges", "Resolviendo tramos a conservar…", 15.0);
+    progress::emit(
+        &app,
+        "export",
+        "ranges",
+        "Resolviendo tramos a conservar…",
+        15.0,
+    );
     let keep = resolve_keep_ranges(None, segments.as_deref(), explicit)?;
 
     jobs.check()?;
@@ -138,11 +140,7 @@ pub fn estimate_export(
     };
     Ok(ExportEstimate {
         estimated_duration: plan.estimated_duration,
-        keep_ranges: plan
-            .keep_ranges
-            .into_iter()
-            .map(|(s, e)| [s, e])
-            .collect(),
+        keep_ranges: plan.keep_ranges.into_iter().map(|(s, e)| [s, e]).collect(),
         cut_duration: (source_duration - plan.estimated_duration).max(0.0),
         source_duration,
     })

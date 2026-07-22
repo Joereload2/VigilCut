@@ -22,9 +22,7 @@ static LIBRARY_TEST_LOCK: Mutex<()> = Mutex::new(());
 /// Hold during tests that touch library root / SQLite (prevents parallel clobber).
 #[cfg(test)]
 pub fn lock_library_for_test() -> std::sync::MutexGuard<'static, ()> {
-    LIBRARY_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
+    LIBRARY_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// Override library root (tests). Pass `None` to clear.
@@ -160,7 +158,8 @@ pub fn import_image(
         return get_asset(&conn, &existing);
     }
 
-    let img = image::open(source).map_err(|e| AppError::Invalid(format!("Imagen inválida: {e}")))?;
+    let img =
+        image::open(source).map_err(|e| AppError::Invalid(format!("Imagen inválida: {e}")))?;
     let (w, h) = (img.width(), img.height());
     let orientation = if w >= h { "landscape" } else { "portrait" };
     let file_size = std::fs::metadata(source)?.len();
@@ -467,9 +466,7 @@ pub fn list_assets(query: Option<&str>, limit: usize) -> AppResult<Vec<MediaAsse
         }
     } else {
         let mut stmt = conn
-            .prepare(&format!(
-                "{SELECT_ALL} ORDER BY updated_at DESC LIMIT ?1"
-            ))
+            .prepare(&format!("{SELECT_ALL} ORDER BY updated_at DESC LIMIT ?1"))
             .map_err(|e| AppError::Message(e.to_string()))?;
         let rows = stmt
             .query_map(params![limit], row_to_asset)
@@ -625,8 +622,13 @@ pub fn import_folder_tracked(
     let mut result = ImportFolderResult::default();
     visit_images(dir, recursive, &mut |path| {
         result.scanned += 1;
-        match import_image_detailed(path, None, tags.clone(), concepts.clone(), LicenseStatus::Owned)
-        {
+        match import_image_detailed(
+            path,
+            None,
+            tags.clone(),
+            concepts.clone(),
+            LicenseStatus::Owned,
+        ) {
             Ok(ImportOutcome::New(a)) => {
                 result.imported += 1;
                 result.asset_ids.push(a.id);
@@ -855,14 +857,9 @@ mod tests {
             )
             .unwrap();
             assert!(matches!(a1, ImportOutcome::New(_)));
-            let a2 = import_image_detailed(
-                &p,
-                Some("two".into()),
-                vec![],
-                vec![],
-                LicenseStatus::Owned,
-            )
-            .unwrap();
+            let a2 =
+                import_image_detailed(&p, Some("two".into()), vec![], vec![], LicenseStatus::Owned)
+                    .unwrap();
             assert!(matches!(a2, ImportOutcome::Duplicate(_)));
             let list = list_assets(None, 50).unwrap();
             assert_eq!(list.len(), 1);
@@ -878,13 +875,8 @@ mod tests {
             std::fs::create_dir_all(&src).unwrap();
             write_png(&src.join("x.png"), [1, 2, 3]);
             write_png(&src.join("y.png"), [4, 5, 6]);
-            let r = import_folder_tracked(
-                &src,
-                vec!["eco".into()],
-                vec!["economia".into()],
-                false,
-            )
-            .unwrap();
+            let r = import_folder_tracked(&src, vec!["eco".into()], vec!["economia".into()], false)
+                .unwrap();
             assert_eq!(r.scanned, 2);
             assert_eq!(r.imported, 2);
             assert_eq!(r.failed, 0);
@@ -902,7 +894,8 @@ mod tests {
         with_temp_library(|| {
             let src = library_root().unwrap().join("z.png");
             write_png(&src, [9, 9, 9]);
-            let a = import_image(&src, None, vec![], vec!["t".into()], LicenseStatus::Owned).unwrap();
+            let a =
+                import_image(&src, None, vec![], vec!["t".into()], LicenseStatus::Owned).unwrap();
             std::fs::remove_file(&a.managed_path).unwrap();
             let n = scan_missing_assets().unwrap();
             assert_eq!(n, 1);

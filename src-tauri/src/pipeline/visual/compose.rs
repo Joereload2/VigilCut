@@ -75,7 +75,13 @@ pub fn evaluate_composition(plan: &mut VisualPlan) {
                     &pl.id,
                     "overlap",
                     "warn",
-                    format!("Solapa con otro B-roll ({})", other.label.as_deref().unwrap_or(&other.id[..8.min(other.id.len())])),
+                    format!(
+                        "Solapa con otro B-roll ({})",
+                        other
+                            .label
+                            .as_deref()
+                            .unwrap_or(&other.id[..8.min(other.id.len())])
+                    ),
                     None,
                 ));
             }
@@ -90,7 +96,10 @@ pub fn evaluate_composition(plan: &mut VisualPlan) {
                     continue;
                 }
                 let avoid = pl.avoid_zones.iter().any(|k| k == &z.kind)
-                    || matches!(z.kind.as_str(), "face" | "subtitle" | "text" | "logo" | "product");
+                    || matches!(
+                        z.kind.as_str(),
+                        "face" | "subtitle" | "text" | "logo" | "product"
+                    );
                 if !avoid {
                     continue;
                 }
@@ -163,9 +172,7 @@ pub fn evaluate_composition(plan: &mut VisualPlan) {
         let has_warn = issues
             .iter()
             .any(|i| i.placement_id == pl.id && i.severity == "warn");
-        if has_error {
-            pl.review_status = ReviewStatus::Conflict;
-        } else if has_warn && pl.review_status != ReviewStatus::Approved {
+        if has_error || (has_warn && pl.review_status != ReviewStatus::Approved) {
             pl.review_status = ReviewStatus::Conflict;
         } else if pl.confidence >= 0.72
             && !has_warn
@@ -256,12 +263,7 @@ pub fn collect_snap_anchors(
 }
 
 /// Apply snap to placement edges; returns (start, end).
-pub fn snap_placement_edges(
-    start: f64,
-    end: f64,
-    anchors: &[f64],
-    threshold: f64,
-) -> (f64, f64) {
+pub fn snap_placement_edges(start: f64, end: f64, anchors: &[f64], threshold: f64) -> (f64, f64) {
     let s = snap_time(start, anchors, threshold);
     let e = snap_time(end, anchors, threshold).max(s + 0.25);
     (s, e)

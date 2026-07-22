@@ -62,7 +62,9 @@ impl AppState {
             return Ok(primary);
         }
         // Dev fallback: project-local models/
-        let local = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("models");
+        let local = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("models");
         if local.join("silero_vad.onnx").is_file() {
             return Ok(local);
         }

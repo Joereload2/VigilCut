@@ -71,7 +71,7 @@ pub fn score_unit(
     };
 
     b.clarity = if has_real_transcript {
-        if n_words >= 5 && n_words <= 120 {
+        if (5..=120).contains(&n_words) {
             0.8
         } else {
             0.55

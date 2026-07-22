@@ -47,16 +47,9 @@ async fn e2e_export_mp4_and_meta_folder_layout() {
     };
     let color = ColorOptions::default();
 
-    export_from_edl(
-        &media,
-        &out_mp4,
-        &run.edl,
-        &export_opts,
-        &color,
-        true,
-    )
-    .await
-    .expect("export_from_edl");
+    export_from_edl(&media, &out_mp4, &run.edl, &export_opts, &color, true)
+        .await
+        .expect("export_from_edl");
 
     assert!(out_mp4.is_file(), "missing output mp4");
     assert!(
@@ -81,10 +74,7 @@ async fn e2e_export_mp4_and_meta_folder_layout() {
 
     // Creator-facing files next to MP4
     let chapters_txt = ws.join("source-editado.chapters.txt");
-    assert!(
-        chapters_txt.is_file(),
-        "expected chapters.txt next to mp4"
-    );
+    assert!(chapters_txt.is_file(), "expected chapters.txt next to mp4");
 
     // Machine meta isolated
     let meta = ws.join("source-editado-meta");

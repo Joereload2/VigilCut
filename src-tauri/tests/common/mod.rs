@@ -8,11 +8,13 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// Path to project-bundled ffmpeg.exe (src-tauri/binaries).
 pub fn bundled_ffmpeg() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries").join(if cfg!(windows) {
-        "ffmpeg.exe"
-    } else {
-        "ffmpeg"
-    })
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("binaries")
+        .join(if cfg!(windows) {
+            "ffmpeg.exe"
+        } else {
+            "ffmpeg"
+        })
 }
 
 pub fn ensure_ffmpeg() {
@@ -35,10 +37,7 @@ fn run_ffmpeg(args: &[&str]) {
     }
     let out = cmd.output().expect("spawn ffmpeg");
     if !out.status.success() {
-        panic!(
-            "ffmpeg failed:\n{}",
-            String::from_utf8_lossy(&out.stderr)
-        );
+        panic!("ffmpeg failed:\n{}", String::from_utf8_lossy(&out.stderr));
     }
 }
 

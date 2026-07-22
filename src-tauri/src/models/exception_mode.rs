@@ -54,7 +54,10 @@ mod tests {
 
     #[test]
     fn default_is_safe() {
-        assert_eq!(ExceptionHandlingMode::default(), ExceptionHandlingMode::Safe);
+        assert_eq!(
+            ExceptionHandlingMode::default(),
+            ExceptionHandlingMode::Safe
+        );
     }
 
     #[test]

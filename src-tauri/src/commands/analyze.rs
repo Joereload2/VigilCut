@@ -83,12 +83,9 @@ pub async fn run_analysis(
     let mut on_prog = |stage: &str, message: &str, percent: f64| {
         progress::emit(&app, "analysis", stage, message, percent);
     };
-    let run = run_silence_analysis_with_progress(
-        PathBuf::from(&path).as_path(),
-        &pol,
-        &mut on_prog,
-    )
-    .await;
+    let run =
+        run_silence_analysis_with_progress(PathBuf::from(&path).as_path(), &pol, &mut on_prog)
+            .await;
     if jobs.is_cancelled() {
         return Err(AppError::Cancelled);
     }

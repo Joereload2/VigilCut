@@ -115,7 +115,11 @@ fn score_pair(ev: &SemanticEvent, asset: &MediaAsset) -> (f64, Vec<String>) {
 
     for c in &asset.concepts {
         let cl = c.to_lowercase();
-        if cl == label || terms.iter().any(|t| t == &cl || cl.contains(t) || t.contains(&cl)) {
+        if cl == label
+            || terms
+                .iter()
+                .any(|t| t == &cl || cl.contains(t) || t.contains(&cl))
+        {
             score += 0.45;
             reasons.push(format!("concept:{c}"));
         }
@@ -255,7 +259,12 @@ mod tests {
         assert!(score < 0.01);
         assert!(reasons.iter().any(|r| r.contains("license_unknown")));
         // Not selected by ranker either
-        let s = rank_suggestions(&[ev.clone()], &[a], 60.0, &MatchConfig::default());
+        let s = rank_suggestions(
+            std::slice::from_ref(&ev),
+            &[a],
+            60.0,
+            &MatchConfig::default(),
+        );
         assert!(s.is_empty());
         let clean = asset("a2", &["inflacion"]);
         let (clean_score, _) = score_pair(&ev, &clean);

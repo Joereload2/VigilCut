@@ -77,14 +77,8 @@ fn jaccard_words(a: &str, b: &str) -> f64 {
     use std::collections::HashSet;
     let a_l = a.to_lowercase();
     let b_l = b.to_lowercase();
-    let wa: HashSet<&str> = a_l
-        .split_whitespace()
-        .filter(|w| w.len() > 2)
-        .collect();
-    let wb: HashSet<&str> = b_l
-        .split_whitespace()
-        .filter(|w| w.len() > 2)
-        .collect();
+    let wa: HashSet<&str> = a_l.split_whitespace().filter(|w| w.len() > 2).collect();
+    let wb: HashSet<&str> = b_l.split_whitespace().filter(|w| w.len() > 2).collect();
     if wa.is_empty() || wb.is_empty() {
         return 0.0;
     }
@@ -132,7 +126,13 @@ mod tests {
         let list = vec![
             cand("a", 0.0, 30.0, "hola mundo importante", 80.0),
             cand("b", 5.0, 35.0, "hola mundo importante hoy", 70.0),
-            cand("c", 100.0, 130.0, "otro tema totalmente distinto aquí", 60.0),
+            cand(
+                "c",
+                100.0,
+                130.0,
+                "otro tema totalmente distinto aquí",
+                60.0,
+            ),
         ];
         let out = dedupe_and_group(list);
         assert_eq!(out.len(), 3);

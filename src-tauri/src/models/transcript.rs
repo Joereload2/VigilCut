@@ -136,10 +136,8 @@ mod tests {
     #[test]
     fn srt_and_txt_roundtrip_shape() {
         let mut tr = Transcript::new("a.mp4", "test");
-        tr.segments.push(TranscriptSegment::new(
-            Span::new(1.5, 3.25),
-            "Hola mundo",
-        ));
+        tr.segments
+            .push(TranscriptSegment::new(Span::new(1.5, 3.25), "Hola mundo"));
         tr.status = TranscriptStatus::Ready;
         let srt = tr.to_srt();
         assert!(srt.contains("-->"));

@@ -35,14 +35,9 @@ async fn smoke_analyze_synthetic_video_produces_edl_and_segments() {
         "duration unexpected: {}",
         run.duration
     );
+    assert!(!run.events.is_empty(), "expected speech/silence events");
     assert!(
-        !run.events.is_empty(),
-        "expected speech/silence events"
-    );
-    assert!(
-        run.events
-            .iter()
-            .any(|e| e.event_type == TYPE_AUDIO_SPEECH),
+        run.events.iter().any(|e| e.event_type == TYPE_AUDIO_SPEECH),
         "expected speech events"
     );
     assert!(
@@ -62,17 +57,11 @@ async fn smoke_analyze_synthetic_video_produces_edl_and_segments() {
 
     let from_edl = keep_ranges_from_edl(&run.edl);
     let from_segs = keep_ranges_from_segments(&run.segments);
-    assert!(
-        !from_edl.is_empty(),
-        "EDL keep ranges empty after merge"
-    );
+    assert!(!from_edl.is_empty(), "EDL keep ranges empty after merge");
     // Segments may keep pending silences (conservative) so segment keep >= edl keep-ish
     let edl_dur: f64 = from_edl.iter().map(|(s, e)| e - s).sum();
     let seg_dur: f64 = from_segs.iter().map(|(s, e)| e - s).sum();
-    assert!(
-        edl_dur > 0.5,
-        "EDL keep duration too small: {edl_dur}"
-    );
+    assert!(edl_dur > 0.5, "EDL keep duration too small: {edl_dur}");
     assert!(
         seg_dur + 0.01 >= edl_dur - 0.5,
         "segment keep ({seg_dur}) far below EDL keep ({edl_dur})"

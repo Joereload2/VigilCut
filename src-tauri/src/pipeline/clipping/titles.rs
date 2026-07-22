@@ -72,8 +72,9 @@ fn content_title(text: &str) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ");
-    let clean = clean
-        .trim_matches(|c: char| c == '"' || c == '\'' || c == '[' || c == ']' || c == '«' || c == '»');
+    let clean = clean.trim_matches(|c: char| {
+        c == '"' || c == '\'' || c == '[' || c == ']' || c == '«' || c == '»'
+    });
     // Prefer up to first sentence end, max ~8 words
     let cut = clean
         .find(['.', '?', '!', '…'])
@@ -121,9 +122,7 @@ fn format_mmss(t: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::clipping::{
-        ClipFraming, ClipReviewStatus, ClipScoreBreakdown,
-    };
+    use crate::models::clipping::{ClipFraming, ClipReviewStatus, ClipScoreBreakdown};
 
     fn cand(id: &str, start: f64, text: &str, primary: bool) -> ClipCandidate {
         ClipCandidate {
@@ -176,6 +175,9 @@ mod tests {
         )];
         finalize_clip_titles(&mut list);
         assert!(list[0].title.starts_with("01. "));
-        assert!(list[0].title.to_lowercase().contains("clave") || list[0].title.to_lowercase().contains("marketing"));
+        assert!(
+            list[0].title.to_lowercase().contains("clave")
+                || list[0].title.to_lowercase().contains("marketing")
+        );
     }
 }

@@ -92,7 +92,10 @@ async fn smoke_sidecar_srt_auto_detected() {
         .await
         .expect("sidecar analysis");
     assert!(
-        run.summary.warnings.iter().any(|w| w.contains("Transcripción") || w.contains("srt"))
+        run.summary
+            .warnings
+            .iter()
+            .any(|w| w.contains("Transcripción") || w.contains("srt"))
             || matches!(
                 run.summary.transcript_source,
                 vigilcut_lib::models::clipping::TranscriptSourceKind::SrtFile

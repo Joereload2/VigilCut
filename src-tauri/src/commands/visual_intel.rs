@@ -9,7 +9,9 @@ use crate::models::visual::{edl_fingerprint, PlacementLayout, PlacementMode, Vis
 use crate::models::visual_intel::{CostPolicy, CoverageSummary, NeedCoverage, VisualConcept};
 use crate::pipeline::semantic::extract_semantic_events;
 use crate::pipeline::time_map::TimeMap;
-use crate::pipeline::visual::concepts::{insert_concept, list_concepts, seed_economy_theme, upsert_theme};
+use crate::pipeline::visual::concepts::{
+    insert_concept, list_concepts, seed_economy_theme, upsert_theme,
+};
 use crate::pipeline::visual::generation::provider::select_provider;
 use crate::pipeline::visual::generation::worker::{
     cover_project_needs, human_approve_candidate, human_reject_candidate, list_pending_review,
@@ -108,9 +110,7 @@ pub fn visual_detect_needs(
         .lock()
         .map_err(|e| AppError::Message(e.to_string()))?;
     let tr = g.transcript.as_ref().ok_or_else(|| {
-        AppError::Invalid(
-            "No hay transcripción. Genera sugerencias o usa Whisper primero.".into(),
-        )
+        AppError::Invalid("No hay transcripción. Genera sugerencias o usa Whisper primero.".into())
     })?;
     let semantics = extract_semantic_events(tr, &project_key, &time_map);
     drop(g);
@@ -169,12 +169,16 @@ pub async fn visual_worker_tick(max_jobs: Option<u32>) -> AppResult<serde_json::
 
 #[tauri::command]
 pub fn visual_list_review_queue(limit: Option<usize>) -> AppResult<serde_json::Value> {
-    Ok(serde_json::to_value(list_pending_review(limit.unwrap_or(50))?)?)
+    Ok(serde_json::to_value(list_pending_review(
+        limit.unwrap_or(50),
+    )?)?)
 }
 
 #[tauri::command]
 pub fn visual_approve_candidate(candidate_id: String) -> AppResult<serde_json::Value> {
-    Ok(serde_json::to_value(human_approve_candidate(&candidate_id)?)?)
+    Ok(serde_json::to_value(human_approve_candidate(
+        &candidate_id,
+    )?)?)
 }
 
 #[tauri::command]

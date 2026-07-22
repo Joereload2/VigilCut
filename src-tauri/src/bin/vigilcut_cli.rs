@@ -9,13 +9,13 @@ use std::env;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use vigilcut_lib::pipeline::batch_worker::{list_videos_in_dir, process_one_file, run_batch_job};
-use vigilcut_lib::pipeline::clipping::{export_approved_clips, run_clipping_analysis};
-use vigilcut_lib::pipeline::engine::run_silence_analysis;
 use vigilcut_lib::models::batch::BatchJob;
 use vigilcut_lib::models::clipping::{ClipReviewStatus, ClippingOptions};
 use vigilcut_lib::models::edl::PolicyConfig;
 use vigilcut_lib::models::preset::{ColorOptions, ExportOptions};
+use vigilcut_lib::pipeline::batch_worker::{list_videos_in_dir, process_one_file, run_batch_job};
+use vigilcut_lib::pipeline::clipping::{export_approved_clips, run_clipping_analysis};
+use vigilcut_lib::pipeline::engine::run_silence_analysis;
 
 fn main() -> ExitCode {
     tracing_subscriber::fmt()
@@ -130,7 +130,11 @@ fn main() -> ExitCode {
                         r.source_duration - r.output_duration
                     );
                 } else {
-                    println!("  ERR {} — {}", r.media_path, r.error.as_deref().unwrap_or("?"));
+                    println!(
+                        "  ERR {} — {}",
+                        r.media_path,
+                        r.error.as_deref().unwrap_or("?")
+                    );
                 }
             }
             if done.failed > 0 {
@@ -257,7 +261,10 @@ fn main() -> ExitCode {
             }
             let (w, h) = match rt.block_on(async {
                 use vigilcut_lib::ffmpeg::Ffmpeg;
-                Ffmpeg::new()?.probe(&media).await.map(|i| (i.width.max(2), i.height.max(2)))
+                Ffmpeg::new()?
+                    .probe(&media)
+                    .await
+                    .map(|i| (i.width.max(2), i.height.max(2)))
             }) {
                 Ok(dims) => dims,
                 Err(e) => {
@@ -306,10 +313,7 @@ fn main() -> ExitCode {
                     let p = PathBuf::from(&path);
                     if p.is_dir() {
                         match vigilcut_lib::pipeline::visual::library::import_folder(
-                            &p,
-                            tags,
-                            concepts,
-                            recursive,
+                            &p, tags, concepts, recursive,
                         ) {
                             Ok(r) => {
                                 println!(
@@ -328,10 +332,7 @@ fn main() -> ExitCode {
                         }
                     } else {
                         match vigilcut_lib::pipeline::visual::import_library_image(
-                            &p,
-                            None,
-                            tags,
-                            concepts,
+                            &p, None, tags, concepts,
                         ) {
                             Ok(a) => {
                                 println!("imported id={} sha256={}", a.id, a.sha256);
@@ -346,10 +347,7 @@ fn main() -> ExitCode {
                 }
                 "list" => {
                     let q = args.get(1).cloned();
-                    match vigilcut_lib::pipeline::visual::library::list_assets(
-                        q.as_deref(),
-                        100,
-                    ) {
+                    match vigilcut_lib::pipeline::visual::library::list_assets(q.as_deref(), 100) {
                         Ok(list) => {
                             println!("{} assets", list.len());
                             for a in list {
@@ -418,17 +416,18 @@ fn main() -> ExitCode {
                         }
                     }
                 }
-                "scan-missing" => match vigilcut_lib::pipeline::visual::library::scan_missing_assets()
-                {
-                    Ok(n) => {
-                        println!("marked_missing={n}");
-                        ExitCode::SUCCESS
+                "scan-missing" => {
+                    match vigilcut_lib::pipeline::visual::library::scan_missing_assets() {
+                        Ok(n) => {
+                            println!("marked_missing={n}");
+                            ExitCode::SUCCESS
+                        }
+                        Err(e) => {
+                            eprintln!("error: {e}");
+                            ExitCode::FAILURE
+                        }
                     }
-                    Err(e) => {
-                        eprintln!("error: {e}");
-                        ExitCode::FAILURE
-                    }
-                },
+                }
                 "enrich" => {
                     // Headless: silence EDL + transcript + suggestions + plan JSON (no auto-accept).
                     let media = args.get(1).cloned().unwrap_or_default();
@@ -459,7 +458,8 @@ fn main() -> ExitCode {
                             return ExitCode::FAILURE;
                         }
                     };
-                    let run_id = vigilcut_lib::models::visual::edl_fingerprint(&run.edl.keep_ranges());
+                    let run_id =
+                        vigilcut_lib::models::visual::edl_fingerprint(&run.edl.keep_ranges());
                     let time_map = vigilcut_lib::pipeline::time_map::TimeMap::from_edl(&run.edl);
                     let tr = match rt.block_on(
                         vigilcut_lib::pipeline::transcript_engine::build_transcript(
@@ -486,13 +486,11 @@ fn main() -> ExitCode {
                     {
                         eprintln!("warn: transcript artifacts: {e}");
                     }
-                    let semantics =
-                        vigilcut_lib::pipeline::semantic::extract_semantic_events(
-                            &tr, &run_id, &time_map,
-                        );
-                    let assets =
-                        vigilcut_lib::pipeline::visual::library::list_active_assets()
-                            .unwrap_or_default();
+                    let semantics = vigilcut_lib::pipeline::semantic::extract_semantic_events(
+                        &tr, &run_id, &time_map,
+                    );
+                    let assets = vigilcut_lib::pipeline::visual::library::list_active_assets()
+                        .unwrap_or_default();
                     let suggestions = vigilcut_lib::pipeline::visual::match_rank::rank_suggestions(
                         &semantics,
                         &assets,
@@ -505,9 +503,8 @@ fn main() -> ExitCode {
                         run_id.clone(),
                     );
                     if assets.is_empty() {
-                        plan.warnings.push(
-                            "Biblioteca vacía: visual import <imagenes> --concepts …".into(),
-                        );
+                        plan.warnings
+                            .push("Biblioteca vacía: visual import <imagenes> --concepts …".into());
                     }
                     if suggestions.is_empty() {
                         plan.warnings.push(
@@ -576,16 +573,14 @@ fn main() -> ExitCode {
                         );
                         return ExitCode::FAILURE;
                     }
-                    let media_ref = arg_value(&args, "--media")
-                        .unwrap_or_else(|| plan.media_path.clone());
-                    match rt.block_on(
-                        vigilcut_lib::pipeline::visual::render::render_visual_plan(
-                            PathBuf::from(&cut).as_path(),
-                            &plan,
-                            PathBuf::from(&out).as_path(),
-                            &media_ref,
-                        ),
-                    ) {
+                    let media_ref =
+                        arg_value(&args, "--media").unwrap_or_else(|| plan.media_path.clone());
+                    match rt.block_on(vigilcut_lib::pipeline::visual::render::render_visual_plan(
+                        PathBuf::from(&cut).as_path(),
+                        &plan,
+                        PathBuf::from(&out).as_path(),
+                        &media_ref,
+                    )) {
                         Ok(p) => {
                             println!("rendered {}", p.display());
                             ExitCode::SUCCESS
@@ -596,9 +591,108 @@ fn main() -> ExitCode {
                         }
                     }
                 }
+                "seed-economy" => {
+                    match vigilcut_lib::pipeline::visual::concepts::seed_economy_theme() {
+                        Ok(c) => {
+                            println!("seeded_concepts={}", c.len());
+                            ExitCode::SUCCESS
+                        }
+                        Err(e) => {
+                            eprintln!("error: {e}");
+                            ExitCode::FAILURE
+                        }
+                    }
+                }
+                "worker" => {
+                    let max: u32 = arg_value(&args, "--max")
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(5);
+                    std::env::set_var(
+                        "VIGILCUT_IMAGE_PROVIDER",
+                        std::env::var("VIGILCUT_IMAGE_PROVIDER").unwrap_or_else(|_| "mock".into()),
+                    );
+                    let rt = tokio::runtime::Builder::new_multi_thread()
+                        .enable_all()
+                        .build()
+                        .expect("rt");
+                    match rt.block_on(
+                        vigilcut_lib::pipeline::visual::generation::worker::worker_tick(max),
+                    ) {
+                        Ok(n) => {
+                            println!("processed={n}");
+                            ExitCode::SUCCESS
+                        }
+                        Err(e) => {
+                            eprintln!("error: {e}");
+                            ExitCode::FAILURE
+                        }
+                    }
+                }
+                "cover" => {
+                    // usage: visual cover <project_key> [--generate] [--max N]
+                    let key = args.get(1).cloned().unwrap_or_default();
+                    if key.is_empty() {
+                        eprintln!(
+                            "usage: vigilcut-cli visual cover <project_key> [--generate] [--max N]"
+                        );
+                        return ExitCode::FAILURE;
+                    }
+                    let generate = args.iter().any(|a| a == "--generate");
+                    let max: u32 = arg_value(&args, "--max")
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(5);
+                    let rt = tokio::runtime::Builder::new_multi_thread()
+                        .enable_all()
+                        .build()
+                        .expect("rt");
+                    match rt.block_on(
+                        vigilcut_lib::pipeline::visual::generation::worker::cover_project_needs(
+                            &key, generate, max,
+                        ),
+                    ) {
+                        Ok(v) => {
+                            println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
+                            ExitCode::SUCCESS
+                        }
+                        Err(e) => {
+                            eprintln!("error: {e}");
+                            ExitCode::FAILURE
+                        }
+                    }
+                }
+                "probe-provider" => {
+                    let rt = tokio::runtime::Builder::new_multi_thread()
+                        .enable_all()
+                        .build()
+                        .expect("rt");
+                    let policy = vigilcut_lib::models::visual_intel::CostPolicy::from_env();
+                    let p = vigilcut_lib::pipeline::visual::generation::provider::select_provider(
+                        policy.paid_providers_enabled,
+                    );
+                    match rt.block_on(p.probe()) {
+                        Ok(probe) => {
+                            println!(
+                                "provider={} model={} ok={} free={} latency_ms={}",
+                                probe.provider,
+                                probe.model,
+                                probe.ok,
+                                probe.free_tier,
+                                probe.latency_ms
+                            );
+                            if let Some(e) = probe.error {
+                                eprintln!("probe_error: {e}");
+                            }
+                            ExitCode::SUCCESS
+                        }
+                        Err(e) => {
+                            eprintln!("error: {e}");
+                            ExitCode::FAILURE
+                        }
+                    }
+                }
                 _ => {
                     eprintln!(
-                        "usage: vigilcut-cli visual <import|list|transcript|scan-missing|enrich|render> ..."
+                        "usage: vigilcut-cli visual <import|list|transcript|scan-missing|enrich|render|seed-economy|worker|cover|probe-provider> ..."
                     );
                     ExitCode::FAILURE
                 }
@@ -682,6 +776,10 @@ VigilCut CLI v1.1 — factory engine (no UI)
   vigilcut-cli visual enrich <video.mp4> [outdir] [--srt path] [--whisper]
   vigilcut-cli visual render <cut.mp4> <plan.json> <out.mp4> [--media source.mp4]
   vigilcut-cli visual scan-missing
+  vigilcut-cli visual seed-economy
+  vigilcut-cli visual worker [--max 5]
+  vigilcut-cli visual cover <project_key> [--generate] [--max N]
+  vigilcut-cli visual probe-provider
 
   Policies: factory (default), youtube, podcast, gentle, shorts-first
 

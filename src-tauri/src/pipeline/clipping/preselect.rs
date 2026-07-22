@@ -1,8 +1,6 @@
 //! Preselection profiles: mark top candidates, discard weak ones.
 
-use crate::models::clipping::{
-    ClipCandidate, ClipReviewStatus, ClippingOptions, MIN_CLIP_SCORE,
-};
+use crate::models::clipping::{ClipCandidate, ClipReviewStatus, ClippingOptions, MIN_CLIP_SCORE};
 
 pub fn apply_preselection(candidates: &mut [ClipCandidate], options: &ClippingOptions) {
     let (max_pre, floor) = options.selection_profile.limits();
@@ -121,7 +119,13 @@ mod tests {
             ClipReviewStatus::Discarded
         );
         // secondary stays non-primary
-        assert!(!list.iter().find(|x| x.id == "a2").unwrap().is_primary_variant);
+        assert!(
+            !list
+                .iter()
+                .find(|x| x.id == "a2")
+                .unwrap()
+                .is_primary_variant
+        );
     }
 
     #[test]

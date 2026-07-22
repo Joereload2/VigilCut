@@ -16,7 +16,12 @@ pub struct JobProgress {
 }
 
 impl JobProgress {
-    pub fn new(job: impl Into<String>, stage: impl Into<String>, message: impl Into<String>, percent: f64) -> Self {
+    pub fn new(
+        job: impl Into<String>,
+        stage: impl Into<String>,
+        message: impl Into<String>,
+        percent: f64,
+    ) -> Self {
         Self {
             job: job.into(),
             stage: stage.into(),
@@ -32,12 +37,6 @@ pub fn emit_progress(app: &AppHandle, progress: JobProgress) {
     let _ = app.emit(PROGRESS_EVENT, progress);
 }
 
-pub fn emit(
-    app: &AppHandle,
-    job: &str,
-    stage: &str,
-    message: &str,
-    percent: f64,
-) {
+pub fn emit(app: &AppHandle, job: &str, stage: &str, message: &str, percent: f64) {
     emit_progress(app, JobProgress::new(job, stage, message, percent));
 }

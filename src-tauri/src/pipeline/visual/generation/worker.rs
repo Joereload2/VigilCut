@@ -14,7 +14,7 @@ use crate::pipeline::visual::generation::cost::{
 use crate::pipeline::visual::generation::provider::{select_provider, GenerationRequest};
 use crate::pipeline::visual::library::{import_image, open_db};
 use crate::pipeline::visual::needs::{get_need, update_need};
-use crate::pipeline::visual::qa::{persist_qa_check, review_image, SemanticHints, QaThresholds};
+use crate::pipeline::visual::qa::{persist_qa_check, review_image, QaThresholds, SemanticHints};
 
 pub fn build_prompt(need: &VisualNeed) -> (String, String) {
     let mut prompt = format!(
@@ -22,10 +22,7 @@ pub fn build_prompt(need: &VisualNeed) -> (String, String) {
         need.label, need.desired_aspect
     );
     if !need.required_contexts.is_empty() {
-        prompt.push_str(&format!(
-            " Context: {}.",
-            need.required_contexts.join(", ")
-        ));
+        prompt.push_str(&format!(" Context: {}.", need.required_contexts.join(", ")));
     }
     let mut negative = need.hard_exclusions.join(", ");
     if !need.forbidden_contexts.is_empty() {
@@ -152,12 +149,7 @@ pub async fn process_next_job() -> AppResult<Option<String>> {
         let now = chrono::Utc::now().to_rfc3339();
         conn.execute(
             "UPDATE generation_jobs SET status=?1, attempt=?2, updated_at=?3 WHERE id=?4",
-            params![
-                JobStatus::Running.as_str(),
-                (attempt + 1) as i64,
-                now,
-                id
-            ],
+            params![JobStatus::Running.as_str(), (attempt + 1) as i64, now, id],
         )
         .map_err(|e| AppError::Message(e.to_string()))?;
     }
@@ -199,19 +191,17 @@ pub async fn process_next_job() -> AppResult<Option<String>> {
                 .map_err(|e| AppError::Message(e.to_string()))?;
             }
 
-            let hints = need_id.as_ref().and_then(|nid| get_need(nid).ok()).map(|n| {
-                SemanticHints {
+            let hints = need_id
+                .as_ref()
+                .and_then(|nid| get_need(nid).ok())
+                .map(|n| SemanticHints {
                     label: n.label,
                     meanings: n.terms,
                     hard_exclusions: n.hard_exclusions,
                     negative_contexts: n.forbidden_contexts,
-                }
-            });
-            let mut check = review_image(
-                &result.local_path,
-                hints.as_ref(),
-                &QaThresholds::default(),
-            )?;
+                });
+            let mut check =
+                review_image(&result.local_path, hints.as_ref(), &QaThresholds::default())?;
             check.candidate_id = Some(cand_id.clone());
             persist_qa_check(&check)?;
 
@@ -360,12 +350,7 @@ fn mark_job(id: &str, status: JobStatus, err: Option<&str>) -> AppResult<()> {
     let conn = open_db()?;
     conn.execute(
         "UPDATE generation_jobs SET status=?1, last_error=?2, updated_at=?3 WHERE id=?4",
-        params![
-            status.as_str(),
-            err,
-            chrono::Utc::now().to_rfc3339(),
-            id
-        ],
+        params![status.as_str(), err, chrono::Utc::now().to_rfc3339(), id],
     )
     .map_err(|e| AppError::Message(e.to_string()))?;
     Ok(())
@@ -561,8 +546,10 @@ pub async fn cover_project_needs(
         ) {
             continue;
         }
-        let mut opts = MatchOptions::default();
-        opts.used_in_project = used.clone();
+        let opts = MatchOptions {
+            used_in_project: used.clone(),
+            ..Default::default()
+        };
         if apply_best_match(need, &opts) {
             update_need(need)?;
             if let Some(id) = &need.matched_asset_id {
@@ -571,10 +558,11 @@ pub async fn cover_project_needs(
             reused += 1;
             continue;
         }
-        if generate_missing && queued < max_generate {
-            if queue_generation_for_need(need, false)?.is_some() {
-                queued += 1;
-            }
+        if generate_missing
+            && queued < max_generate
+            && queue_generation_for_need(need, false)?.is_some()
+        {
+            queued += 1;
         }
     }
 

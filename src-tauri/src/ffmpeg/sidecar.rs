@@ -416,8 +416,12 @@ fn parse_probe_json(path: &Path, json: &serde_json::Value) -> AppResult<MediaInf
         .cloned()
         .unwrap_or_default();
 
-    let video = streams.iter().find(|s| s.get("codec_type").and_then(|v| v.as_str()) == Some("video"));
-    let audio = streams.iter().find(|s| s.get("codec_type").and_then(|v| v.as_str()) == Some("audio"));
+    let video = streams
+        .iter()
+        .find(|s| s.get("codec_type").and_then(|v| v.as_str()) == Some("video"));
+    let audio = streams
+        .iter()
+        .find(|s| s.get("codec_type").and_then(|v| v.as_str()) == Some("audio"));
 
     let duration = format
         .get("duration")

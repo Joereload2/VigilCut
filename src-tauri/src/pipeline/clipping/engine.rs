@@ -159,7 +159,10 @@ pub async fn run_clipping_analysis_with_progress(
         framing,
     );
     candidates = dedupe_and_group(candidates);
-    let dropped_weak = candidates.iter().filter(|c| c.score < MIN_CLIP_SCORE).count();
+    let dropped_weak = candidates
+        .iter()
+        .filter(|c| c.score < MIN_CLIP_SCORE)
+        .count();
     candidates.retain(|c| c.score >= MIN_CLIP_SCORE);
     if dropped_weak > 0 {
         warnings.push(format!(
@@ -193,10 +196,7 @@ pub async fn run_clipping_analysis_with_progress(
         .iter()
         .filter(|c| c.status == ClipReviewStatus::Discarded)
         .count();
-    let best_score = candidates
-        .iter()
-        .map(|c| c.score)
-        .fold(0.0_f64, f64::max);
+    let best_score = candidates.iter().map(|c| c.score).fold(0.0_f64, f64::max);
     let selected_total_duration: f64 = candidates
         .iter()
         .filter(|c| c.status == ClipReviewStatus::Preselected && c.is_primary_variant)

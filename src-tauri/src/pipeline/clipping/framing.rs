@@ -53,9 +53,7 @@ pub fn compute_crop_filter(framing: &ClipFraming, src_w: u32, src_h: u32) -> Str
             let cy = (framing.center_y.clamp(0.05, 0.95) * src_h) - crop_h / 2.0;
             let x = cx.clamp(0.0, (src_w - crop_w).max(0.0));
             let y = cy.clamp(0.0, (src_h - crop_h).max(0.0));
-            format!(
-                "crop={crop_w:.0}:{crop_h:.0}:{x:.0}:{y:.0},scale={out_w}:{out_h}"
-            )
+            format!("crop={crop_w:.0}:{crop_h:.0}:{x:.0}:{y:.0},scale={out_w}:{out_h}")
         }
     }
 }

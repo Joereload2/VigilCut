@@ -13,8 +13,8 @@ use commands::watch::InboxWatchState;
 use job_control::JobControl;
 use pipeline::visual::VisualSession;
 use state::AppState;
-use tauri::Manager;
 use std::sync::Mutex;
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

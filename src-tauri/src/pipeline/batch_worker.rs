@@ -203,15 +203,7 @@ pub async fn run_batch_job(mut job: BatchJob, policy: PolicyConfig) -> BatchJob 
         job.touch();
 
         let path = PathBuf::from(path_str);
-        let result = process_one_file(
-            &path,
-            &out_dir,
-            &policy,
-            mode,
-            &export_opts,
-            &color,
-        )
-        .await;
+        let result = process_one_file(&path, &out_dir, &policy, mode, &export_opts, &color).await;
 
         if result.needs_review {
             needs_review_count += 1;
@@ -233,15 +225,12 @@ pub async fn run_batch_job(mut job: BatchJob, policy: PolicyConfig) -> BatchJob 
     }
 
     job.current_file = None;
-    job.status = if needs_review_count > 0 && job.completed == 0 {
+    job.status = if needs_review_count > 0 {
         BatchStatus::NeedsReview
-    } else if needs_review_count > 0 {
-        BatchStatus::NeedsReview
-    } else if job.failed == 0 && job.completed > 0 {
-        BatchStatus::Completed
     } else if job.completed == 0 {
         BatchStatus::Failed
     } else {
+        // completed > 0, zero pending review (failed may be > 0)
         BatchStatus::Completed
     };
     job.touch();

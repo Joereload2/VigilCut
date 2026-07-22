@@ -181,10 +181,7 @@ async fn detect_silence_ranges(
     let silero_model = AppState::models_dir()
         .ok()
         .map(|d| d.join("silero_vad.onnx"));
-    let silero_available = silero_model
-        .as_ref()
-        .map(|p| p.is_file())
-        .unwrap_or(false);
+    let silero_available = silero_model.as_ref().map(|p| p.is_file()).unwrap_or(false);
 
     if policy.prefer_silero && silero_available {
         match crate::pipeline::detectors::detect_silences_silero(

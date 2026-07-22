@@ -3,9 +3,7 @@
 use rusqlite::{params, Connection};
 
 use crate::error::{AppError, AppResult};
-use crate::models::visual_intel::{
-    canonical_key, ConceptStatus, Theme, VisualConcept,
-};
+use crate::models::visual_intel::{canonical_key, ConceptStatus, Theme, VisualConcept};
 use crate::pipeline::visual::library::open_db;
 
 fn json_vec(v: &[String]) -> String {
@@ -198,6 +196,8 @@ pub fn seed_economy_theme() -> AppResult<Vec<VisualConcept>> {
         "Economía, dinero y negocios",
         Some("Conceptos reutilizables para noticias y finanzas personales"),
     )?;
+    // (title, literal, meanings, positive_contexts, hard_exclusions)
+    #[allow(clippy::type_complexity)]
     let seeds: &[(&str, &[&str], &[&str], &[&str], &[&str])] = &[
         (
             "Persona comparando precios en supermercado",

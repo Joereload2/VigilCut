@@ -41,20 +41,18 @@ pub fn match_need_against(
         if matches!(asset.license_status, LicenseStatus::Unknown) {
             continue;
         }
-        if let Some((score, reasons, exclusions, format_ok, will_crop)) =
-            score_asset(need, asset, opts)
-        {
-            if score < opts.min_score {
+        if let Some(parts) = score_asset(need, asset, opts) {
+            if parts.score < opts.min_score {
                 continue;
             }
             out.push(MatchCandidate {
                 asset_id: asset.id.clone(),
                 asset_title: asset.title.clone(),
-                score,
-                reasons,
-                exclusions_checked: exclusions,
-                format_ok,
-                will_crop,
+                score: parts.score,
+                reasons: parts.reasons,
+                exclusions_checked: parts.exclusions_checked,
+                format_ok: parts.format_ok,
+                will_crop: parts.will_crop,
                 times_used: asset.times_used,
                 thumbnail_path: asset.thumbnail_path.clone(),
             });
@@ -68,11 +66,15 @@ pub fn match_need_against(
     out
 }
 
-fn score_asset(
-    need: &VisualNeed,
-    asset: &MediaAsset,
-    opts: &MatchOptions,
-) -> Option<(f64, Vec<String>, Vec<String>, bool, bool)> {
+struct ScoreParts {
+    score: f64,
+    reasons: Vec<String>,
+    exclusions_checked: Vec<String>,
+    format_ok: bool,
+    will_crop: bool,
+}
+
+fn score_asset(need: &VisualNeed, asset: &MediaAsset, opts: &MatchOptions) -> Option<ScoreParts> {
     let mut score = 0.0_f64;
     let mut reasons = Vec::new();
     let mut exclusions_checked = Vec::new();
@@ -81,7 +83,11 @@ fn score_asset(
     let terms: Vec<String> = need.terms.iter().map(|t| t.to_lowercase()).collect();
 
     // Hard exclusions on asset vs need contexts
-    for ex in asset.hard_exclusions.iter().chain(need.hard_exclusions.iter()) {
+    for ex in asset
+        .hard_exclusions
+        .iter()
+        .chain(need.hard_exclusions.iter())
+    {
         let exl = ex.to_lowercase();
         exclusions_checked.push(ex.clone());
         // If need requires a context that asset hard-excludes — skip
@@ -121,7 +127,11 @@ fn score_asset(
         .chain(asset.literal_description.iter())
     {
         let cl = c.to_lowercase();
-        if cl == label || terms.iter().any(|t| t == &cl || cl.contains(t) || t.contains(&cl)) {
+        if cl == label
+            || terms
+                .iter()
+                .any(|t| t == &cl || cl.contains(t) || t.contains(&cl))
+        {
             score += 0.4;
             reasons.push(format!("concept:{c}"));
         }
@@ -161,8 +171,7 @@ fn score_asset(
             if ar == pref {
                 score += 0.08;
                 reasons.push(format!("aspect:{ar}"));
-            } else if (ar == "landscape" && pref == "16:9")
-                || (ar == "portrait" && pref == "9:16")
+            } else if (ar == "landscape" && pref == "16:9") || (ar == "portrait" && pref == "9:16")
             {
                 score += 0.03;
                 will_crop = true;
@@ -192,13 +201,13 @@ fn score_asset(
     if reasons.is_empty() && score < 0.2 {
         return None;
     }
-    Some((
-        score.clamp(0.0, 1.5),
+    Some(ScoreParts {
+        score: score.clamp(0.0, 1.5),
         reasons,
         exclusions_checked,
         format_ok,
         will_crop,
-    ))
+    })
 }
 
 /// Apply best match onto need if above threshold.
@@ -271,7 +280,7 @@ mod tests {
         let a = asset("Super precios", &["supermercado", "precios"]);
         let mut need = VisualNeed::from_label("p1", "supermercado");
         need.required_contexts = vec!["economía doméstica".into()];
-        let ranked = match_need_against(&need, &[a.clone()], &MatchOptions::default());
+        let ranked = match_need_against(&need, std::slice::from_ref(&a), &MatchOptions::default());
         assert!(!ranked.is_empty());
         assert!(ranked[0].score > 0.3);
 
@@ -286,8 +295,10 @@ mod tests {
     fn penalty_same_project() {
         let a = asset("Super", &["inflacion"]);
         let need = VisualNeed::from_label("p1", "inflacion");
-        let mut opts = MatchOptions::default();
-        opts.used_in_project = vec![a.id.clone()];
+        let opts = MatchOptions {
+            used_in_project: vec![a.id.clone()],
+            ..Default::default()
+        };
         let ranked = match_need_against(&need, &[a], &opts);
         if let Some(r) = ranked.first() {
             assert!(r.reasons.iter().any(|x| x.contains("same_project")));

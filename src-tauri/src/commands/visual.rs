@@ -141,7 +141,8 @@ pub async fn visual_transcribe_whisper(
 }
 
 #[tauri::command]
-pub fn visual_whisper_status() -> AppResult<crate::pipeline::detectors::whisper_cli::WhisperStatus> {
+pub fn visual_whisper_status() -> AppResult<crate::pipeline::detectors::whisper_cli::WhisperStatus>
+{
     Ok(crate::pipeline::detectors::whisper_cli::whisper_status())
 }
 
@@ -151,7 +152,10 @@ pub async fn visual_install_whisper() -> AppResult<String> {
 }
 
 #[tauri::command]
-pub fn visual_list_assets(query: Option<String>, limit: Option<usize>) -> AppResult<serde_json::Value> {
+pub fn visual_list_assets(
+    query: Option<String>,
+    limit: Option<usize>,
+) -> AppResult<serde_json::Value> {
     let list = list_assets(query.as_deref(), limit.unwrap_or(100))?;
     Ok(serde_json::to_value(list)?)
 }
@@ -304,9 +308,7 @@ pub fn visual_snap_placement(
 }
 
 #[tauri::command]
-pub fn visual_evaluate_composition(
-    visual: State<'_, VisualSessionState>,
-) -> AppResult<VisualPlan> {
+pub fn visual_evaluate_composition(visual: State<'_, VisualSessionState>) -> AppResult<VisualPlan> {
     crate::pipeline::visual::evaluate_plan(&visual)
 }
 
@@ -429,7 +431,9 @@ pub fn visual_set_suggestion_status(
 
 #[tauri::command]
 pub fn visual_get_session(visual: State<'_, VisualSessionState>) -> AppResult<serde_json::Value> {
-    let g = visual.lock().map_err(|e| AppError::Message(e.to_string()))?;
+    let g = visual
+        .lock()
+        .map_err(|e| AppError::Message(e.to_string()))?;
     Ok(serde_json::json!({
         "transcript": g.transcript,
         "suggestions": g.suggestions,
@@ -467,7 +471,9 @@ pub fn visual_save_plan(
     visual: State<'_, VisualSessionState>,
 ) -> AppResult<String> {
     let plan = {
-        let g = visual.lock().map_err(|e| AppError::Message(e.to_string()))?;
+        let g = visual
+            .lock()
+            .map_err(|e| AppError::Message(e.to_string()))?;
         g.plan
             .clone()
             .ok_or_else(|| AppError::Invalid("No hay VisualPlan en sesión.".into()))?
@@ -483,7 +489,9 @@ pub fn visual_load_plan(
     visual: State<'_, VisualSessionState>,
 ) -> AppResult<VisualPlan> {
     let plan = load_visual_plan(PathBuf::from(&path).as_path())?;
-    let mut g = visual.lock().map_err(|e| AppError::Message(e.to_string()))?;
+    let mut g = visual
+        .lock()
+        .map_err(|e| AppError::Message(e.to_string()))?;
     g.plan = Some(plan.clone());
     g.edl_fp = Some(plan.edl_fingerprint.clone());
     g.plan_path = Some(PathBuf::from(&path));
@@ -498,14 +506,12 @@ pub async fn visual_render_plan(
     visual: State<'_, VisualSessionState>,
 ) -> AppResult<String> {
     let plan = {
-        let g = visual.lock().map_err(|e| AppError::Message(e.to_string()))?;
-        g.plan
-            .clone()
-            .ok_or_else(|| {
-                AppError::Invalid(
-                    "No hay VisualPlan. Genera sugerencias y acepta alguna.".into(),
-                )
-            })?
+        let g = visual
+            .lock()
+            .map_err(|e| AppError::Message(e.to_string()))?;
+        g.plan.clone().ok_or_else(|| {
+            AppError::Invalid("No hay VisualPlan. Genera sugerencias y acepta alguna.".into())
+        })?
     };
     let out = render_visual_plan(
         PathBuf::from(&cut_video_path).as_path(),

@@ -169,7 +169,10 @@ pub fn bulk_clip_status(
             if !c.is_primary_variant {
                 continue;
             }
-            if matches!(c.status, ClipReviewStatus::Discarded | ClipReviewStatus::Exported) {
+            if matches!(
+                c.status,
+                ClipReviewStatus::Discarded | ClipReviewStatus::Exported
+            ) {
                 continue;
             }
             if only_high_confidence && (c.score < 72.0 || c.confidence < 0.55) {

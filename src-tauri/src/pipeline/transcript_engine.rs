@@ -14,7 +14,14 @@ pub async fn build_transcript(
     prefer_whisper: bool,
     run_id: Option<String>,
 ) -> AppResult<Transcript> {
-    build_transcript_with_progress(media_path, explicit_srt, prefer_whisper, run_id, &mut |_, _, _| {}).await
+    build_transcript_with_progress(
+        media_path,
+        explicit_srt,
+        prefer_whisper,
+        run_id,
+        &mut |_, _, _| {},
+    )
+    .await
 }
 
 pub async fn build_transcript_with_progress(
@@ -52,7 +59,8 @@ pub async fn build_transcript_with_progress(
                 t.media_path = media_path.to_string_lossy().into_owned();
                 t.run_id = tr.run_id.clone();
                 t.engine = format!("sidecar:{}", side.display());
-                t.warnings.push(format!("Loaded sidecar {}", side.display()));
+                t.warnings
+                    .push(format!("Loaded sidecar {}", side.display()));
                 on_progress("transcript", "Subtítulos listos", 100.0);
                 return Ok(t);
             }
@@ -115,8 +123,7 @@ fn load_from_path(path: &Path) -> AppResult<Transcript> {
     }
     let mut tr = Transcript::new("pending", "file");
     for c in cues {
-        tr.segments
-            .push(TranscriptSegment::new(c.span, c.text));
+        tr.segments.push(TranscriptSegment::new(c.span, c.text));
     }
     tr.status = TranscriptStatus::Ready;
     tr.language = "auto".into();
@@ -150,10 +157,16 @@ pub fn write_transcript_artifacts(
     ));
     let srt_path = out_dir.join(format!("{stem}.transcript.srt"));
     std::fs::write(&srt_path, tr.to_srt())?;
-    arts.push(("transcript_srt".into(), srt_path.to_string_lossy().into_owned()));
+    arts.push((
+        "transcript_srt".into(),
+        srt_path.to_string_lossy().into_owned(),
+    ));
     let txt_path = out_dir.join(format!("{stem}.transcript.txt"));
     std::fs::write(&txt_path, tr.to_txt_timed())?;
-    arts.push(("transcript_txt".into(), txt_path.to_string_lossy().into_owned()));
+    arts.push((
+        "transcript_txt".into(),
+        txt_path.to_string_lossy().into_owned(),
+    ));
     Ok(arts)
 }
 

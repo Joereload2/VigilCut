@@ -180,7 +180,12 @@ pub enum PlacementMode {
     )]
     PictureInPicture,
     /// Overlay lower-third style band
-    #[serde(alias = "flotante", alias = "float", alias = "lower-third", alias = "lower_third")]
+    #[serde(
+        alias = "flotante",
+        alias = "float",
+        alias = "lower-third",
+        alias = "lower_third"
+    )]
     LowerThird,
 }
 
@@ -596,7 +601,11 @@ pub struct VisualPlan {
 }
 
 impl VisualPlan {
-    pub fn new(run_id: impl Into<String>, media_path: impl Into<String>, edl_fp: impl Into<String>) -> Self {
+    pub fn new(
+        run_id: impl Into<String>,
+        media_path: impl Into<String>,
+        edl_fp: impl Into<String>,
+    ) -> Self {
         let now = chrono::Utc::now().to_rfc3339();
         // Spatial zones are added when detection/user defines them — not fake
         // face boxes on every plan (they confuse supervision on split layouts).
@@ -642,9 +651,18 @@ mod tests {
 
     #[test]
     fn placement_mode_from_user_labels() {
-        assert_eq!(PlacementMode::from_user("completa"), PlacementMode::Fullframe);
-        assert_eq!(PlacementMode::from_user("parcial"), PlacementMode::PictureInPicture);
-        assert_eq!(PlacementMode::from_user("flotante"), PlacementMode::LowerThird);
+        assert_eq!(
+            PlacementMode::from_user("completa"),
+            PlacementMode::Fullframe
+        );
+        assert_eq!(
+            PlacementMode::from_user("parcial"),
+            PlacementMode::PictureInPicture
+        );
+        assert_eq!(
+            PlacementMode::from_user("flotante"),
+            PlacementMode::LowerThird
+        );
     }
 
     #[test]

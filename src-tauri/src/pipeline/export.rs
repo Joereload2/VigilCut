@@ -44,12 +44,7 @@ pub fn keep_ranges_from_edl(edl: &Edl) -> Vec<(f64, f64)> {
 pub fn keep_ranges_from_segments(segments: &[Segment]) -> Vec<(f64, f64)> {
     let ranges: Vec<(f64, f64)> = segments
         .iter()
-        .filter(|s| {
-            matches!(
-                s.decision,
-                SegmentDecision::Keep | SegmentDecision::Pending
-            )
-        })
+        .filter(|s| matches!(s.decision, SegmentDecision::Keep | SegmentDecision::Pending))
         .map(|s| (s.start, s.end))
         .collect();
     merge_keep_ranges(ranges)
@@ -104,10 +99,7 @@ pub fn audio_enhance_filters(audio: &AudioEnhanceOptions) -> Vec<String> {
         filters.push("acompressor=threshold=-18dB:ratio=3:attack=20:release=250".into());
     }
     if audio.normalize {
-        filters.push(format!(
-            "loudnorm=I={}:TP=-1.5:LRA=11",
-            audio.target_lufs
-        ));
+        filters.push(format!("loudnorm=I={}:TP=-1.5:LRA=11", audio.target_lufs));
     }
     filters
 }
@@ -148,9 +140,7 @@ pub fn build_export_filter(
             color.brightness, color.contrast, color.saturation, color.gamma
         ));
     } else {
-        parts.push(format!(
-            "[0:v]select='{expr}',setpts=N/FRAME_RATE/TB[vout]"
-        ));
+        parts.push(format!("[0:v]select='{expr}',setpts=N/FRAME_RATE/TB[vout]"));
     }
 
     if has_audio {
@@ -177,8 +167,17 @@ pub async fn export_keep_ranges(
     color: &ColorOptions,
     has_audio: bool,
 ) -> AppResult<PathBuf> {
-    export_keep_ranges_with_audio(input, output, keep, export_opts, color, None, has_audio, None)
-        .await
+    export_keep_ranges_with_audio(
+        input,
+        output,
+        keep,
+        export_opts,
+        color,
+        None,
+        has_audio,
+        None,
+    )
+    .await
 }
 
 pub async fn export_keep_ranges_with_audio(
@@ -301,10 +300,7 @@ pub async fn export_keep_ranges_with_audio(
 
     match run_result {
         Ok(p) => {
-            tracing::info!(
-                "Export finalized (original untouched) → {}",
-                p.display()
-            );
+            tracing::info!("Export finalized (original untouched) → {}", p.display());
             Ok(p)
         }
         Err(e) => {
@@ -418,7 +414,7 @@ mod tests {
             &ColorOptions::default(),
             None,
         )
-            .unwrap();
+        .unwrap();
         assert!(f.contains("between(t\\,"));
         assert!(f.contains("[vout]"));
         assert!(f.contains("[aout]"));
@@ -431,13 +427,8 @@ mod tests {
         audio.denoise = true;
         audio.normalize = true;
         audio.highpass_hz = Some(80);
-        let f = build_export_filter(
-            &[(0.0, 5.0)],
-            true,
-            &ColorOptions::default(),
-            Some(&audio),
-        )
-        .unwrap();
+        let f = build_export_filter(&[(0.0, 5.0)], true, &ColorOptions::default(), Some(&audio))
+            .unwrap();
         assert!(f.contains("highpass=f=80"));
         assert!(f.contains("afftdn="));
         assert!(f.contains("loudnorm="));
@@ -447,9 +438,12 @@ mod tests {
     #[test]
     fn resolve_prefers_explicit_then_edl_then_segments() {
         let edl = Edl::from_remove_spans("x.mp4", 10.0, &[(2.0, 3.0)]);
-        let segs = vec![
-            Segment::new(0.0, 10.0, SegmentKind::Speech, SegmentDecision::Keep),
-        ];
+        let segs = vec![Segment::new(
+            0.0,
+            10.0,
+            SegmentKind::Speech,
+            SegmentDecision::Keep,
+        )];
 
         let k = resolve_keep_ranges(None, None, Some(vec![(0.0, 1.0), (2.0, 3.0)])).unwrap();
         assert_eq!(k.len(), 2);

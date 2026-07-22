@@ -166,7 +166,9 @@ pub fn review_image(
         details["semanticMode"] = serde_json::json!("heuristic_no_vision");
     }
 
-    let hard_hit = forbidden.iter().any(|f| f.starts_with("exclusion_in_brief:"));
+    let hard_hit = forbidden
+        .iter()
+        .any(|f| f.starts_with("exclusion_in_brief:"));
     let (decision, reason) = if hard_hit {
         (
             "reject".to_string(),
@@ -244,9 +246,7 @@ fn find_near_duplicate(phash: &str, max_dist: u32) -> AppResult<Option<String>> 
         .prepare("SELECT id, perceptual_hash FROM media_assets WHERE perceptual_hash IS NOT NULL AND status = 'active'")
         .map_err(|e| AppError::Message(e.to_string()))?;
     let rows = stmt
-        .query_map([], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-        })
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
         .map_err(|e| AppError::Message(e.to_string()))?;
     for row in rows.flatten() {
         if let Some(d) = hamming_hex(phash, &row.1) {
