@@ -69,8 +69,8 @@ fn run_ffmpeg(args: &[&str]) {
     // Keep it only for interactive local Windows sessions.
     #[cfg(windows)]
     {
-        let is_ci = std::env::var_os("CI").is_some()
-            || std::env::var_os("GITHUB_ACTIONS").is_some();
+        let is_ci =
+            std::env::var_os("CI").is_some() || std::env::var_os("GITHUB_ACTIONS").is_some();
         if !is_ci {
             use std::os::windows::process::CommandExt;
             cmd.creation_flags(CREATE_NO_WINDOW);
@@ -158,8 +158,8 @@ pub fn make_talking_head_fixture(path: &Path) {
         cmd.args(args);
         #[cfg(windows)]
         {
-            let is_ci = std::env::var_os("CI").is_some()
-                || std::env::var_os("GITHUB_ACTIONS").is_some();
+            let is_ci =
+                std::env::var_os("CI").is_some() || std::env::var_os("GITHUB_ACTIONS").is_some();
             if !is_ci {
                 use std::os::windows::process::CommandExt;
                 cmd.creation_flags(CREATE_NO_WINDOW);
