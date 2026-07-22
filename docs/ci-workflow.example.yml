@@ -7,6 +7,10 @@ on:
   pull_request:
     branches: [main, master]
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   frontend:
     runs-on: windows-latest
@@ -21,6 +25,15 @@ jobs:
       - run: npm run build
       - name: Lint alias (svelte-check)
         run: npm run lint
+      - name: Env example present (no secrets)
+        shell: pwsh
+        run: |
+          if (-not (Test-Path .env.example)) { throw ".env.example missing" }
+          $txt = Get-Content .env.example -Raw
+          if ($txt -match 'service_role' -or $txt -match 'sk-[a-zA-Z0-9]{20,}') {
+            throw "Possible secret material in .env.example"
+          }
+          Write-Host "OK .env.example"
 
   rust:
     runs-on: windows-latest
@@ -36,13 +49,42 @@ jobs:
         run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
       - name: Clippy
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-      - name: Unit tests
+      - name: Unit tests (full lib)
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture
+      - name: Visual library unit filter
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib pipeline::visual -- --nocapture
+      - name: CLI binary builds
+        run: cargo build --manifest-path src-tauri/Cargo.toml --bin vigilcut-cli
 
-  # Smoke needs FFmpeg — install via winget/choco if available; skip soft-fail otherwise
   smoke:
     runs-on: windows-latest
     needs: [rust]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Install FFmpeg
+        shell: pwsh
+        run: |
+          choco install ffmpeg -y --no-progress
+          ffmpeg -version
+          if ($LASTEXITCODE -ne 0) { throw "ffmpeg not on PATH after install" }
+      - name: Smoke pipeline
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test smoke_pipeline -- --nocapture
+      - name: Smoke clipping
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test smoke_clipping -- --nocapture
+      - name: Smoke visual (overlay + library)
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test smoke_visual -- --nocapture
+      - name: Smoke visual intel (match → mock gen → QA)
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test smoke_visual_intel -- --nocapture
+        env:
+          VIGILCUT_IMAGE_PROVIDER: mock
+
+  e2e:
+    runs-on: windows-latest
+    needs: [smoke]
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -51,10 +93,29 @@ jobs:
         with:
           workspaces: src-tauri
       - name: Install FFmpeg
+        shell: pwsh
         run: |
           choco install ffmpeg -y --no-progress
           ffmpeg -version
-        continue-on-error: true
-      - name: Smoke pipeline
-        run: cargo test --manifest-path src-tauri/Cargo.toml --test smoke_pipeline -- --nocapture
-        continue-on-error: true
+      - name: E2E factory
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test e2e_factory -- --nocapture
+      - name: E2E clipping
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test e2e_clipping -- --nocapture
+
+  supabase-sql:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Basic SQL migration sanity
+        run: |
+          set -euo pipefail
+          f=supabase/migrations/20260722000000_visual_library.sql
+          test -f "$f"
+          ! grep -qiE 'service_role|eyJhbGci' "$f"
+          grep -q 'CREATE TABLE IF NOT EXISTS public.media_assets' "$f"
+          grep -q 'CREATE TABLE IF NOT EXISTS public.visual_concepts' "$f"
+          grep -q 'CREATE TABLE IF NOT EXISTS public.generation_jobs' "$f"
+          grep -q 'ENABLE ROW LEVEL SECURITY' "$f"
+          grep -q 'visual-library' "$f"
+          grep -q 'WITH CHECK' "$f"
+          echo "Supabase migration checks OK"
