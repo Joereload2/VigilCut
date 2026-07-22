@@ -487,8 +487,14 @@ export async function visualUpdatePlacement(params: {
   positionX?: number | null;
   positionY?: number | null;
   sizeW?: number | null;
+  sizeH?: number | null;
   fit?: string | null;
   status?: string | null;
+  reviewStatus?: string | null;
+  manualOverride?: boolean | null;
+  relatedText?: string | null;
+  restoreAi?: boolean | null;
+  opacity?: number | null;
 }): Promise<unknown> {
   return invoke("visual_update_placement", {
     placementId: params.placementId,
@@ -498,9 +504,35 @@ export async function visualUpdatePlacement(params: {
     positionX: params.positionX ?? null,
     positionY: params.positionY ?? null,
     sizeW: params.sizeW ?? null,
+    sizeH: params.sizeH ?? null,
     fit: params.fit ?? null,
     status: params.status ?? null,
+    reviewStatus: params.reviewStatus ?? null,
+    manualOverride: params.manualOverride ?? null,
+    relatedText: params.relatedText ?? null,
+    restoreAi: params.restoreAi ?? null,
+    opacity: params.opacity ?? null,
   });
+}
+
+export async function visualSnapPlacement(params: {
+  placementId: string;
+  outputStart: number;
+  outputEnd: number;
+  anchors: number[];
+  threshold?: number | null;
+}): Promise<unknown> {
+  return invoke("visual_snap_placement", {
+    placementId: params.placementId,
+    outputStart: params.outputStart,
+    outputEnd: params.outputEnd,
+    anchors: params.anchors,
+    threshold: params.threshold ?? null,
+  });
+}
+
+export async function visualEvaluateComposition(): Promise<unknown> {
+  return invoke("visual_evaluate_composition");
 }
 
 export async function visualRemovePlacement(placementId: string): Promise<unknown> {

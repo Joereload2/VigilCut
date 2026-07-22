@@ -112,6 +112,8 @@ pub fn run() {
             commands::visual::visual_attach_image,
             commands::visual::visual_create_manual_placement,
             commands::visual::visual_update_placement,
+            commands::visual::visual_snap_placement,
+            commands::visual::visual_evaluate_composition,
             commands::visual::visual_remove_placement,
             commands::visual::visual_add_protected_range,
             commands::visual::visual_remove_protected_range,

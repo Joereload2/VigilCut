@@ -1,5 +1,7 @@
 //! Visual enrichment: library, matching, plan, render.
 
+pub mod compose;
+pub mod layout;
 pub mod library;
 pub mod match_rank;
 pub mod render;
@@ -12,8 +14,11 @@ use crate::models::edl::Edl;
 use crate::models::event::Span;
 use crate::models::transcript::{Transcript, TranscriptStatus};
 use crate::models::visual::{
-    edl_fingerprint, PlacementLayout, PlacementMode, ProtectedRange, LicenseStatus,
+    edl_fingerprint, PlacementLayout, PlacementMode, ProtectedRange, ReviewStatus, LicenseStatus,
     SuggestionStatus, VisualPlan, VisualPlacement, VisualSuggestion,
+};
+use crate::pipeline::visual::compose::{
+    evaluate_composition, restore_suggested, snap_placement_edges,
 };
 use crate::pipeline::semantic::extract_semantic_events;
 use crate::pipeline::time_map::TimeMap;
@@ -432,7 +437,7 @@ pub fn create_manual_placement(
         label.or_else(|| Some(asset.title.clone())),
     );
     plan.placements.push(placement.clone());
-    plan.touch();
+    evaluate_composition(plan);
     plan.warnings.retain(|w| !w.contains("Biblioteca vacía"));
 
     let plan_out = plan.clone();
@@ -442,7 +447,7 @@ pub fn create_manual_placement(
     g.edl_fp = Some(fp);
 
     Ok(serde_json::json!({
-        "placement": placement,
+        "placement": plan_out.placements.iter().find(|p| p.id == placement.id).cloned().unwrap_or(placement),
         "asset": asset,
         "plan": plan_out,
         "transcript": g.transcript,
@@ -467,58 +472,141 @@ pub fn update_placement(
     position_x: Option<f64>,
     position_y: Option<f64>,
     size_w: Option<f64>,
+    size_h: Option<f64>,
     fit: Option<&str>,
     status: Option<&str>,
+    review_status: Option<&str>,
+    manual_override: Option<bool>,
+    related_text: Option<String>,
+    restore_ai: Option<bool>,
+    opacity: Option<f64>,
 ) -> AppResult<VisualPlan> {
     let mut g = state.lock().map_err(|e| AppError::Message(e.to_string()))?;
     let plan = g
         .plan
         .as_mut()
         .ok_or_else(|| AppError::Invalid("No hay VisualPlan en sesión.".into()))?;
-    let pl = plan
-        .placements
-        .iter_mut()
-        .find(|p| p.id == placement_id)
-        .ok_or_else(|| AppError::NotFound(placement_id.into()))?;
-    if let Some(s) = output_start {
-        pl.output_start = s.max(0.0);
-    }
-    if let Some(e) = output_end {
-        pl.output_end = e.max(pl.output_start + 0.25);
-    }
-    if let Some(m) = display_mode {
-        pl.mode = PlacementMode::from_user(m);
-        // refresh layout defaults when mode changes unless user also sent coords
-        if position_x.is_none() && position_y.is_none() && size_w.is_none() {
-            pl.layout = PlacementLayout::for_mode(pl.mode);
+    let (check_start, check_end, check_active, check_override) = {
+        let pl = plan
+            .placements
+            .iter_mut()
+            .find(|p| p.id == placement_id)
+            .ok_or_else(|| AppError::NotFound(placement_id.into()))?;
+        if restore_ai == Some(true) {
+            restore_suggested(pl);
         }
-    }
-    if let Some(x) = position_x {
-        pl.layout.x = x;
-    }
-    if let Some(y) = position_y {
-        pl.layout.y = y;
-    }
-    if let Some(w) = size_w {
-        pl.layout.w = w;
-    }
-    pl.layout = pl.layout.clone().clamp();
-    if let Some(f) = fit {
-        pl.fit = f.into();
-    }
-    if let Some(st) = status {
-        pl.status = st.into();
-    }
-    let check_start = pl.output_start;
-    let check_end = pl.output_end;
-    let check_active = pl.status == "active";
-    // Protected range check (after releasing pl borrow via copies)
-    if check_active && plan.is_protected(check_start, check_end) {
+        if let Some(s) = output_start {
+            pl.output_start = s.max(0.0);
+            pl.manual_override = true;
+        }
+        if let Some(e) = output_end {
+            pl.output_end = e.max(pl.output_start + 0.25);
+            pl.manual_override = true;
+        }
+        if let Some(m) = display_mode {
+            pl.mode = PlacementMode::from_user(m);
+            if position_x.is_none() && position_y.is_none() && size_w.is_none() {
+                pl.layout = PlacementLayout::for_mode(pl.mode);
+            }
+            pl.manual_override = true;
+        }
+        if let Some(x) = position_x {
+            pl.layout.x = x;
+            pl.manual_override = true;
+        }
+        if let Some(y) = position_y {
+            pl.layout.y = y;
+            pl.manual_override = true;
+        }
+        if let Some(w) = size_w {
+            pl.layout.w = w;
+            pl.manual_override = true;
+        }
+        if let Some(h) = size_h {
+            pl.layout.h = h;
+            pl.manual_override = true;
+        }
+        if let Some(o) = opacity {
+            pl.layout.opacity = o;
+        }
+        pl.layout = pl.layout.clone().clamp();
+        if let Some(f) = fit {
+            pl.fit = f.into();
+            pl.manual_override = true;
+        }
+        if let Some(st) = status {
+            pl.status = st.into();
+        }
+        if let Some(rs) = review_status {
+            pl.review_status = match rs.to_lowercase().as_str() {
+                "approved" | "aceptado" | "ok" => ReviewStatus::Approved,
+                "conflict" | "conflicto" => ReviewStatus::Conflict,
+                "rejected" | "rechazado" => ReviewStatus::Rejected,
+                _ => ReviewStatus::Pending,
+            };
+        }
+        if let Some(mo) = manual_override {
+            pl.manual_override = mo;
+        }
+        if let Some(rt) = related_text {
+            pl.related_text = Some(rt);
+        }
+        (
+            pl.output_start,
+            pl.output_end,
+            pl.status == "active",
+            pl.manual_override,
+        )
+    };
+    if check_active && !check_override && plan.is_protected(check_start, check_end) {
         return Err(AppError::Invalid(
-            "El placement cae en un rango protegido.".into(),
+            "El placement cae en un rango protegido. Activa override o mueve el bloque.".into(),
         ));
     }
-    plan.touch();
+    evaluate_composition(plan);
+    let out = plan.clone();
+    let _ = save_visual_plan(&out, None);
+    Ok(out)
+}
+
+/// Magnetic snap placement edges to transcript/cut anchors (output timeline).
+pub fn snap_placement(
+    state: &VisualState,
+    placement_id: &str,
+    output_start: f64,
+    output_end: f64,
+    anchors: Vec<f64>,
+    threshold: Option<f64>,
+) -> AppResult<VisualPlan> {
+    let thr = threshold.unwrap_or(0.18);
+    let (s, e) = snap_placement_edges(output_start, output_end, &anchors, thr);
+    update_placement(
+        state,
+        placement_id,
+        Some(s),
+        Some(e),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(true),
+        None,
+        None,
+        None,
+    )
+}
+
+pub fn evaluate_plan(state: &VisualState) -> AppResult<VisualPlan> {
+    let mut g = state.lock().map_err(|e| AppError::Message(e.to_string()))?;
+    let plan = g
+        .plan
+        .as_mut()
+        .ok_or_else(|| AppError::Invalid("No hay VisualPlan en sesión.".into()))?;
+    evaluate_composition(plan);
     let out = plan.clone();
     let _ = save_visual_plan(&out, None);
     Ok(out)

@@ -52,21 +52,15 @@ async fn smoke_visual_overlay_render_atomic_and_manifest() {
     assert_eq!(std::fs::metadata(&png).unwrap().len(), orig_meta, "original must stay intact");
 
     let mut plan = VisualPlan::new("smoke-run", cut.to_string_lossy(), "fp-smoke");
-    plan.placements.push(VisualPlacement {
-        id: uuid::Uuid::new_v4().to_string(),
-        asset_id: asset.id.clone(),
-        output_start: 0.5,
-        output_end: 1.5,
-        mode: PlacementMode::Fullframe,
-        fit: "cover".into(),
-        transition_in: "none".into(),
-        transition_out: "none".into(),
-        status: "active".into(),
-        provenance: "smoke_test".into(),
-        suggestion_id: None,
-        layout: Default::default(),
-        label: Some("smoke".into()),
-    });
+    plan.placements.push(VisualPlacement::manual(
+        asset.id.clone(),
+        0.5,
+        1.5,
+        PlacementMode::Fullframe,
+        Default::default(),
+        "cover",
+        Some("smoke".into()),
+    ));
 
     let out = ws.join("visual-enriched.mp4");
     let rendered = render_visual_plan(&cut, &plan, &out, "smoke-media.mp4")

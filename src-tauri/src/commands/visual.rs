@@ -254,8 +254,14 @@ pub fn visual_update_placement(
     position_x: Option<f64>,
     position_y: Option<f64>,
     size_w: Option<f64>,
+    size_h: Option<f64>,
     fit: Option<String>,
     status: Option<String>,
+    review_status: Option<String>,
+    manual_override: Option<bool>,
+    related_text: Option<String>,
+    restore_ai: Option<bool>,
+    opacity: Option<f64>,
     visual: State<'_, VisualSessionState>,
 ) -> AppResult<VisualPlan> {
     update_placement(
@@ -267,9 +273,41 @@ pub fn visual_update_placement(
         position_x,
         position_y,
         size_w,
+        size_h,
         fit.as_deref(),
         status.as_deref(),
+        review_status.as_deref(),
+        manual_override,
+        related_text,
+        restore_ai,
+        opacity,
     )
+}
+
+#[tauri::command]
+pub fn visual_snap_placement(
+    placement_id: String,
+    output_start: f64,
+    output_end: f64,
+    anchors: Vec<f64>,
+    threshold: Option<f64>,
+    visual: State<'_, VisualSessionState>,
+) -> AppResult<VisualPlan> {
+    crate::pipeline::visual::snap_placement(
+        &visual,
+        &placement_id,
+        output_start,
+        output_end,
+        anchors,
+        threshold,
+    )
+}
+
+#[tauri::command]
+pub fn visual_evaluate_composition(
+    visual: State<'_, VisualSessionState>,
+) -> AppResult<VisualPlan> {
+    crate::pipeline::visual::evaluate_plan(&visual)
 }
 
 #[tauri::command]
