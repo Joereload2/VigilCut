@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::event::Span;
+use super::visual_intel::{AssetProvenance, QaStatus};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -57,6 +58,33 @@ pub struct MediaAsset {
     pub original_path: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    // ── Intelligent library extensions (defaults for legacy rows) ──
+    #[serde(default)]
+    pub literal_description: Vec<String>,
+    #[serde(default)]
+    pub meanings: Vec<String>,
+    #[serde(default)]
+    pub positive_contexts: Vec<String>,
+    #[serde(default)]
+    pub negative_contexts: Vec<String>,
+    #[serde(default)]
+    pub hard_exclusions: Vec<String>,
+    #[serde(default)]
+    pub aspect_ratio: Option<String>,
+    #[serde(default)]
+    pub safe_area: Option<String>,
+    #[serde(default)]
+    pub perceptual_hash: Option<String>,
+    #[serde(default)]
+    pub qa_status: QaStatus,
+    #[serde(default)]
+    pub technical_score: Option<f64>,
+    #[serde(default)]
+    pub semantic_score: Option<f64>,
+    #[serde(default)]
+    pub provenance: Option<AssetProvenance>,
+    #[serde(default)]
+    pub commercial_use: Option<bool>,
 }
 
 impl MediaAsset {

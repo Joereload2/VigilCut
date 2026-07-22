@@ -8,6 +8,8 @@ use sha2::{Digest, Sha256};
 
 use crate::error::{AppError, AppResult};
 use crate::models::visual::{AssetStatus, LicenseStatus, MediaAsset};
+use crate::models::visual_intel::{AssetProvenance, QaStatus};
+use crate::pipeline::visual::schema;
 use crate::state::AppState;
 
 /// Process-wide override for tests (preferred over env when set).
@@ -16,6 +18,14 @@ static LIBRARY_ROOT_OVERRIDE: Mutex<Option<PathBuf>> = Mutex::new(None);
 /// Serializes library tests that mutate the override.
 #[cfg(test)]
 static LIBRARY_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+/// Hold during tests that touch library root / SQLite (prevents parallel clobber).
+#[cfg(test)]
+pub fn lock_library_for_test() -> std::sync::MutexGuard<'static, ()> {
+    LIBRARY_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
 
 /// Override library root (tests). Pass `None` to clear.
 pub fn set_library_root_override(path: Option<PathBuf>) {
@@ -93,6 +103,7 @@ pub fn open_db() -> AppResult<Connection> {
         "#,
     )
     .map_err(|e| AppError::Message(e.to_string()))?;
+    schema::migrate(&conn)?;
     Ok(conn)
 }
 
@@ -176,6 +187,8 @@ pub fn import_image(
             .unwrap_or("image")
             .to_string()
     });
+    let aspect = aspect_label(w, h);
+    let phash = perceptual_hash_simple(&img);
     let asset = MediaAsset {
         id: id.clone(),
         kind: "image".into(),
@@ -184,8 +197,8 @@ pub fn import_image(
         sha256: sha,
         title,
         description: None,
-        tags,
-        concepts,
+        tags: tags.clone(),
+        concepts: concepts.clone(),
         category: None,
         width: w,
         height: h,
@@ -204,21 +217,107 @@ pub fn import_image(
         original_path: Some(source.to_string_lossy().into_owned()),
         created_at: now.clone(),
         updated_at: now,
+        literal_description: tags,
+        meanings: concepts.clone(),
+        positive_contexts: concepts,
+        negative_contexts: Vec::new(),
+        hard_exclusions: Vec::new(),
+        aspect_ratio: Some(aspect),
+        safe_area: Some("center".into()),
+        perceptual_hash: Some(phash),
+        qa_status: QaStatus::Approved,
+        technical_score: Some(((w * h) as f64 / 1_000_000.0).min(1.0)),
+        semantic_score: None,
+        provenance: Some(AssetProvenance {
+            source: "import".into(),
+            provider: None,
+            model: None,
+            prompt: None,
+            negative_prompt: None,
+            seed: None,
+            generated_at: None,
+        }),
+        commercial_use: Some(matches!(
+            license,
+            LicenseStatus::Owned | LicenseStatus::Licensed | LicenseStatus::PublicDomain
+        )),
     };
 
     insert_asset(&conn, &asset)?;
     Ok(asset)
 }
 
+pub fn aspect_label(w: u32, h: u32) -> String {
+    if w == 0 || h == 0 {
+        return "unknown".into();
+    }
+    let r = w as f64 / h as f64;
+    if (r - 16.0 / 9.0).abs() < 0.08 {
+        "16:9".into()
+    } else if (r - 9.0 / 16.0).abs() < 0.08 {
+        "9:16".into()
+    } else if (r - 1.0).abs() < 0.08 {
+        "1:1".into()
+    } else if (r - 4.0 / 3.0).abs() < 0.08 {
+        "4:3".into()
+    } else if w >= h {
+        "landscape".into()
+    } else {
+        "portrait".into()
+    }
+}
+
+/// Simple average-hash (8x8) for near-duplicate detection — not cryptographic.
+pub fn perceptual_hash_simple(img: &image::DynamicImage) -> String {
+    let small = img.resize_exact(8, 8, image::imageops::FilterType::Triangle);
+    let gray = small.to_luma8();
+    let mut sum: u32 = 0;
+    let mut vals = [0u8; 64];
+    for (i, p) in gray.pixels().enumerate() {
+        vals[i] = p[0];
+        sum += p[0] as u32;
+    }
+    let avg = (sum / 64) as u8;
+    let mut bits: u64 = 0;
+    for (i, v) in vals.iter().enumerate() {
+        if *v >= avg {
+            bits |= 1u64 << i;
+        }
+    }
+    format!("{bits:016x}")
+}
+
+pub fn hamming_hex(a: &str, b: &str) -> Option<u32> {
+    let a = u64::from_str_radix(a, 16).ok()?;
+    let b = u64::from_str_radix(b, 16).ok()?;
+    Some((a ^ b).count_ones())
+}
+
+fn json_vec(v: &[String]) -> String {
+    serde_json::to_string(v).unwrap_or_else(|_| "[]".into())
+}
+
+fn parse_json_vec(s: &str) -> Vec<String> {
+    serde_json::from_str(s).unwrap_or_default()
+}
+
 fn insert_asset(conn: &Connection, a: &MediaAsset) -> AppResult<()> {
+    let prov = a
+        .provenance
+        .as_ref()
+        .and_then(|p| serde_json::to_string(p).ok());
     conn.execute(
         r#"INSERT INTO media_assets (
             id, kind, managed_path, thumbnail_path, sha256, title, description, tags, concepts,
             category, width, height, orientation, mime_type, file_size, license_status, source,
             attribution, times_used, last_used_at, allow_same_video_repeat, minimum_videos_before_reuse,
-            quality_score, status, original_path, created_at, updated_at
+            quality_score, status, original_path, created_at, updated_at,
+            meanings, positive_contexts, negative_contexts, hard_exclusions, aspect_ratio, safe_area,
+            perceptual_hash, qa_status, technical_score, semantic_score, provenance_json, commercial_use,
+            literal_description
         ) VALUES (
-            ?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27
+            ?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,
+            ?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38,?39,?40
         )"#,
         params![
             a.id,
@@ -228,8 +327,8 @@ fn insert_asset(conn: &Connection, a: &MediaAsset) -> AppResult<()> {
             a.sha256,
             a.title,
             a.description,
-            serde_json::to_string(&a.tags).unwrap_or_else(|_| "[]".into()),
-            serde_json::to_string(&a.concepts).unwrap_or_else(|_| "[]".into()),
+            json_vec(&a.tags),
+            json_vec(&a.concepts),
             a.category,
             a.width,
             a.height,
@@ -248,6 +347,19 @@ fn insert_asset(conn: &Connection, a: &MediaAsset) -> AppResult<()> {
             a.original_path,
             a.created_at,
             a.updated_at,
+            json_vec(&a.meanings),
+            json_vec(&a.positive_contexts),
+            json_vec(&a.negative_contexts),
+            json_vec(&a.hard_exclusions),
+            a.aspect_ratio,
+            a.safe_area,
+            a.perceptual_hash,
+            a.qa_status.as_str(),
+            a.technical_score,
+            a.semantic_score,
+            prov,
+            a.commercial_use.map(|b| b as i64),
+            json_vec(&a.literal_description),
         ],
     )
     .map_err(|e| AppError::Message(e.to_string()))?;
@@ -259,6 +371,20 @@ fn row_to_asset(r: &rusqlite::Row<'_>) -> rusqlite::Result<MediaAsset> {
     let concepts: String = r.get(8)?;
     let lic: String = r.get(15)?;
     let st: String = r.get(23)?;
+    // Extended columns may be missing on very old DBs before migrate; use try_get with defaults.
+    let meanings: String = r.get::<_, String>(27).unwrap_or_else(|_| "[]".into());
+    let pos_ctx: String = r.get::<_, String>(28).unwrap_or_else(|_| "[]".into());
+    let neg_ctx: String = r.get::<_, String>(29).unwrap_or_else(|_| "[]".into());
+    let hard_ex: String = r.get::<_, String>(30).unwrap_or_else(|_| "[]".into());
+    let aspect: Option<String> = r.get(31)?;
+    let safe: Option<String> = r.get(32)?;
+    let phash: Option<String> = r.get(33)?;
+    let qa: String = r.get::<_, String>(34).unwrap_or_else(|_| "none".into());
+    let tech: Option<f64> = r.get(35)?;
+    let sem: Option<f64> = r.get(36)?;
+    let prov_s: Option<String> = r.get(37)?;
+    let commercial: Option<i64> = r.get(38)?;
+    let literal: String = r.get::<_, String>(39).unwrap_or_else(|_| "[]".into());
     Ok(MediaAsset {
         id: r.get(0)?,
         kind: r.get(1)?,
@@ -267,8 +393,8 @@ fn row_to_asset(r: &rusqlite::Row<'_>) -> rusqlite::Result<MediaAsset> {
         sha256: r.get(4)?,
         title: r.get(5)?,
         description: r.get(6)?,
-        tags: serde_json::from_str(&tags).unwrap_or_default(),
-        concepts: serde_json::from_str(&concepts).unwrap_or_default(),
+        tags: parse_json_vec(&tags),
+        concepts: parse_json_vec(&concepts),
         category: r.get(9)?,
         width: r.get::<_, i64>(10)? as u32,
         height: r.get::<_, i64>(11)? as u32,
@@ -287,13 +413,30 @@ fn row_to_asset(r: &rusqlite::Row<'_>) -> rusqlite::Result<MediaAsset> {
         original_path: r.get(24)?,
         created_at: r.get(25)?,
         updated_at: r.get(26)?,
+        literal_description: parse_json_vec(&literal),
+        meanings: parse_json_vec(&meanings),
+        positive_contexts: parse_json_vec(&pos_ctx),
+        negative_contexts: parse_json_vec(&neg_ctx),
+        hard_exclusions: parse_json_vec(&hard_ex),
+        aspect_ratio: aspect,
+        safe_area: safe,
+        perceptual_hash: phash,
+        qa_status: QaStatus::parse(&qa),
+        technical_score: tech,
+        semantic_score: sem,
+        provenance: prov_s.and_then(|s| serde_json::from_str(&s).ok()),
+        commercial_use: commercial.map(|c| c != 0),
     })
 }
 
 const SELECT_ALL: &str = r#"SELECT id, kind, managed_path, thumbnail_path, sha256, title, description,
     tags, concepts, category, width, height, orientation, mime_type, file_size, license_status,
     source, attribution, times_used, last_used_at, allow_same_video_repeat, minimum_videos_before_reuse,
-    quality_score, status, original_path, created_at, updated_at FROM media_assets"#;
+    quality_score, status, original_path, created_at, updated_at,
+    meanings, positive_contexts, negative_contexts, hard_exclusions, aspect_ratio, safe_area,
+    perceptual_hash, qa_status, technical_score, semantic_score, provenance_json, commercial_use,
+    literal_description
+    FROM media_assets"#;
 
 fn get_asset(conn: &Connection, id: &str) -> AppResult<MediaAsset> {
     conn.query_row(

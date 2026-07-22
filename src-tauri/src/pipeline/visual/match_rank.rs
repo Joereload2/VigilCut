@@ -192,6 +192,19 @@ mod tests {
             original_path: None,
             created_at: String::new(),
             updated_at: String::new(),
+            literal_description: Vec::new(),
+            meanings: Vec::new(),
+            positive_contexts: Vec::new(),
+            negative_contexts: Vec::new(),
+            hard_exclusions: Vec::new(),
+            aspect_ratio: Some("16:9".into()),
+            safe_area: Some("center".into()),
+            perceptual_hash: None,
+            qa_status: Default::default(),
+            technical_score: None,
+            semantic_score: None,
+            provenance: None,
+            commercial_use: Some(true),
         }
     }
 

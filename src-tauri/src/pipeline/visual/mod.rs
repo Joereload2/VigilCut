@@ -1,10 +1,19 @@
-//! Visual enrichment: library, matching, plan, render.
+//! Visual enrichment: library, matching, plan, render, intelligent library.
 
 pub mod compose;
+pub mod concepts;
+pub mod generation;
+pub mod intelligent_match;
 pub mod layout;
 pub mod library;
 pub mod match_rank;
+pub mod needs;
+pub mod qa;
 pub mod render;
+pub mod schema;
+
+#[cfg(test)]
+mod intel_flow_tests;
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;

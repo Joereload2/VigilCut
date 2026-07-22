@@ -13,5 +13,7 @@ pub mod progress;
 pub mod project;
 pub mod segment;
 pub mod subtitle;
+pub mod story_contracts;
 pub mod transcript;
 pub mod visual;
+pub mod visual_intel;
