@@ -1,13 +1,17 @@
 //! Render accepted visual placements as image overlays via FFmpeg.
+//! Geometry comes from [`layout::PlacementGeom`] — same contract as live preview.
 
 use std::path::{Path, PathBuf};
 
 use crate::error::{AppError, AppResult};
 use crate::ffmpeg::Ffmpeg;
-use crate::models::visual::{PlacementMode, VisualPlan};
+use crate::models::visual::VisualPlan;
 use crate::pipeline::safe_paths::{
     cleanup_temp, finalize_atomic, temp_export_path, unique_output_path, validate_export_output,
     validate_export_request,
+};
+use crate::pipeline::visual::layout::{
+    geom_json, PlacementGeom, DEFAULT_FRAME_H, DEFAULT_FRAME_W,
 };
 use crate::pipeline::visual::library::{list_assets, record_usage};
 
@@ -25,25 +29,27 @@ pub async fn render_visual_plan(
         .placements
         .iter()
         .filter(|p| p.status == "active")
-        .filter(|p| {
-            // Skip if fully inside a protected range
-            !plan.is_protected(p.output_start, p.output_end)
-        })
+        .filter(|p| !plan.is_protected(p.output_start, p.output_end))
         .cloned()
         .collect();
 
     if active.is_empty() {
-        // Nothing to overlay — refuse silent "copy as visual render" without labeling
         return Err(AppError::Invalid(
             "VisualPlan sin placements activos".into(),
         ));
     }
 
-    // Resolve asset paths
+    let frame_w = DEFAULT_FRAME_W;
+    let frame_h = DEFAULT_FRAME_H;
+
     let all = list_assets(None, 500)?;
     let mut inputs: Vec<PathBuf> = vec![cut_video.to_path_buf()];
     let mut filter_parts = Vec::new();
-    let mut last = "[0:v]".to_string();
+    // Normalize main video to canonical frame so overlay math matches layout.rs
+    filter_parts.push(format!(
+        "[0:v]scale={frame_w}:{frame_h}:force_original_aspect_ratio=decrease,pad={frame_w}:{frame_h}:(ow-iw)/2:(oh-ih)/2,setsar=1[base0]"
+    ));
+    let mut last = "[base0]".to_string();
 
     for (i, pl) in active.iter().enumerate() {
         let asset = all
@@ -62,42 +68,10 @@ pub async fn render_visual_plan(
         let start = pl.output_start;
         let end = pl.output_end;
         let enable = format!("between(t\\,{start:.3}\\,{end:.3})");
-        let alpha = pl.layout.opacity.clamp(0.05, 1.0);
-        let (scale, ox, oy) = match pl.mode {
-            PlacementMode::Fullframe => {
-                // Cover full frame
-                (
-                    format!(
-                        "[{idx}:v]scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720,format=rgba,colorchannelmixer=aa={alpha:.3}[ov{i}]"
-                    ),
-                    "(W-w)/2".to_string(),
-                    "(H-h)/2".to_string(),
-                )
-            }
-            PlacementMode::PictureInPicture => {
-                let wf = (pl.layout.w * 1280.0).round().max(80.0) as i32;
-                let xf = pl.layout.x.clamp(0.0, 1.0);
-                let yf = pl.layout.y.clamp(0.0, 1.0);
-                (
-                    format!(
-                        "[{idx}:v]scale={wf}:-1:force_original_aspect_ratio=decrease,format=rgba,colorchannelmixer=aa={alpha:.3}[ov{i}]"
-                    ),
-                    format!("(W-w)*{xf:.4}"),
-                    format!("(H-h)*{yf:.4}"),
-                )
-            }
-            PlacementMode::LowerThird => {
-                let wf = (pl.layout.w * 1280.0).round().max(120.0) as i32;
-                let yf = pl.layout.y.clamp(0.0, 1.0);
-                (
-                    format!(
-                        "[{idx}:v]scale={wf}:-1:force_original_aspect_ratio=decrease,format=rgba,colorchannelmixer=aa={alpha:.3}[ov{i}]"
-                    ),
-                    "(W-w)/2".to_string(),
-                    format!("(H-h)*{yf:.4}"),
-                )
-            }
-        };
+
+        let geom = PlacementGeom::from_placement(pl);
+        let scale = geom.ffmpeg_scale_filter(idx, i, frame_w, frame_h);
+        let (ox, oy) = geom.ffmpeg_overlay_xy(frame_w, frame_h);
         filter_parts.push(scale);
         let overlay = format!("{last}[ov{i}]overlay={ox}:{oy}:enable='{enable}'[v{i}]");
         filter_parts.push(overlay);
@@ -110,7 +84,6 @@ pub async fn render_visual_plan(
 
     let mut args: Vec<String> = vec!["-y".into()];
     for inp in &inputs {
-        // loop still image
         if inp != cut_video {
             args.push("-loop".into());
             args.push("1".into());
@@ -144,7 +117,13 @@ pub async fn render_visual_plan(
         cleanup_temp(&temp);
         return Err(e);
     }
-    if let Err(e) = validate_export_output(&temp, plan.placements.iter().map(|p| p.output_end).fold(0.0, f64::max)) {
+    if let Err(e) = validate_export_output(
+        &temp,
+        plan.placements
+            .iter()
+            .map(|p| p.output_end)
+            .fold(0.0, f64::max),
+    ) {
         cleanup_temp(&temp);
         return Err(e);
     }
@@ -153,7 +132,6 @@ pub async fn render_visual_plan(
         return Err(e);
     }
 
-    // Record usage only after success
     for pl in &active {
         let _ = record_usage(
             &pl.asset_id,
@@ -164,11 +142,12 @@ pub async fn render_visual_plan(
         );
     }
 
-    // Manifest next to output (traceable, reproducible)
     let manifest_path = final_out.with_extension("visual-manifest.json");
     let manifest = serde_json::json!({
         "kind": "visual_render_manifest",
-        "version": 1,
+        "version": 2,
+        "layoutContract": "center_norm_v1",
+        "frame": { "w": frame_w, "h": frame_h },
         "cutVideo": cut_video.to_string_lossy(),
         "output": final_out.to_string_lossy(),
         "sourceMedia": media_path_for_usage,
@@ -176,22 +155,28 @@ pub async fn render_visual_plan(
         "runId": plan.run_id,
         "edlFingerprint": plan.edl_fingerprint,
         "planVersion": plan.version,
-        "placements": active.iter().map(|p| serde_json::json!({
-            "id": p.id,
-            "assetId": p.asset_id,
-            "outputStart": p.output_start,
-            "outputEnd": p.output_end,
-            "mode": p.mode,
-            "provenance": p.provenance,
-        })).collect::<Vec<_>>(),
+        "placements": active.iter().map(|p| {
+            let mut o = serde_json::json!({
+                "id": p.id,
+                "assetId": p.asset_id,
+                "outputStart": p.output_start,
+                "outputEnd": p.output_end,
+                "mode": p.mode,
+                "fit": p.fit,
+                "provenance": p.provenance,
+            });
+            if let Some(map) = o.as_object_mut() {
+                map.insert("layout".into(), geom_json(p));
+            }
+            o
+        }).collect::<Vec<_>>(),
         "renderedAt": chrono::Utc::now().to_rfc3339(),
-        "note": "Overlays applied on cut timeline. Original media was not modified.",
+        "note": "Overlays use PlacementGeom center-normalized layout. Original media not modified.",
     });
     let _ = std::fs::write(
         &manifest_path,
         serde_json::to_string_pretty(&manifest).unwrap_or_default(),
     );
-    // Also persist the full plan beside the output
     let plan_beside = final_out.with_extension("visual-plan.json");
     let _ = std::fs::write(
         &plan_beside,
