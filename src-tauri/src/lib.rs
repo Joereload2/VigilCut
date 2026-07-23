@@ -145,6 +145,7 @@ pub fn run() {
             commands::visual_intel::visual_probe_image_provider,
             commands::visual_intel::visual_cost_policy,
             commands::visual_intel::visual_library_dashboard,
+            commands::visual_intel::visual_library_concept_coverage,
             commands::visual_intel::visual_library_create_request,
             commands::visual_intel::visual_library_preview_request,
             commands::visual_intel::visual_library_confirm_request,

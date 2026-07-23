@@ -548,6 +548,13 @@ pub fn visual_library_dashboard() -> AppResult<serde_json::Value> {
 }
 
 #[tauri::command]
+pub fn visual_library_concept_coverage(limit: Option<usize>) -> AppResult<serde_json::Value> {
+    Ok(serde_json::to_value(
+        crate::pipeline::visual::concept_coverage::list(limit.unwrap_or(100))?,
+    )?)
+}
+
+#[tauri::command]
 pub fn visual_library_create_request(
     input: crate::pipeline::visual::library_requests::CreateLibraryRequest,
 ) -> AppResult<serde_json::Value> {

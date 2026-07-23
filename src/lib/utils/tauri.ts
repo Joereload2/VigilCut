@@ -492,6 +492,10 @@ export async function visualLibraryDashboard(): Promise<unknown> {
   return invoke("visual_library_dashboard");
 }
 
+export async function visualLibraryConceptCoverage(limit = 100): Promise<unknown> {
+  return invoke("visual_library_concept_coverage", { limit });
+}
+
 export type CreateLibraryRequestInput = {
   title: string;
   targetCount: number;

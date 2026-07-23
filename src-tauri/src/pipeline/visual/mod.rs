@@ -2,6 +2,7 @@
 
 pub mod compose;
 pub mod concepts;
+pub mod concept_coverage;
 pub mod generation;
 pub mod intelligent_match;
 pub mod layout;
