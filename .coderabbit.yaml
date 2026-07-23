@@ -1,0 +1,79 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+reviews:
+  profile: chill
+  poem: false
+  in_progress_fortune: false
+  enable_prompt_for_ai_agents: true
+  path_filters:
+    - "!dist/**"
+    - "!node_modules/**"
+    - "!src-tauri/target/**"
+    - "!src-tauri/gen/**"
+    - "!src-tauri/binaries/**"
+    - "!**/*.lock"
+    - "!package-lock.json"
+    - "!**/*.png"
+    - "!**/*.jpg"
+    - "!**/*.jpeg"
+    - "!**/*.webp"
+    - "!**/*.mp4"
+  auto_review:
+    enabled: true
+    drafts: false
+    auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 5
+    ignore_title_keywords:
+      - "WIP"
+      - "DO NOT MERGE"
+      - "[skip review]"
+    ignore_usernames:
+      - "dependabot[bot]"
+      - "github-actions[bot]"
+  path_instructions:
+    - path: "src-tauri/src/**/*.rs"
+      instructions: |
+        Prioritize correctness over style already enforced by rustfmt and Clippy.
+        Flag race conditions, non-atomic state transitions, poisoned or long-held locks,
+        impossible persisted states, missing idempotency, weak cancellation, stuck-job
+        recovery gaps, unsafe file handling, SSRF/redirect/DNS/IPv6 gaps, secret
+        exposure, and paid-provider paths that are not disabled by default.
+        Flag functions or modules whose mixed responsibilities make these invariants
+        difficult to test; propose a concrete boundary rather than cosmetic splitting.
+    - path: "src-tauri/src/visual_library/**/*.rs"
+      instructions: |
+        Enforce the independent Visual Library boundary. B-roll and Story Builder
+        must consume contracts and media_asset_id, never SQLite tables, provider
+        details, GeneratedCandidate, storage paths, or direct placement from a
+        candidate. Every usable generated/imported image must pass through the
+        ingestion service with deduplication, provenance, license, and QA.
+    - path: "src/**/*.svelte"
+      instructions: |
+        Focus on truthful persisted states, non-blocking generation, retry/cancel
+        behavior, accessibility, keyboard/focus semantics, new-user comprehension,
+        and duplicated or oversized UI responsibilities. The UI may enqueue and poll
+        but must never act as the worker or scheduler. Do not repeat formatting or
+        TypeScript diagnostics already produced by project checks.
+    - path: "supabase/**/*.sql"
+      instructions: |
+        Treat migrations and RLS as security-sensitive. Require additive,
+        non-destructive migrations; RLS on exposed tables; ownership/workspace
+        isolation; UPDATE policies with USING and WITH CHECK; private Storage;
+        idempotency; and no service_role assumptions in clients. Flag direct writes
+        to storage.objects and authorization based on user_metadata.
+    - path: "src-tauri/tests/**/*.rs"
+      instructions: |
+        Reject tests that only assert success or key presence. Require assertions for
+        persisted state, idempotency, restart recovery, priority, cancellation, cost
+        gates, license truth, and asset reuse. Require mocks to be named and never
+        presented as evidence that an external provider works.
+    - path: ".github/workflows/**"
+      instructions: |
+        Review permissions, secret handling, action provenance, cache scope,
+        reproducibility, failure masking, and whether checks measure what their names
+        claim. Ignore stylistic YAML suggestions.
+    - path: "docs/**/*.md"
+      instructions: |
+        Flag claims that runtime integrations, paid providers, synchronization,
+        coverage upload, or external reviews work when only configuration, mocks, or
+        documentation exist. Require exact activation and rollback steps.

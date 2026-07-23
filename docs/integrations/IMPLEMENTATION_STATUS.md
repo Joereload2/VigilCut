@@ -9,7 +9,7 @@ This file records verified evidence after each isolated implementation gate.
 | Worker/Scheduler | verified | this phase commit | Full gate passes; 44 visual and 7 smoke tests | Real SQLite supervisor; mock provider | None |
 | Dependabot | verified | this integration commit | YAML assertions and full gate pass | Real configuration; GitHub run not observed | Must reach default branch; security settings and labels require GitHub verification |
 | Codecov | experimental | this integration commit | 100 instrumented tests; 182547-byte report; full gate passes | Real local report; remote upload unobserved | Codecov onboarding/OIDC workflow must be observed |
-| CodeRabbit | pending | - | - | - | GitHub App authorization required |
+| CodeRabbit | blocked | this integration commit | Official schema keys and full gate pass | Real configuration; no review observed | GitHub App authorization required |
 | Pollinations | pending | - | - | - | Terms, license, free route, and network probe required |
 | Supabase runtime | pending | - | - | - | Development credentials required for real verification |
 | Sentry ADR | pending | - | - | - | No SDK or telemetry authorized |
@@ -81,3 +81,19 @@ This file records verified evidence after each isolated implementation gate.
 - Rollback: remove the coverage workflow and `codecov.yml`.
 - Final gate: check, build, fmt, clippy, 44 visual tests, and 7 smoke tests
   passed on 2026-07-23 in addition to the instrumented run.
+## Stage record: CodeRabbit
+
+- Implemented: low-noise review profile, exclusions, incremental limits, and
+  focused instructions for Rust, library boundaries, Svelte, SQL, tests, CI,
+  and documentation.
+- Tested: YAML parsed and all configured keys checked against the live official
+  schema.v2.json; complete local gate passed.
+- Real: configuration file only.
+- Not operational: no GitHub App installation and no PR review observed.
+- Dependencies added: none.
+- Cost observed: 0.
+- Authorization required: repository owner must authorize the CodeRabbit
+  GitHub App and review its permissions/plan.
+- Rollback: remove `.coderabbit.yaml` and revoke the App separately if installed.
+- Final gate: check, build, fmt, clippy, 44 visual tests, and 7 smoke tests
+  passed on 2026-07-23.
