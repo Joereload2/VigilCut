@@ -34,6 +34,7 @@
   let description = $state("");
   let prompt = $state("");
   let negativePrompt = $state("");
+  let intent = $state("");
   let format = $state<"16:9" | "9:16" | "1:1" | "4:5">("16:9");
   let style = $state<"photorealistic" | "illustration" | "infographic" | "cinematic" | "other">("photorealistic");
 
@@ -54,7 +55,7 @@
   }
 
   function resetForm() {
-    theme = ""; concept = ""; description = ""; prompt = ""; negativePrompt = "";
+    intent = ""; theme = ""; concept = ""; description = ""; prompt = ""; negativePrompt = "";
     format = "16:9"; style = "photorealistic"; preview = null; advanced = false;
   }
 
@@ -70,9 +71,11 @@
   }
 
   async function searchFirst() {
-    if (concept.trim().length < 2 || description.trim().length < 3) {
-      error = "Escribe un concepto y una descripción clara."; return;
+    if (intent.trim().length < 2) {
+      error = "Escribe qué necesitas, por ejemplo: dinero, economía o personas trabajando."; return;
     }
+    concept = concept.trim() || intent.trim();
+    description = description.trim() || `Imagen relacionada con ${intent.trim()}`;
     busy = true; error = ""; notice = "";
     try {
       preview = await api.visualLibraryCreateRequest({
@@ -151,16 +154,23 @@
   {#if formOpen}
     <div class="rounded-2xl border border-violet-700/60 bg-surface-950/95 p-4 shadow-xl" role="dialog" aria-modal="true" aria-labelledby="new-image-title" tabindex="-1">
       <div class="flex items-start justify-between gap-3"><div><h3 id="new-image-title" class="text-base font-semibold text-white">Nueva imagen</h3><p class="text-[11px] text-surface-400">Una imagen · revisión humana obligatoria</p></div><button type="button" class="btn-ghost" onclick={() => { formOpen = false; resetForm(); }}>Cerrar</button></div>
-      <form class="mt-3 grid gap-3 sm:grid-cols-2" onsubmit={(e) => { e.preventDefault(); void searchFirst(); }}>
-        <label class="text-[11px] text-surface-300">Tema <input class="mt-1 w-full rounded-lg border border-surface-700 bg-surface-900 px-3 py-2" bind:value={theme} placeholder="Economía" /></label>
-        <label class="text-[11px] text-surface-300">Concepto o título <input class="mt-1 w-full rounded-lg border border-surface-700 bg-surface-900 px-3 py-2" bind:value={concept} placeholder="Inflación" required /></label>
-        <label class="text-[11px] text-surface-300 sm:col-span-2">Descripción de la imagen <textarea class="mt-1 min-h-20 w-full rounded-lg border border-surface-700 bg-surface-900 px-3 py-2" bind:value={description} placeholder="Familia comparando precios en un supermercado" required></textarea></label>
-        <label class="text-[11px] text-surface-300 sm:col-span-2">No debe contener <textarea class="mt-1 min-h-14 w-full rounded-lg border border-surface-700 bg-surface-900 px-3 py-2" bind:value={negativePrompt} placeholder="texto, logos, marcas, manos deformes"></textarea></label>
-        <label class="text-[11px] text-surface-300">Formato <select class="mt-1 w-full rounded-lg border border-surface-700 bg-surface-900 px-3 py-2" bind:value={format}><option value="16:9">Horizontal 16:9</option><option value="9:16">Vertical 9:16</option><option value="1:1">Cuadrado 1:1</option><option value="4:5">Retrato 4:5</option></select></label>
-        <label class="text-[11px] text-surface-300">Estilo <select class="mt-1 w-full rounded-lg border border-surface-700 bg-surface-900 px-3 py-2" bind:value={style}><option value="photorealistic">Fotografía realista</option><option value="illustration">Ilustración</option><option value="infographic">Infografía sin texto</option><option value="cinematic">Cinematográfico</option><option value="other">Otro</option></select></label>
-        <button type="button" class="text-left text-[10px] text-violet-300 underline sm:col-span-2" onclick={() => (advanced = !advanced)}>{advanced ? "Ocultar opciones avanzadas" : "Opciones avanzadas"}</button>
-        {#if advanced}<label class="text-[11px] text-surface-300 sm:col-span-2">Prompt positivo editable <textarea class="mt-1 min-h-20 w-full rounded-lg border border-surface-700 bg-surface-900 px-3 py-2" bind:value={prompt} placeholder="Se construirá automáticamente si queda vacío"></textarea></label>{/if}
-        <div class="flex justify-end gap-2 sm:col-span-2"><button type="button" class="btn-ghost" onclick={() => { formOpen = false; resetForm(); }}>Cancelar</button><button type="submit" class="btn-primary" disabled={busy}>{busy ? "Buscando…" : "Buscar coincidencias"}</button></div>
+      <form class="mt-4" onsubmit={(e) => { e.preventDefault(); void searchFirst(); }}>
+        <label class="block text-xs font-medium text-surface-200">¿Qué imagen necesitas?
+          <input class="mt-2 w-full rounded-xl border border-surface-700 bg-surface-900 px-4 py-3 text-base" bind:value={intent} placeholder="dinero" required />
+        </label>
+        <p class="mt-2 text-[11px] text-surface-500">Escribe una idea. VigilCut buscará conceptos relacionados antes de generar.</p>
+        <button type="button" class="mt-3 text-left text-[11px] text-violet-300 underline" onclick={() => (advanced = !advanced)}>{advanced ? "Ocultar detalles" : "Añadir detalles opcionales"}</button>
+        {#if advanced}
+          <div class="mt-3 grid gap-3 rounded-xl border border-surface-800 bg-surface-900/60 p-3 sm:grid-cols-2">
+            <label class="text-[11px] text-surface-300">Tema<input class="mt-1 w-full rounded-lg border border-surface-700 bg-surface-950 px-3 py-2" bind:value={theme} placeholder="Se infiere automáticamente" /></label>
+            <label class="text-[11px] text-surface-300">Título o concepto<input class="mt-1 w-full rounded-lg border border-surface-700 bg-surface-950 px-3 py-2" bind:value={concept} placeholder="Opcional" /></label>
+            <label class="text-[11px] text-surface-300 sm:col-span-2">Descripción<textarea class="mt-1 min-h-16 w-full rounded-lg border border-surface-700 bg-surface-950 px-3 py-2" bind:value={description} placeholder="Opcional: se genera a partir de tu idea"></textarea></label>
+            <label class="text-[11px] text-surface-300 sm:col-span-2">No debe contener<textarea class="mt-1 min-h-14 w-full rounded-lg border border-surface-700 bg-surface-950 px-3 py-2" bind:value={negativePrompt} placeholder="logos, texto ilegible..."></textarea></label>
+            <label class="text-[11px] text-surface-300">Formato<select class="mt-1 w-full rounded-lg border border-surface-700 bg-surface-950 px-3 py-2" bind:value={format}><option value="16:9">Horizontal 16:9</option><option value="9:16">Vertical 9:16</option><option value="1:1">Cuadrado 1:1</option><option value="4:5">Retrato 4:5</option></select></label>
+            <label class="text-[11px] text-surface-300">Estilo<select class="mt-1 w-full rounded-lg border border-surface-700 bg-surface-950 px-3 py-2" bind:value={style}><option value="photorealistic">Fotografía realista</option><option value="illustration">Ilustración</option><option value="infographic">Infografía sin texto</option><option value="cinematic">Cinematográfico</option><option value="other">Otro</option></select></label>
+          </div>
+        {/if}
+        <div class="mt-4 flex justify-end gap-2"><button type="button" class="btn-ghost" onclick={() => { formOpen = false; resetForm(); }}>Cancelar</button><button type="submit" class="btn-primary px-5" disabled={busy}>{busy ? "Buscando…" : "Buscar imágenes"}</button></div>
       </form>
 
       {#if preview}
