@@ -14,22 +14,35 @@
   import VideoVisualsView from "./VideoVisualsView.svelte";
   import VisualPicker from "./VisualPicker.svelte";
 
+  type ScenePickContext = {
+    needId: string;
+    label: string;
+    outputStart: number | null;
+    outputEnd: number | null;
+  };
+
   let {
     projectKey = $bindable<string | null>(null),
+    view = $bindable<VisualsViewId>("library"),
     compact = false,
+    hideChrome = false,
     onMessage = (_m: string) => {},
     onError = (_e: string) => {},
     onPlanUpdated = (_p: unknown) => {},
+    onViewChange = (_v: VisualsViewId) => {},
   }: {
     projectKey?: string | null;
-    /** true = panel derecho dentro de VisualPanel */
+    view?: VisualsViewId;
+    /** true = panel embebido (p.ej. solo contenido de vista) */
     compact?: boolean;
+    /** Oculta header/tabs si el padre ya los muestra */
+    hideChrome?: boolean;
     onMessage?: (m: string) => void;
     onError?: (e: string) => void;
     onPlanUpdated?: (p: unknown) => void;
+    onViewChange?: (v: VisualsViewId) => void;
   } = $props();
 
-  let view = $state<VisualsViewId>("library");
   let searchQ = $state("");
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
   let assets = $state<MediaAsset[]>([]);
@@ -51,28 +64,41 @@
   let pickerNeed = $state<NeedSupervision | null>(null);
   let pickerMatches = $state<MediaAsset[]>([]);
   let pickerLoading = $state(false);
+  /** PM-002: escena activa al buscar/elegir (no auto-primera uncovered) */
+  let sceneContext = $state<ScenePickContext | null>(null);
+  /** PM-005: asset importado en picker pendiente de confirmar */
+  let pendingImportId = $state<string | null>(null);
 
   const hasVideo = $derived(!!projectStore.mediaPath);
   const pending = $derived(snap?.pendingReview ?? []);
   const needs = $derived(snap?.needs ?? []);
   const coverage = $derived(snap?.coverage ?? null);
-  const sceneLabel = $derived(
-    pickerNeed
-      ? null
-      : needs.find((n) => n.uiState === "uncovered" || n.need.coverage === "uncovered")
-        ? null
-        : null,
-  );
+  const sceneLabelShort = $derived.by(() => {
+    if (!sceneContext) return null;
+    const s = sceneContext.outputStart;
+    if (s == null) return sceneContext.label;
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return `${m.toString().padStart(2, "0")}:${sec.toString().padStart(2, "0")}`;
+  });
 
   let didInitView = $state(false);
   $effect(() => {
     if (!didInitView) {
       didInitView = true;
       view = hasVideo ? "video" : "library";
+      onViewChange(view);
     } else if (!hasVideo && view === "video") {
       view = "library";
+      onViewChange(view);
     }
   });
+
+  function setView(v: VisualsViewId) {
+    if (v === "video" && !hasVideo) return;
+    view = v;
+    onViewChange(v);
+  }
 
   $effect(() => {
     void loadAssets(null);
@@ -106,8 +132,13 @@
     if (searchTimer) clearTimeout(searchTimer);
     searchTimer = setTimeout(() => {
       void loadAssets(v.trim() || null);
-      if (view !== "library") view = "library";
+      // PM-002: expandir a Biblioteca preservando sceneContext
+      if (view !== "library") setView("library");
     }, 300);
+  }
+
+  function clearSceneContext() {
+    sceneContext = null;
   }
 
   async function loadDaily() {
@@ -178,7 +209,7 @@
       })) as { projectKey?: string };
       projectKey = res.projectKey ?? projectKey;
       await refreshSnap();
-      view = "video";
+      setView("video");
       onMessage("Momentos visuales actualizados");
     } catch (e) {
       onError(String(e));
@@ -189,11 +220,18 @@
 
   async function openPicker(n: NeedSupervision) {
     if (n.uiState === "needs_human_review" || n.uiState === "reviewing") {
-      view = "review";
+      setView("review");
       return;
     }
+    sceneContext = {
+      needId: n.need.id,
+      label: n.need.label,
+      outputStart: n.need.outputStart ?? null,
+      outputEnd: n.need.outputEnd ?? null,
+    };
     pickerNeed = n;
     pickerOpen = true;
+    pendingImportId = null;
     pickerLoading = true;
     pickerMatches = [];
     try {
@@ -259,36 +297,29 @@
   }
 
   async function useAssetOnNeed(assetId: string) {
-    if (!pickerNeed || !projectStore.mediaPath) return;
+    const needId = sceneContext?.needId ?? pickerNeed?.need.id;
+    if (!needId || !projectStore.mediaPath) {
+      onError("No hay escena seleccionada para colocar la imagen");
+      return;
+    }
     busy = true;
     try {
-      await api.visualAssignNeedAsset(pickerNeed.need.id, assetId);
-      const s = pickerNeed.need.outputStart ?? 0;
-      const e = pickerNeed.need.outputEnd ?? s + 4;
-      const res = (await api.visualCreateManualPlacement({
+      // PM-003: una sola escritura backend
+      const res = (await api.visualUseAssetForNeed({
+        needId,
+        assetId,
         mediaPath: projectStore.mediaPath,
         analysisRunId: projectStore.analysisRun?.id ?? null,
-        assetId,
-        outputStart: s,
-        outputEnd: e,
-        displayMode: "completa",
-        sourceDuration: projectStore.duration,
-        label: pickerNeed.need.label,
       })) as { plan?: unknown; message?: string };
-      if (res.plan) onPlanUpdated(res.plan);
-      try {
-        const applied = (await api.visualApplyNeedsToPlan({
-          mediaPath: projectStore.mediaPath,
-          analysisRunId: projectStore.analysisRun?.id ?? null,
-          projectKey: projectKey ?? pickerNeed.need.projectKey,
-        })) as { plan?: unknown };
-        if (applied.plan) onPlanUpdated(applied.plan);
-      } catch {
-        /* placement already done */
+      if (!res.plan) {
+        throw new Error("No se pudo persistir el plan");
       }
+      onPlanUpdated(res.plan);
       onMessage(res.message ?? "Imagen en el video");
       pickerOpen = false;
       pickerNeed = null;
+      pendingImportId = null;
+      clearSceneContext();
       await refreshSnap();
       await loadAssets(searchQ.trim() || null);
     } catch (e) {
@@ -351,10 +382,15 @@
       const a = (await api.visualImportImage(p)) as MediaAsset;
       await loadAssets(searchQ.trim() || null);
       selectedAssetId = a.id;
-      if (pickerNeed) {
-        await useAssetOnNeed(a.id);
+      // PM-005: no colocar hasta confirmar Usar
+      if (pickerOpen && (pickerNeed || sceneContext)) {
+        pendingImportId = a.id;
+        if (!pickerMatches.some((m) => m.id === a.id)) {
+          pickerMatches = [a, ...pickerMatches];
+        }
+        onMessage("Imagen importada — confirma «Usar esta imagen» si quieres colocarla");
       } else {
-        view = "library";
+        setView("library");
         onMessage("Imagen importada a la biblioteca");
       }
     } catch (e) {
@@ -386,7 +422,7 @@
         `Carpeta: ${r.imported ?? 0} nuevas, ${r.duplicates ?? 0} duplicadas` +
           (r.failed ? `, ${r.failed} errores` : ""),
       );
-      view = "library";
+      setView("library");
     } catch (e) {
       onError(String(e));
     } finally {
@@ -560,15 +596,17 @@
 >
   <!-- Shell header -->
   <header class="shrink-0 space-y-1.5 border-b border-surface-800 pb-2">
-    {#if !compact}
-      <div>
-        <h1 class="text-sm font-semibold text-surface-50">Visuales</h1>
-        <p class="text-[10px] text-surface-500">
-          Encuentra, revisa y usa imágenes sin salir de tu proyecto.
-        </p>
-      </div>
-    {:else}
-      <div class="text-[11px] font-semibold text-surface-200">Visuales</div>
+    {#if !hideChrome}
+      {#if !compact}
+        <div>
+          <h1 class="text-sm font-semibold text-surface-50">Visuales</h1>
+          <p class="text-[10px] text-surface-500">
+            Encuentra, revisa y usa imágenes sin salir de tu proyecto.
+          </p>
+        </div>
+      {:else}
+        <div class="text-[11px] font-semibold text-surface-200">Visuales</div>
+      {/if}
     {/if}
 
     <div class="flex gap-1">
@@ -647,47 +685,62 @@
       </div>
     </div>
 
-    <div class="grid grid-cols-3 gap-1" role="tablist" aria-label="Vistas de Visuales">
-      <button
-        type="button"
-        role="tab"
-        aria-selected={view === "video"}
-        disabled={!hasVideo}
-        title={!hasVideo ? "Abre un video para ver qué imágenes necesita" : undefined}
-        class="rounded-lg px-1.5 py-1.5 text-[10px] font-semibold transition
-          {view === 'video' ? 'bg-sky-600 text-white' : 'bg-surface-800 text-surface-300'}
-          {!hasVideo ? 'cursor-not-allowed opacity-40' : 'hover:bg-surface-700'}"
-        onclick={() => hasVideo && (view = "video")}
-      >
-        Este video
-      </button>
-      <button
-        type="button"
-        role="tab"
-        aria-selected={view === "library"}
-        class="rounded-lg px-1.5 py-1.5 text-[10px] font-semibold transition
-          {view === 'library' ? 'bg-violet-600 text-white' : 'bg-surface-800 text-surface-300 hover:bg-surface-700'}"
-        onclick={() => (view = "library")}
-      >
-        Biblioteca
-      </button>
-      <button
-        type="button"
-        role="tab"
-        aria-selected={view === "review"}
-        class="rounded-lg px-1.5 py-1.5 text-[10px] font-semibold transition
-          {view === 'review' ? 'bg-amber-600 text-white' : 'bg-surface-800 text-surface-300 hover:bg-surface-700'}"
-        onclick={() => (view = "review")}
-      >
-        Por revisar
-        {#if pending.length > 0}
-          <span class="ml-0.5 rounded-full bg-black/30 px-1 text-[9px]">{pending.length}</span>
-        {/if}
-      </button>
-    </div>
+    {#if !hideChrome}
+      <div class="grid grid-cols-3 gap-1" role="tablist" aria-label="Vistas de Visuales">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view === "video"}
+          disabled={!hasVideo}
+          title={!hasVideo ? "Abre un video para ver qué imágenes necesita" : undefined}
+          class="rounded-lg px-1.5 py-1.5 text-[10px] font-semibold transition
+            {view === 'video' ? 'bg-sky-600 text-white' : 'bg-surface-800 text-surface-300'}
+            {!hasVideo ? 'cursor-not-allowed opacity-40' : 'hover:bg-surface-700'}"
+          onclick={() => setView("video")}
+        >
+          Este video
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view === "library"}
+          class="rounded-lg px-1.5 py-1.5 text-[10px] font-semibold transition
+            {view === 'library' ? 'bg-violet-600 text-white' : 'bg-surface-800 text-surface-300 hover:bg-surface-700'}"
+          onclick={() => setView("library")}
+        >
+          Biblioteca
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view === "review"}
+          class="rounded-lg px-1.5 py-1.5 text-[10px] font-semibold transition
+            {view === 'review' ? 'bg-amber-600 text-white' : 'bg-surface-800 text-surface-300 hover:bg-surface-700'}"
+          onclick={() => setView("review")}
+        >
+          Por revisar
+          {#if pending.length > 0}
+            <span class="ml-0.5 rounded-full bg-black/30 px-1 text-[9px]">{pending.length}</span>
+          {/if}
+        </button>
+      </div>
+    {/if}
   </header>
 
   <div class="min-h-0 flex-1 overflow-hidden pt-2" aria-live="polite">
+    {#if sceneContext && view === "library"}
+      <div
+        class="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-sky-800/50 bg-sky-950/40 px-2 py-1.5 text-[11px]"
+      >
+        <p class="min-w-0 text-sky-100">
+          Eligiendo imagen para <strong>{sceneLabelShort}</strong>
+          — {sceneContext.label}
+        </p>
+        <button type="button" class="btn-ghost shrink-0 text-[10px]" onclick={clearSceneContext}
+          >Cancelar</button
+        >
+      </div>
+    {/if}
     {#if dailyOpen}
       <div class="mb-2 rounded-lg border border-surface-800 p-2">
         <DailySettings
@@ -727,7 +780,7 @@
         {usage}
         {usageLoading}
         {busy}
-        sceneLabel={null}
+        sceneLabel={sceneContext ? sceneLabelShort : null}
         onSelect={(id) => (selectedAssetId = id)}
         onSave={saveAsset}
         onArchive={(id) => setStatus(id, "archived")}
@@ -738,6 +791,11 @@
           }
           return Promise.resolve();
         }}
+        onUseInScene={
+          sceneContext && projectStore.mediaPath
+            ? (id) => void useAssetOnNeed(id)
+            : undefined
+        }
       />
     {:else}
       <ReviewInbox
@@ -757,9 +815,12 @@
   matches={pickerMatches}
   matchesLoading={pickerLoading}
   {busy}
+  pendingImportId={pendingImportId}
   onClose={() => {
     pickerOpen = false;
     pickerNeed = null;
+    pendingImportId = null;
+    // PM-005: cerrar sin Usar deja plan intacto; asset ya en biblioteca
   }}
   onUseAsset={(id) => void useAssetOnNeed(id)}
   onImport={() => void pickerImport()}

@@ -95,4 +95,65 @@ mod tests {
         std::env::remove_var("VIGILCUT_REQUIRE_HUMAN_QA");
         let _ = std::fs::remove_dir_all(dir);
     }
+
+    /// PM-003: one use creates exactly one placement; second call replaces.
+    #[test]
+    #[allow(clippy::await_holding_lock)]
+    fn use_asset_for_need_single_placement() {
+        use crate::models::edl::Edl;
+        use crate::pipeline::visual::{use_asset_for_need, VisualSession, VisualState};
+        use std::sync::Mutex;
+
+        let _lock = crate::pipeline::visual::library::lock_library_for_test();
+        let dir = std::env::temp_dir().join(format!("vc-use-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        set_library_root_override(Some(dir.clone()));
+
+        let png = dir.join("a.png");
+        let mut img = RgbImage::new(320, 180);
+        for p in img.pixels_mut() {
+            *p = Rgb([40, 90, 140]);
+        }
+        image::DynamicImage::ImageRgb8(img).save(&png).unwrap();
+        let asset = import_image(
+            &png,
+            Some("escena test".into()),
+            vec![],
+            vec!["escena".into()],
+            LicenseStatus::Owned,
+        )
+        .unwrap();
+
+        let mut need = VisualNeed::from_label("proj-use", "escena test");
+        need.terms = vec!["escena".into()];
+        need.output_start = Some(2.0);
+        need.output_end = Some(6.0);
+        save_needs(std::slice::from_ref(&need)).unwrap();
+
+        let media = dir.join("v.mp4");
+        let _ = std::fs::write(&media, b"fake");
+        let edl = Edl::from_remove_spans(media.to_string_lossy().as_ref(), 30.0, &[]);
+        let state: VisualState = Mutex::new(VisualSession::default());
+
+        let r1 = use_asset_for_need(&state, &edl, &media, &need.id, &asset.id).unwrap();
+        let plan1 = r1.get("plan").unwrap();
+        let n1 = plan1
+            .get("placements")
+            .and_then(|p| p.as_array())
+            .map(|a| a.len())
+            .unwrap_or(0);
+        assert_eq!(n1, 1, "first use must create one placement");
+
+        let r2 = use_asset_for_need(&state, &edl, &media, &need.id, &asset.id).unwrap();
+        let plan2 = r2.get("plan").unwrap();
+        let n2 = plan2
+            .get("placements")
+            .and_then(|p| p.as_array())
+            .map(|a| a.len())
+            .unwrap_or(0);
+        assert_eq!(n2, 1, "second use must replace, not duplicate");
+
+        set_library_root_override(None);
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

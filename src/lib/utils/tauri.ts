@@ -508,6 +508,21 @@ export async function visualAssignNeedAsset(needId: string, assetId: string): Pr
   return invoke("visual_assign_need_asset", { needId, assetId });
 }
 
+/** Single write: assign scene asset + create/replace one placement (PM-003). */
+export async function visualUseAssetForNeed(params: {
+  needId: string;
+  assetId: string;
+  mediaPath: string;
+  analysisRunId?: string | null;
+}): Promise<unknown> {
+  return invoke("visual_use_asset_for_need", {
+    needId: params.needId,
+    assetId: params.assetId,
+    mediaPath: params.mediaPath,
+    analysisRunId: params.analysisRunId ?? null,
+  });
+}
+
 export async function visualCancelJob(jobId: string): Promise<unknown> {
   return invoke("visual_cancel_job", { jobId });
 }

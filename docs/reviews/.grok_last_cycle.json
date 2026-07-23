@@ -1,6 +1,6 @@
 {
-  "last_processed_cycle_id": "CYCLE-000",
-  "last_processed_at": "2026-07-23T00:00:00Z",
-  "last_origin_sha": "ef1f982b363fee904dca68617144bfdd67340377",
-  "notes": "Bootstrap protocol. Do not reprocess CYCLE-000."
+  "last_processed_cycle_id": "CYCLE-001",
+  "last_processed_at": "2026-07-23T07:30:00Z",
+  "last_origin_sha": "724a66e6551b7948b6902d70cf7e6d101d816316",
+  "notes": "CYCLE-001 PM-001..005 implemented. Source was docs/reviews/CYCLE-001_PM.md (PENDIENTE)."
 }

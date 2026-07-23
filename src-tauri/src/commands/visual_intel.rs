@@ -169,6 +169,26 @@ pub fn visual_assign_need_asset(need_id: String, asset_id: String) -> AppResult<
     Ok(serde_json::json!({ "need": need, "ok": true }))
 }
 
+/// Single orchestrator: assign need + one placement (create or replace). PM-003.
+#[tauri::command]
+pub fn visual_use_asset_for_need(
+    need_id: String,
+    asset_id: String,
+    media_path: String,
+    analysis_run_id: Option<String>,
+    analysis: State<'_, AnalysisCache>,
+    visual: State<'_, VisualSessionState>,
+) -> AppResult<serde_json::Value> {
+    let edl = edl_helper(&analysis, analysis_run_id.as_deref(), &media_path)?;
+    crate::pipeline::visual::use_asset_for_need(
+        &visual,
+        &edl,
+        std::path::Path::new(&media_path),
+        &need_id,
+        &asset_id,
+    )
+}
+
 #[tauri::command]
 pub fn visual_list_needs(project_key: String) -> AppResult<serde_json::Value> {
     let needs = list_needs(&project_key)?;

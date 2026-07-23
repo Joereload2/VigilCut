@@ -1,6 +1,6 @@
 # CYCLE-001 — Product Manager
 
-- Estado: PENDIENTE
+- Estado: RESUELTO POR GROK
 - Base HEAD: 9ef5b2e42cd34ba384c2b6312721dc0dd92c0d53
 - Fecha: 2026-07-23
 - Prioridad: alta
@@ -136,6 +136,56 @@ Por revisar → Generar otra inicialmente ausente → rechazar con motivo → Ah
 - `npm.cmd run build`: primer intento bloqueado por sandbox; repetido fuera del sandbox, exit 0, 151 módulos.
 - `git diff --check`: exit 0 antes de añadir este ciclo.
 
-## Resultado requerido de Grok
+---
 
-Cambiar `Estado: PENDIENTE` a `Estado: RESUELTO POR GROK` y añadir commit, archivos modificados, decisiones PM-001–PM-005, pruebas reales, evidencia A/B/C y puntos no resueltos.
+## Resultado Grok
+
+- **Estado final:** RESUELTO POR GROK  
+- **Fecha resolución:** 2026-07-23  
+- **HEAD base ciclo:** `9ef5b2e` → implementación sobre `724a66e` (+ este commit)
+
+### Decisiones PM-001–PM-005
+
+| ID | Decisión |
+|----|----------|
+| **PM-001** | Una sola instancia de `VisualWorkspace`. `Este video` = grid 70/30; `Biblioteca`/`Por revisar` = strip de video compacto + workspace a ancho completo. `bind:view` + `onViewChange` preservan plan/playhead/selección. |
+| **PM-002** | `sceneContext` se setea solo desde Buscar/Cambiar (no auto-uncovered). Banner en Biblioteca; cards con `Usar en mm:ss`; Cancelar limpia contexto sin tocar plan. |
+| **PM-003** | Command `visual_use_asset_for_need` + `use_asset_for_need` en Rust: assign need + create/replace un placement (`related_text=need:{id}`). Frontend una sola invoke; error si no hay plan. |
+| **PM-004** | ReviewInbox: solo Aprobar/Rechazar; tras confirmar rechazo → «¿Generar otra?» / «Ahora no». Sin Generar otra en estado inicial. |
+| **PM-005** | Import en picker → `pendingImportId` + CTA Usar; no placement hasta confirmar. Cerrar deja asset en biblioteca. |
+
+### Archivos modificados
+
+- `src-tauri/src/pipeline/visual/mod.rs` — `use_asset_for_need`
+- `src-tauri/src/commands/visual_intel.rs` — `visual_use_asset_for_need`
+- `src-tauri/src/lib.rs` — registro command
+- `src-tauri/src/pipeline/visual/intel_flow_tests.rs` — test single placement
+- `src/lib/utils/tauri.ts` — wrapper
+- `src/lib/components/visual/VisualWorkspace.svelte` — scene context, use single API, import confirm
+- `src/lib/components/visual/VisualPicker.svelte` — pending import CTA
+- `src/lib/components/visual/ReviewInbox.svelte` — reject flow PM-004
+- `src/lib/components/visual/LibraryView.svelte` — grid min 170px, inspector ≥280px
+- `src/lib/components/VisualPanel.svelte` — layout por vista, un workspace
+- `docs/reviews/CODEX_TO_GROK.md` — enlace ciclo
+- `docs/reviews/.grok_last_cycle.json` — tracker
+
+### Pruebas reales (Grok)
+
+| Comando | Resultado |
+|---------|-----------|
+| `cargo test --lib pipeline::visual::intel_flow_tests -- --test-threads=1` | **2 passed** (incluye `use_asset_for_need_single_placement`) |
+| `npm run check` | **0 errors**, 1 warning preexistente `ExportSuccess.svelte:50` |
+
+### Evidencia flujos A/B/C (lógica implementada)
+
+| Flujo | Cobertura en código |
+|-------|---------------------|
+| **A** | `openPicker` → `sceneContext` → search → Library banner + Usar → `visualUseAssetForNeed` (1 placement) → cambiar vista sin remount workspace |
+| **B** | Import en picker → pending CTA; `onClose` no llama use; plan intacto |
+| **C** | ReviewInbox sin Generar otra inicial; post-reject Generar otra / Ahora no |
+
+### Puntos no resueltos / seguimiento
+
+- Smoke manual A/B/C en app Tauri no ejecutado en este poll (sin UI headless).
+- `visual_assign_need_asset` sigue registrado (compat); el path de producto usa `visual_use_asset_for_need`.
+- Preview compacta en strip full-width puede compartir el mismo player instance; si hay glitches de doble-video en runtime, unificar a un solo `VideoPreview` con CSS (follow-up).

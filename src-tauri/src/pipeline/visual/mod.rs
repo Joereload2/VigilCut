@@ -466,6 +466,110 @@ pub fn create_manual_placement(
     }))
 }
 
+/// Single write path: assign need asset + create/replace one placement (PM-003).
+pub fn use_asset_for_need(
+    state: &VisualState,
+    edl: &Edl,
+    media_path: &Path,
+    need_id: &str,
+    asset_id: &str,
+) -> AppResult<serde_json::Value> {
+    use crate::models::visual_intel::NeedCoverage;
+    use crate::pipeline::visual::needs::{get_need, update_need};
+
+    let mut need = get_need(need_id)?;
+    let asset = get_asset_by_id(asset_id)?;
+    need.matched_asset_id = Some(asset.id.clone());
+    need.coverage = NeedCoverage::Covered;
+    need.match_reasons = vec!["user_selected".into()];
+    need.updated_at = chrono::Utc::now().to_rfc3339();
+    update_need(&need)?;
+
+    let start = need.output_start.unwrap_or(0.0);
+    let end = need
+        .output_end
+        .unwrap_or(start + need.approx_duration_secs.max(3.5));
+    let need_tag = format!("need:{}", need.id);
+
+    let time_map = TimeMap::from_edl(edl);
+    let out_dur = time_map.output_duration.max(0.1);
+    let start = start.clamp(0.0, out_dur);
+    let mut end = end.clamp(0.0, out_dur);
+    if end < start + 0.25 {
+        end = (start + 3.5).min(out_dur);
+    }
+
+    let mut g = state.lock().map_err(|e| AppError::Message(e.to_string()))?;
+    let fp = edl_fingerprint(&edl.keep_ranges());
+    if g.plan.is_none() {
+        g.plan = Some(VisualPlan::new(
+            g.edl_fp.clone().unwrap_or_else(|| fp.clone()),
+            media_path.to_string_lossy(),
+            fp.clone(),
+        ));
+    }
+    let plan = g.plan.as_mut().unwrap();
+    if plan.edl_fingerprint != fp {
+        plan.edl_fingerprint = fp.clone();
+        plan.placements.clear();
+        plan.protected_ranges.clear();
+    }
+
+    let existing = plan.placements.iter().position(|p| {
+        p.related_text
+            .as_ref()
+            .is_some_and(|t| t == &need_tag || t == &need.label)
+            || ((p.output_start - start).abs() < 0.2
+                && p.related_text
+                    .as_ref()
+                    .is_some_and(|t| t.contains(&need.label)))
+    });
+
+    let placement = if let Some(idx) = existing {
+        let pl = &mut plan.placements[idx];
+        pl.asset_id = asset.id.clone();
+        pl.output_start = start;
+        pl.output_end = end;
+        pl.related_text = Some(need_tag.clone());
+        pl.label = Some(need.label.clone());
+        pl.manual_override = true;
+        pl.clone()
+    } else {
+        let mut pl = VisualPlacement::manual(
+            &asset.id,
+            start,
+            end,
+            PlacementMode::Fullframe,
+            PlacementLayout::for_mode(PlacementMode::Fullframe),
+            "cover",
+            Some(need.label.clone()),
+        );
+        pl.related_text = Some(need_tag);
+        pl.provenance = "library_match".into();
+        plan.placements.push(pl.clone());
+        pl
+    };
+
+    evaluate_composition(plan);
+    let plan_out = plan.clone();
+    save_visual_plan(&plan_out, None).map_err(|e| {
+        AppError::Message(format!("No se pudo guardar el plan visual: {e}"))
+    })?;
+    g.edl_fp = Some(fp);
+
+    Ok(serde_json::json!({
+        "ok": true,
+        "need": need,
+        "asset": asset,
+        "placement": placement,
+        "plan": plan_out,
+        "message": format!(
+            "Imagen «{}» en {:.1}–{:.1}s",
+            asset.title, start, end
+        ),
+    }))
+}
+
 pub fn update_placement(
     state: &VisualState,
     placement_id: &str,

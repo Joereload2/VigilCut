@@ -6,6 +6,7 @@
   import SupervisedTimeline from "./visual/SupervisedTimeline.svelte";
   import HorizontalProps from "./visual/HorizontalProps.svelte";
   import VisualWorkspace from "./visual/VisualWorkspace.svelte";
+  import type { VisualsViewId } from "./visual/library/libraryTypes";
   import type {
     Asset,
     CompositionIssue,
@@ -17,6 +18,8 @@
   let busy = $state(false);
   let error = $state<string | null>(null);
   let lastMessage = $state("");
+  /** PM-001: layout depends on active Visuales view */
+  let visualsView = $state<VisualsViewId>("video");
   /** Pre-resultado tras aplicar imágenes (mismo proyecto, sin pedir otro MP4). */
   let previewPath = $state<string | null>(null);
   /** Cut/source used as overlay base (never a second unrelated pick). */
@@ -463,81 +466,101 @@
 </script>
 
 <!--
-  Layout per wireframe:
-  - Left ~70%: video preview (top) + timeline (bottom ~30% of window height)
-  - Right ~30%: tools / others (always fully visible, scroll inside)
+  PM-001: single VisualWorkspace instance (state preserved).
+  Este video → 70/30; Biblioteca/Revisar → full width + compact video strip.
 -->
 <div
-  class="grid h-full min-h-0 w-full min-w-0 max-w-full gap-1.5 overflow-hidden"
-  style="box-sizing:border-box; height:100%; width:100%; grid-template-columns: minmax(0, 7fr) minmax(12rem, 3fr); grid-template-rows: minmax(0, 1fr);"
+  class="h-full min-h-0 w-full min-w-0 max-w-full gap-1.5 overflow-hidden
+    {visualsView === 'video'
+    ? 'grid'
+    : 'flex flex-col'}"
+  style="box-sizing:border-box; height:100%; width:100%;
+    {visualsView === 'video'
+    ? 'grid-template-columns: minmax(0, 7fr) minmax(16rem, 3fr); grid-template-rows: minmax(0, 1fr);'
+    : ''}"
 >
-  <!-- LEFT 70%: video + timeline -->
-  <div class="flex min-h-0 min-w-0 flex-col gap-1 overflow-hidden">
-    {#if error}
-      <div class="shrink-0 break-words rounded-lg border border-cut/30 bg-cut/10 px-2 py-0.5 text-[10px] text-cut">
-        {error}
+  {#if visualsView === "video"}
+    <div class="flex min-h-0 min-w-0 flex-col gap-1 overflow-hidden">
+      {#if error}
+        <div class="shrink-0 break-words rounded-lg border border-cut/30 bg-cut/10 px-2 py-0.5 text-[10px] text-cut">
+          {error}
+        </div>
+      {/if}
+      <div class="min-h-0 w-full min-w-0 flex-1 overflow-hidden" style="min-height: 8rem">
+        <VideoPreview compact />
       </div>
-    {/if}
-
-    <!-- Video takes most of the left column -->
-    <div class="min-h-0 w-full min-w-0 flex-1 overflow-hidden" style="min-height: 8rem">
-      <VideoPreview compact />
-    </div>
-
-    <!-- Timeline ~50% smaller: fixed compact band, not stretching -->
-    <div
-      class="w-full min-w-0 shrink-0 overflow-hidden"
-      style="height: clamp(88px, 14vh, 120px); box-sizing: border-box"
-    >
-      <SupervisedTimeline
-        duration={duration}
-        {placements}
-        {protectedRanges}
-        transcript={transcriptSegs}
-        {issues}
-        selectedId={selectedPlacementId}
-        imagePathFor={imagePathForPlacement}
-        onSelect={(id) => {
-          selectedPlacementId = id;
-        }}
-        onMove={movePlacementLocal}
-        onSnapMove={snapPlacement}
-      />
-    </div>
-    {#if selectedPlacement}
-      <div class="max-h-28 shrink-0 overflow-y-auto rounded-lg border border-surface-800 bg-surface-900/50 p-1">
-        <HorizontalProps
-          placement={selectedPlacement}
-          thumbPath={selectedThumb}
+      <div
+        class="w-full min-w-0 shrink-0 overflow-hidden"
+        style="height: clamp(88px, 14vh, 120px); box-sizing: border-box"
+      >
+        <SupervisedTimeline
+          duration={duration}
+          {placements}
+          {protectedRanges}
+          transcript={transcriptSegs}
           {issues}
-          {busy}
-          onUpdate={updateSelected}
-          onRemove={removeSelected}
-          onApplySuggestion={applyIssueSuggestion}
-          onExport={placements.length > 0 ? renderPlan : undefined}
+          selectedId={selectedPlacementId}
+          imagePathFor={imagePathForPlacement}
+          onSelect={(id) => {
+            selectedPlacementId = id;
+          }}
+          onMove={movePlacementLocal}
+          onSnapMove={snapPlacement}
         />
       </div>
-    {/if}
-  </div>
+      {#if selectedPlacement}
+        <div class="max-h-28 shrink-0 overflow-y-auto rounded-lg border border-surface-800 bg-surface-900/50 p-1">
+          <HorizontalProps
+            placement={selectedPlacement}
+            thumbPath={selectedThumb}
+            {issues}
+            {busy}
+            onUpdate={updateSelected}
+            onRemove={removeSelected}
+            onApplySuggestion={applyIssueSuggestion}
+            onExport={placements.length > 0 ? renderPlan : undefined}
+          />
+        </div>
+      {/if}
+    </div>
+  {:else}
+    <div
+      class="flex w-full shrink-0 items-center gap-2 overflow-hidden rounded-lg border border-surface-800 bg-surface-950/80 px-2 py-1"
+      style="height: clamp(56px, 10vh, 88px)"
+    >
+      <div class="h-full w-36 shrink-0 overflow-hidden rounded border border-surface-800 sm:w-48">
+        <VideoPreview compact />
+      </div>
+      <div class="min-w-0 flex-1">
+        <p class="truncate text-[11px] text-surface-300">
+          Video en segundo plano — plan y playhead se conservan
+        </p>
+        {#if lastMessage}
+          <p class="truncate text-[10px] text-surface-500">{lastMessage}</p>
+        {/if}
+      </div>
+      {#if placements.length > 0}
+        <button type="button" class="btn-secondary shrink-0 text-[10px]" disabled={busy} onclick={renderPlan}
+          >Exportar</button
+        >
+      {/if}
+    </div>
+  {/if}
 
-  <!-- RIGHT 30%: Visuales unificado (Este video | Biblioteca | Por revisar) -->
   <aside
-    class="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-surface-800 bg-surface-900/60 p-2"
+    class="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-surface-800 bg-surface-900/60 p-2
+      {visualsView === 'video' ? '' : 'min-h-0 flex-1'}"
     style="box-sizing:border-box"
     aria-label="Visuales"
   >
-    {#if error}
-      <div class="mb-1 shrink-0 break-words rounded border border-cut/30 bg-cut/10 px-2 py-0.5 text-[10px] text-cut">
-        {error}
-      </div>
-    {/if}
-    {#if lastMessage}
+    {#if lastMessage && visualsView === "video"}
       <p class="mb-1 shrink-0 truncate text-[10px] text-surface-500">{lastMessage}</p>
     {/if}
     <div class="min-h-0 flex-1 overflow-hidden">
       <VisualWorkspace
-        compact
+        compact={visualsView === "video"}
         bind:projectKey
+        bind:view={visualsView}
         onMessage={(m) => {
           lastMessage = m;
           projectStore.statusMessage = m;
@@ -549,9 +572,12 @@
           plan = p as VisualPlan;
           syncPlanToPlayer(plan);
         }}
+        onViewChange={(v) => {
+          visualsView = v;
+        }}
       />
     </div>
-    {#if placements.length > 0}
+    {#if placements.length > 0 && visualsView === "video"}
       <button
         type="button"
         class="btn-primary mt-1 w-full shrink-0 text-[10px]"

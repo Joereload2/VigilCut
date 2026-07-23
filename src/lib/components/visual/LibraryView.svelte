@@ -105,10 +105,13 @@
     </div>
   {/if}
 
-  <div class="grid min-h-0 flex-1 gap-2 overflow-hidden" style="grid-template-columns: minmax(0,1fr) minmax(140px,42%)">
+  <div
+    class="grid min-h-0 flex-1 gap-2 overflow-hidden"
+    style="grid-template-columns: minmax(0,1fr) minmax(280px, 34%)"
+  >
     <div class="min-h-0 overflow-y-auto">
       {#if loading}
-        <div class="grid grid-cols-2 gap-2">
+        <div class="grid gap-2" style="grid-template-columns: repeat(auto-fill, minmax(170px, 1fr))">
           {#each Array(6) as _}
             <div class="aspect-[4/3] animate-pulse rounded-xl bg-surface-800"></div>
           {/each}
@@ -120,7 +123,7 @@
             : "No hay resultados con estos filtros."}
         </p>
       {:else}
-        <div class="grid grid-cols-2 gap-2">
+        <div class="grid gap-2" style="grid-template-columns: repeat(auto-fill, minmax(170px, 1fr))">
           {#each filtered as a (a.id)}
             <AssetCard
               asset={a}
@@ -133,7 +136,7 @@
         </div>
       {/if}
     </div>
-    <div class="min-h-0 overflow-y-auto border-l border-surface-800 pl-2">
+    <div class="min-h-0 min-w-[280px] overflow-y-auto border-l border-surface-800 pl-2">
       {#if selected}
         <AssetInspector
           asset={selected}

@@ -10,6 +10,7 @@
     matches = [] as MediaAsset[],
     matchesLoading = false,
     busy = false,
+    pendingImportId = null as string | null,
     onClose,
     onUseAsset,
     onImport,
@@ -21,6 +22,7 @@
     matches?: MediaAsset[];
     matchesLoading?: boolean;
     busy?: boolean;
+    pendingImportId?: string | null;
     onClose: () => void;
     onUseAsset: (assetId: string) => void;
     onImport: () => void;
@@ -112,6 +114,22 @@
             </ul>
           {/if}
         </section>
+
+        {#if pendingImportId}
+          <div class="rounded-lg border border-violet-800/50 bg-violet-950/30 p-2">
+            <p class="text-[10px] text-violet-100">
+              Imagen importada. Confirma si quieres usarla en esta escena (no se colocó aún).
+            </p>
+            <button
+              type="button"
+              class="btn-primary mt-1.5 w-full text-[11px]"
+              disabled={busy}
+              onclick={() => onUseAsset(pendingImportId!)}
+            >
+              Usar esta imagen
+            </button>
+          </div>
+        {/if}
 
         <div class="flex flex-col gap-1.5 border-t border-surface-800 pt-2">
           <button type="button" class="btn-secondary w-full text-[11px]" disabled={busy} onclick={onImport}>
