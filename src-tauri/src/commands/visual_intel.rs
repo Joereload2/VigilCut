@@ -19,10 +19,9 @@ use crate::pipeline::visual::generation::supervision::{
 };
 use crate::pipeline::visual::generation::worker::{
     cover_project_needs, human_approve_candidate, human_reject_candidate,
-    human_reject_candidate_with_reason, list_pending_review, queue_generation_for_need,
-    worker_tick,
+    human_reject_candidate_with_reason, list_pending_review, worker_tick,
 };
-use crate::pipeline::visual::intelligent_match::{apply_best_match, match_need, MatchOptions};
+use crate::pipeline::visual::intelligent_match::{apply_best_match, MatchOptions};
 use crate::pipeline::visual::needs::{
     coverage_for_project, detect_needs_from_semantics, get_need, list_needs, merge_detected_needs,
     skip_need, update_need,
@@ -140,7 +139,7 @@ pub fn visual_detect_needs(
 #[tauri::command]
 pub fn visual_search_library_for_need(need_id: String) -> AppResult<serde_json::Value> {
     let mut need = get_need(&need_id)?;
-    let ranked = match_need(&need, &MatchOptions::default());
+    let ranked = crate::pipeline::visual::matching_adapter::search_for_need(&need)?;
     let matched = apply_best_match(&mut need, &MatchOptions::default());
     if matched {
         update_need(&need)?;
@@ -160,13 +159,9 @@ pub fn visual_search_library_for_need(need_id: String) -> AppResult<serde_json::
 /// Human chose a specific library asset for a scene (picker "Usar esta imagen").
 #[tauri::command]
 pub fn visual_assign_need_asset(need_id: String, asset_id: String) -> AppResult<serde_json::Value> {
-    let mut need = get_need(&need_id)?;
-    need.matched_asset_id = Some(asset_id);
-    need.coverage = NeedCoverage::Covered;
-    need.match_reasons = vec!["user_selected".into()];
-    need.updated_at = chrono::Utc::now().to_rfc3339();
-    update_need(&need)?;
-    Ok(serde_json::json!({ "need": need, "ok": true }))
+    let (need, assignment) =
+        crate::pipeline::visual::assignments::assign_need(&need_id, &asset_id)?;
+    Ok(serde_json::json!({ "need": need, "assignment": assignment, "ok": true }))
 }
 
 /// Single orchestrator: assign need + one placement (create or replace). PM-003.
@@ -279,7 +274,15 @@ pub async fn visual_generate_need(need_id: String) -> AppResult<serde_json::Valu
             "message": "Se reutilizó una imagen de la biblioteca",
         }));
     }
-    let job_id = queue_generation_for_need(&mut need, false)?;
+    let job_id = crate::visual_library::VisualLibrary::request_generation(
+        &crate::visual_library::LibraryService::new(),
+        crate::visual_library::LibraryGenerationRequest {
+            idempotency_key: format!("need:{}:v1", need.id),
+            need: need.clone(),
+            origin: "video_need".into(),
+            opportunistic: false,
+        },
+    )?;
     Ok(serde_json::json!({
         "action": "queued",
         "jobId": job_id,
@@ -594,7 +597,7 @@ pub fn visual_library_cancel_request(request_id: String) -> AppResult<serde_json
 #[tauri::command]
 pub fn visual_match_need(need_id: String) -> AppResult<serde_json::Value> {
     let mut need = get_need(&need_id)?;
-    let ranked = match_need(&need, &MatchOptions::default());
+    let ranked = crate::pipeline::visual::matching_adapter::search_for_need(&need)?;
     let matched = apply_best_match(&mut need, &MatchOptions::default());
     if matched {
         update_need(&need)?;

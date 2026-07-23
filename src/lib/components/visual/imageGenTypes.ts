@@ -92,6 +92,7 @@ export interface CandidateView {
   fileExists: boolean;
   conceptTitle?: string | null;
   needLabel?: string | null;
+  themeTitle?: string | null;
 }
 
 export interface NeedSupervision {

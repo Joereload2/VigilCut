@@ -9,9 +9,10 @@
     onGoSilence?: () => void;
     onGoClips?: () => void;
     onGoVisual?: () => void;
+    onGoLibrary?: () => void;
     onOpenPath?: (path: string) => void;
   }
-  let { onOpen, onGoSilence, onGoClips, onGoVisual, onOpenPath }: Props = $props();
+  let { onOpen, onGoSilence, onGoClips, onGoVisual, onGoLibrary, onOpenPath }: Props = $props();
 
   type HomeTab = "start" | "recent" | "factory";
   let tab = $state<HomeTab>("start");
@@ -114,7 +115,7 @@
           Elige un modo de trabajo. Después de abrir el video podrás cambiar de modo en la barra
           izquierda.
         </p>
-        <div class="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+        <div class="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
           <button
             type="button"
             class="rounded-xl border border-vigil-600/40 bg-vigil-950/40 p-3.5 text-left transition hover:border-vigil-500 hover:bg-vigil-950/70"
@@ -143,9 +144,20 @@
             onclick={() => (onGoVisual ? onGoVisual() : onOpen())}
           >
             <div class="text-xl">🖼</div>
+            <div class="mt-1.5 text-sm font-bold text-white">Visual / B-roll</div>
+            <div class="mt-1 text-[10px] leading-snug text-surface-400">
+              Encuentra y coloca imágenes sobre la línea de tiempo de un video.
+            </div>
+          </button>
+          <button
+            type="button"
+            class="rounded-xl border border-violet-600/40 bg-violet-950/30 p-3.5 text-left transition hover:border-violet-500 hover:bg-violet-950/50"
+            onclick={() => (onGoLibrary ? onGoLibrary() : undefined)}
+          >
+            <div class="text-xl">▦</div>
             <div class="mt-1.5 text-sm font-bold text-white">Biblioteca Visual</div>
             <div class="mt-1 text-[10px] leading-snug text-surface-400">
-              Gestiona imágenes y conceptos sin abrir un video. B-roll se usa después, dentro de cada video.
+              Gestiona assets, conceptos, generación y revisión sin abrir un video.
             </div>
           </button>
         </div>

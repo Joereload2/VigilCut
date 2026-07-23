@@ -587,8 +587,3 @@ pub struct MatchCandidate {
     pub times_used: u32,
     pub thumbnail_path: Option<String>,
 }
-
-// ── Story-builder readiness (not full product) ──────────────────────────
-
-/// Future text-to-video scene requirement shares the same need shape.
-pub type SceneRequirement = VisualNeed;

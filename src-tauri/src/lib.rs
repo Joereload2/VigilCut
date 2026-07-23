@@ -5,6 +5,7 @@ mod job_control;
 pub mod models;
 pub mod pipeline;
 mod state;
+pub mod visual_library;
 
 use commands::analyze::AnalysisCache;
 use commands::clipping::ClippingCache;

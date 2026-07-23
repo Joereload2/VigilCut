@@ -11,7 +11,7 @@
   import RightDock from "$lib/components/RightDock.svelte";
   import Timeline from "$lib/components/Timeline.svelte";
   import VisualPanel from "$lib/components/VisualPanel.svelte";
-  import VisualWorkspace from "$lib/components/visual/VisualWorkspace.svelte";
+  import LibraryWorkspace from "$lib/components/library/LibraryWorkspace.svelte";
   import AuxTabShell from "$lib/components/AuxTabShell.svelte";
   import { projectStore } from "$lib/stores/project.svelte";
   import type { FfmpegStatus, JobProgress } from "$lib/types";
@@ -20,7 +20,7 @@
   let ffmpeg = $state<FfmpegStatus | null>(null);
   let version = $state("0.1.0");
   /** Top-level work mode — tabs in TopBar, no left sidebar */
-  let workspaceTab = $state<"silence" | "clips" | "visual">("silence");
+  let workspaceTab = $state<"silence" | "clips" | "visual" | "library">("silence");
   let toast = $state<string | null>(null);
   let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -281,20 +281,18 @@
     onReanalyze={() => projectStore.reanalyze()}
   />
 
-  {#if workspaceTab === "visual" && !projectStore.mediaPath}
-    <!-- Visuales sin video: Biblioteca + Por revisar (UNIFIED_VISUALS_UX_SPEC) -->
-    <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-2">
-      <VisualWorkspace
-        onMessage={(m) => {
-          projectStore.statusMessage = m;
-          showToast(m);
-        }}
-        onError={(e) => {
-          projectStore.error = e;
-        }}
-      />
-    </div>
-  {:else if !projectStore.mediaPath}
+  {#if workspaceTab === "library"}
+    <LibraryWorkspace />
+  {:else if workspaceTab === "visual" && !projectStore.mediaPath}
+    <div class="flex min-h-0 min-w-0 flex-1 items-center justify-center p-6">
+      <div class="max-w-md rounded-2xl border border-sky-800/60 bg-sky-950/30 p-6 text-center">
+        <h2 class="text-lg font-semibold text-white">Visual / B-roll</h2>
+        <p class="mt-2 text-sm text-surface-400">
+          B-roll trabaja sobre la línea de tiempo de un video. La Biblioteca Visual está disponible como modo independiente.
+        </p>
+        <button type="button" class="btn-primary mt-4" onclick={openFile}>Abrir video</button>
+      </div>
+    </div>  {:else if !projectStore.mediaPath}
     <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <Welcome
         onOpen={openFile}
@@ -308,6 +306,9 @@
         }}
         onGoVisual={() => {
           workspaceTab = "visual";
+        }}
+        onGoLibrary={() => {
+          workspaceTab = "library";
         }}
         onOpenPath={(path) => {
           void projectStore.openMedia(path);

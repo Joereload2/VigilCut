@@ -12,7 +12,7 @@ use crate::pipeline::visual::generation::cost::{
     can_enqueue_generation, increment_generation_counter, CostGate,
 };
 use crate::pipeline::visual::generation::provider::{select_provider, GenerationRequest};
-use crate::pipeline::visual::library::{import_image, open_db};
+use crate::pipeline::visual::library::open_db;
 use crate::pipeline::visual::needs::{get_need, update_need};
 use crate::pipeline::visual::qa::{persist_qa_check, review_image, QaThresholds, SemanticHints};
 
@@ -400,6 +400,7 @@ pub async fn process_next_job() -> AppResult<Option<String>> {
                         &result.provider,
                         &result.model,
                         need_id.as_deref(),
+                        &job_origin,
                     )?;
                     {
                         let conn = open_db()?;
@@ -562,33 +563,46 @@ fn mark_job(id: &str, status: JobStatus, err: Option<&str>) -> AppResult<()> {
 }
 
 fn promote_candidate(
-    _candidate_id: &str,
+    candidate_id: &str,
     path: &std::path::Path,
     prompt: &str,
     negative: &str,
     provider: &str,
     model: &str,
     need_id: Option<&str>,
+    origin: &str,
 ) -> AppResult<MediaAsset> {
-    let title = need_id
-        .and_then(|id| get_need(id).ok())
-        .map(|n| n.label)
+    use crate::visual_library::{AssetIngestionRequest, IngestionSource, LibraryService};
+
+    let need = need_id.and_then(|id| get_need(id).ok());
+    let title = need
+        .as_ref()
+        .map(|need| need.label.clone())
         .unwrap_or_else(|| "generated".into());
-    let concepts = need_id
-        .and_then(|id| get_need(id).ok())
-        .map(|n| n.terms)
+    let concepts = need
+        .as_ref()
+        .map(|need| need.terms.clone())
         .unwrap_or_default();
-    // Codex HIGH-003: AI license is Unknown until evidence exists; not Owned/commercial by default.
-    let mut asset = import_image(
-        path,
-        Some(title),
-        concepts.clone(),
-        concepts,
-        LicenseStatus::Unknown,
-    )?;
+    let concept_ids = need
+        .as_ref()
+        .and_then(|need| need.concept_id.clone())
+        .into_iter()
+        .collect();
+    let source = match origin {
+        "daily_feed" => IngestionSource::DailyGeneration,
+        "story_builder" => IngestionSource::StoryBuilderGeneration,
+        _ => IngestionSource::BrollGeneration,
+    };
     let conn = open_db()?;
-    let prov = AssetProvenance {
-        source: "ai_generated".into(),
+    let (technical_score, semantic_score) = conn
+        .query_row(
+            "SELECT technical_score, semantic_score FROM generated_candidates WHERE id=?1",
+            params![candidate_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap_or((None, None));
+    let provenance = AssetProvenance {
+        source: source.as_str().into(),
         provider: Some(provider.into()),
         model: Some(model.into()),
         prompt: Some(prompt.into()),
@@ -596,25 +610,23 @@ fn promote_candidate(
         seed: None,
         generated_at: Some(chrono::Utc::now().to_rfc3339()),
     };
-    let prov_s = serde_json::to_string(&prov).unwrap_or_else(|_| "{}".into());
-    conn.execute(
-        "UPDATE media_assets SET provenance_json=?1, qa_status=?2, commercial_use=0, license_status='unknown', source=?3, updated_at=?4 WHERE id=?5",
-        params![
-            prov_s,
-            QaStatus::Approved.as_str(),
-            format!("ai:{provider}"),
-            chrono::Utc::now().to_rfc3339(),
-            asset.id
-        ],
-    )
-    .map_err(|e| AppError::Message(e.to_string()))?;
-    asset.provenance = Some(prov);
-    asset.qa_status = QaStatus::Approved;
-    asset.license_status = LicenseStatus::Unknown;
-    asset.commercial_use = Some(false);
-    Ok(asset)
+    Ok(LibraryService::new()
+        .ingest_asset(AssetIngestionRequest {
+            source_path: path.to_path_buf(),
+            source,
+            title: Some(title),
+            tags: concepts.clone(),
+            concept_ids,
+            concept_terms: concepts,
+            provenance,
+            license_status: LicenseStatus::Unknown,
+            commercial_use: Some(false),
+            qa_status: QaStatus::Approved,
+            technical_score,
+            semantic_score,
+        })?
+        .asset)
 }
-
 /// Process up to `max_jobs` queued items.
 pub async fn worker_tick(max_jobs: u32) -> AppResult<u32> {
     let mut n = 0u32;
@@ -716,6 +728,7 @@ pub fn human_approve_candidate(candidate_id: &str) -> AppResult<MediaAsset> {
         provider.as_deref().unwrap_or("unknown"),
         model.as_deref().unwrap_or("unknown"),
         need_id.as_deref(),
+        &origin,
     )?;
 
     // Finalize candidate + need without nested connections (avoids SQLite lock)
@@ -762,7 +775,8 @@ pub fn human_approve_candidate(candidate_id: &str) -> AppResult<MediaAsset> {
     // Metrics for daily
     if origin == "daily_feed" {
         let _ = crate::pipeline::visual::generation::daily_feed::bump_metric_public("approved");
-        let _ = crate::pipeline::visual::generation::daily_feed::bump_metric_public("concepts_covered");
+        let _ =
+            crate::pipeline::visual::generation::daily_feed::bump_metric_public("concepts_covered");
     }
 
     Ok(asset)

@@ -1,8 +1,8 @@
 <script lang="ts">
   /** Horizontal work-mode switcher for the top bar (no left sidebar). */
   interface Props {
-    mode: "silence" | "clips" | "visual";
-    onMode: (m: "silence" | "clips" | "visual") => void;
+    mode: "silence" | "clips" | "visual" | "library";
+    onMode: (m: "silence" | "clips" | "visual" | "library") => void;
   }
   let { mode, onMode }: Props = $props();
 </script>
@@ -45,6 +45,18 @@
       ? 'bg-sky-600 text-white'
       : 'text-surface-400 hover:bg-surface-800 hover:text-surface-200'}"
     onclick={() => onMode("visual")}
+  >
+    Visual/B-roll
+  </button>
+  <button
+    type="button"
+    role="tab"
+    aria-selected={mode === "library"}
+    class="shrink-0 rounded-md px-2.5 py-1 text-[11px] font-semibold transition sm:px-3 sm:text-xs
+      {mode === 'library'
+      ? 'bg-violet-600 text-white'
+      : 'text-surface-400 hover:bg-surface-800 hover:text-surface-200'}"
+    onclick={() => onMode("library")}
   >
     Biblioteca
   </button>

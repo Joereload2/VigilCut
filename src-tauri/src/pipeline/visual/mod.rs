@@ -1,8 +1,9 @@
 //! Visual enrichment: library, matching, plan, render, intelligent library.
 
+pub mod assignments;
 pub mod compose;
-pub mod concepts;
 pub mod concept_coverage;
+pub mod concepts;
 pub mod generation;
 pub mod intelligent_match;
 pub mod layout;
@@ -10,6 +11,7 @@ pub mod library;
 pub mod library_dashboard;
 pub mod library_requests;
 pub mod match_rank;
+pub mod matching_adapter;
 pub mod needs;
 pub mod qa;
 pub mod render;
@@ -26,7 +28,7 @@ use crate::models::edl::Edl;
 use crate::models::event::Span;
 use crate::models::transcript::{Transcript, TranscriptStatus};
 use crate::models::visual::{
-    edl_fingerprint, LicenseStatus, PlacementLayout, PlacementMode, ProtectedRange, ReviewStatus,
+    edl_fingerprint, PlacementLayout, PlacementMode, ProtectedRange, ReviewStatus,
     SuggestionStatus, VisualPlacement, VisualPlan, VisualSuggestion,
 };
 use crate::pipeline::semantic::extract_semantic_events;
@@ -35,7 +37,7 @@ use crate::pipeline::transcript_engine::write_transcript_artifacts;
 use crate::pipeline::visual::compose::{
     evaluate_composition, restore_suggested, snap_placement_edges,
 };
-use crate::pipeline::visual::library::{get_asset_by_id, import_image, list_active_assets};
+use crate::pipeline::visual::library::{get_asset_by_id, list_active_assets};
 use crate::pipeline::visual::match_rank::{rank_suggestions, MatchConfig};
 use uuid::Uuid;
 
@@ -229,12 +231,11 @@ pub fn attach_image_to_moment(
     if concept.is_empty() {
         return Err(AppError::Invalid("Concepto vacío".into()));
     }
-    let asset = import_image(
+    let asset = import_library_image(
         image_path,
         Some(concept.clone()),
         vec![concept.clone()],
         vec![concept.clone()],
-        LicenseStatus::Owned,
     )?;
 
     let time_map = TimeMap::from_edl(edl);
@@ -379,7 +380,7 @@ pub fn create_manual_placement(
     let asset = if let Some(id) = asset_id.filter(|s| !s.is_empty()) {
         get_asset_by_id(id)?
     } else if let Some(p) = image_path {
-        import_image(p, label.clone(), vec![], vec![], LicenseStatus::Owned)?
+        import_library_image(p, label.clone(), vec![], vec![])?
     } else {
         return Err(AppError::Invalid(
             "Indica asset_id o image_path para el placement manual.".into(),
@@ -555,9 +556,8 @@ pub fn use_asset_for_need(
 
     evaluate_composition(plan);
     let plan_out = plan.clone();
-    save_visual_plan(&plan_out, None).map_err(|e| {
-        AppError::Message(format!("No se pudo guardar el plan visual: {e}"))
-    })?;
+    save_visual_plan(&plan_out, None)
+        .map_err(|e| AppError::Message(format!("No se pudo guardar el plan visual: {e}")))?;
     g.edl_fp = Some(fp);
 
     Ok(serde_json::json!({
@@ -874,7 +874,28 @@ pub fn import_library_image(
     tags: Vec<String>,
     concepts: Vec<String>,
 ) -> AppResult<crate::models::visual::MediaAsset> {
-    import_image(path, title, tags, concepts, LicenseStatus::Owned)
+    use crate::models::visual_intel::{AssetProvenance, QaStatus};
+    use crate::visual_library::{AssetIngestionRequest, IngestionSource, LibraryService};
+
+    Ok(LibraryService::new()
+        .ingest_asset(AssetIngestionRequest {
+            source_path: path.to_path_buf(),
+            source: IngestionSource::ManualImport,
+            title,
+            tags,
+            concept_ids: Vec::new(),
+            concept_terms: concepts,
+            provenance: AssetProvenance {
+                source: IngestionSource::ManualImport.as_str().into(),
+                ..Default::default()
+            },
+            license_status: crate::models::visual::LicenseStatus::Owned,
+            commercial_use: Some(true),
+            qa_status: QaStatus::Approved,
+            technical_score: None,
+            semantic_score: None,
+        })?
+        .asset)
 }
 
 /// Export session transcript projections to a user-chosen directory.

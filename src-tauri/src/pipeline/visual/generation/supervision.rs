@@ -65,6 +65,8 @@ pub struct CandidateView {
     pub concept_title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub need_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme_title: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -119,11 +121,7 @@ pub fn map_ui_state(
             }
             JobStatus::Running => {
                 if j.cancel_requested || j.stage == "cancelling" {
-                    return (
-                        "cancelling".into(),
-                        "Cancelando…".into(),
-                        "wait".into(),
-                    );
+                    return ("cancelling".into(), "Cancelando…".into(), "wait".into());
                 }
                 let label = match j.stage.as_str() {
                     "preparing" => "Preparando solicitud",
@@ -256,6 +254,7 @@ fn row_candidate(r: &rusqlite::Row<'_>) -> rusqlite::Result<CandidateView> {
         file_exists: false,
         concept_title: None,
         need_label: None,
+        theme_title: None,
     })
 }
 
@@ -263,7 +262,22 @@ fn enrich_candidate_labels(c: &mut CandidateView) {
     if let Some(nid) = &c.need_id {
         if let Ok(n) = get_need(nid) {
             c.need_label = Some(n.label.clone());
-            c.concept_title = Some(n.label);
+            if let Some(concept_id) = n.concept_id {
+                if let Ok(conn) = open_db() {
+                    if let Ok((concept, theme)) = conn.query_row(
+                        "SELECT c.title, t.title FROM visual_concepts c
+                         LEFT JOIN themes t ON t.id=c.theme_id WHERE c.id=?1",
+                        params![concept_id],
+                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+                    ) {
+                        c.concept_title = Some(concept);
+                        c.theme_title = theme;
+                    }
+                }
+            }
+            if c.concept_title.is_none() {
+                c.concept_title = Some(n.label);
+            }
         }
     }
     if c.concept_title.is_none() {
@@ -473,8 +487,9 @@ pub fn queue_regenerate(need_id: &str) -> AppResult<String> {
         n + 1
     };
     let idem = format!("need:{need_id}:v{version}");
-    let job_id = super::worker::queue_generation_with_key(&mut need, false, &idem, "video_need")?
-        .ok_or_else(|| AppError::Invalid("No se pudo encolar (política de coste)".into()))?;
+    let job_id =
+        super::worker::queue_generation_with_key(&mut need, false, &idem, "video_need")?
+            .ok_or_else(|| AppError::Invalid("No se pudo encolar (política de coste)".into()))?;
 
     // Only after successful enqueue: mark previous review candidates discarded
     if let Ok(Some(c)) = latest_candidate_for_need(need_id) {

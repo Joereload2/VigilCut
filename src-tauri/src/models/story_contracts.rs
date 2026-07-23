@@ -4,7 +4,8 @@
 use serde::{Deserialize, Serialize};
 
 use super::visual::VisualPlan;
-use super::visual_intel::VisualNeed;
+use crate::error::AppResult;
+use crate::visual_library::{AssetMatch, AssetQuery, VisualLibrary};
 
 /// Lightweight project shell for future text→video.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,9 +35,26 @@ pub struct StoryScene {
     #[serde(default)]
     pub duration_secs: f64,
     #[serde(default)]
-    pub requirements: Vec<VisualNeed>,
+    pub requirements: Vec<SceneRequirement>,
     #[serde(default)]
     pub assignments: Vec<SceneAssetAssignment>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SceneRequirement {
+    pub id: String,
+    pub scene_id: String,
+    pub label: String,
+    pub query: AssetQuery,
+    #[serde(default)]
+    pub priority: i32,
+}
+
+impl SceneRequirement {
+    pub fn search<L: VisualLibrary>(&self, library: &L) -> AppResult<Vec<AssetMatch>> {
+        library.search(&self.query)
+    }
 }
 
 /// Assignment of a library asset to a scene (≠ MediaAsset ownership).

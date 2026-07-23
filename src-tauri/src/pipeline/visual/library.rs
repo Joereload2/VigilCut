@@ -599,6 +599,40 @@ pub fn list_active_assets() -> AppResult<Vec<MediaAsset>> {
         .collect())
 }
 
+fn ingest_folder_asset(
+    path: &Path,
+    title: Option<String>,
+    tags: Vec<String>,
+    concepts: Vec<String>,
+    license_status: LicenseStatus,
+) -> AppResult<ImportOutcome> {
+    let source = crate::visual_library::IngestionSource::FolderImport;
+    let outcome = crate::visual_library::LibraryService::new().ingest_asset(
+        crate::visual_library::AssetIngestionRequest {
+            source_path: path.to_path_buf(),
+            source,
+            title,
+            tags,
+            concept_ids: Vec::new(),
+            concept_terms: concepts,
+            provenance: AssetProvenance {
+                source: source.as_str().into(),
+                ..Default::default()
+            },
+            license_status,
+            commercial_use: Some(true),
+            qa_status: QaStatus::Approved,
+            technical_score: None,
+            semantic_score: None,
+        },
+    )?;
+    Ok(if outcome.duplicate {
+        ImportOutcome::Duplicate(outcome.asset)
+    } else {
+        ImportOutcome::New(outcome.asset)
+    })
+}
+
 /// Import every jpg/png/webp under a folder (non-recursive by default).
 pub fn import_folder(
     dir: &Path,
@@ -622,7 +656,7 @@ pub fn import_folder_tracked(
     let mut result = ImportFolderResult::default();
     visit_images(dir, recursive, &mut |path| {
         result.scanned += 1;
-        match import_image_detailed(
+        match ingest_folder_asset(
             path,
             None,
             tags.clone(),

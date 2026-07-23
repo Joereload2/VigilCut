@@ -73,6 +73,43 @@ mod tests {
         assert!(job.is_some());
         let n = worker_tick(2).await.unwrap();
         assert!(n >= 1);
+        let mut generated_need = crate::pipeline::visual::needs::get_need(&need2.id).unwrap();
+        if generated_need.matched_asset_id.is_none() {
+            let candidate =
+                crate::pipeline::visual::generation::supervision::latest_candidate_for_need(
+                    &need2.id,
+                )
+                .unwrap()
+                .expect("worker must persist a candidate awaiting human QA");
+            crate::pipeline::visual::generation::worker::human_approve_candidate(&candidate.id)
+                .unwrap();
+            generated_need = crate::pipeline::visual::needs::get_need(&need2.id).unwrap();
+        }
+        let generated_asset_id = generated_need
+            .matched_asset_id
+            .clone()
+            .expect("approved candidate must be ingested before assignment");
+        let generated_asset = crate::visual_library::VisualLibrary::get_asset(
+            &crate::visual_library::LibraryService::new(),
+            &generated_asset_id,
+        )
+        .unwrap();
+        assert_eq!(generated_asset.source.as_deref(), Some("broll_generation"));
+        let media = dir.join("generated-flow.mp4");
+        std::fs::write(&media, b"fixture").unwrap();
+        let edl =
+            crate::models::edl::Edl::from_remove_spans(media.to_string_lossy().as_ref(), 30.0, &[]);
+        let state: crate::pipeline::visual::VisualState =
+            std::sync::Mutex::new(crate::pipeline::visual::VisualSession::default());
+        let placed = crate::pipeline::visual::use_asset_for_need(
+            &state,
+            &edl,
+            &media,
+            &need2.id,
+            &generated_asset_id,
+        )
+        .unwrap();
+        assert_eq!(placed["placement"]["assetId"], generated_asset_id);
 
         let needs = list_needs("proj-test").unwrap();
         assert!(

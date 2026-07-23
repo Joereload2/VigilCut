@@ -83,8 +83,8 @@ pub async fn run_once_for_test() -> crate::error::AppResult<u32> {
 /// Hold a cancel flag registry so cancel can abort mid-generate (best-effort).
 pub mod cancel_registry {
     use std::collections::HashMap;
-    use std::sync::{Arc, Mutex};
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex};
 
     static FLAGS: Mutex<Option<HashMap<String, Arc<AtomicBool>>>> = Mutex::new(None);
 

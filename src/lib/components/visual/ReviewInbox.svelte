@@ -128,6 +128,9 @@
       </div>
       <div class="min-w-0 flex-1">
         <p class="font-medium text-surface-100">{titleOf(c)}</p>
+        {#if c.themeTitle}
+          <p class="text-[9px] text-violet-300">Tema: {c.themeTitle}</p>
+        {/if}
         <p class="text-[10px] text-surface-500">
           {c.origin === "daily_feed" ? "Biblioteca automática" : "Este video"}
           · {costLabel(c.costKind, c.freeVerified)}

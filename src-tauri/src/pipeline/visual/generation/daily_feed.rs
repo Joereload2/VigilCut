@@ -177,8 +177,8 @@ async fn run_daily_cycle_inner(force: bool) -> AppResult<serde_json::Value> {
     let policy = CostPolicy::from_env();
     let provider = select_provider(policy.paid_providers_enabled);
     // Codex CRIT-006: only local mock or capability free_verified — never free_configured alone
-    let free_verified = provider.name() == "mock"
-        || capability_free_verified(provider.name()).unwrap_or(false);
+    let free_verified =
+        provider.name() == "mock" || capability_free_verified(provider.name()).unwrap_or(false);
     if !free_verified {
         return Ok(serde_json::json!({
             "ok": false,
@@ -349,9 +349,50 @@ mod tests {
         // process any queue (tests call worker_tick; production uses supervisor)
         let _ = crate::pipeline::visual::generation::worker::worker_tick(3).await;
 
-        // Prefer reuse path on second cycle for same concept space
-        let r2 = run_daily_cycle_forced().await.unwrap();
-        assert!(r2.get("ok").is_some());
+        let candidate =
+            crate::pipeline::visual::generation::supervision::list_pending_candidates(10)
+                .unwrap()
+                .into_iter()
+                .find(|candidate| candidate.origin == "daily_feed")
+                .expect("daily worker must leave a reviewable candidate");
+        assert!(candidate.concept_title.is_some());
+        assert!(candidate.theme_title.is_some());
+        let asset =
+            crate::pipeline::visual::generation::worker::human_approve_candidate(&candidate.id)
+                .unwrap();
+        assert_eq!(asset.source.as_deref(), Some("daily_generation"));
+
+        // A later video consumes the approved library asset by media_asset_id. The
+        // daily flow itself never creates a placement and needs no project key.
+        let mut video_need =
+            crate::models::visual_intel::VisualNeed::from_label("second-video", "economia");
+        video_need.output_start = Some(2.0);
+        video_need.output_end = Some(6.0);
+        crate::pipeline::visual::needs::save_needs(std::slice::from_ref(&video_need)).unwrap();
+        let media = dir.join("second-video.mp4");
+        std::fs::write(&media, b"fixture").unwrap();
+        let edl =
+            crate::models::edl::Edl::from_remove_spans(media.to_string_lossy().as_ref(), 20.0, &[]);
+        let state: crate::pipeline::visual::VisualState =
+            std::sync::Mutex::new(crate::pipeline::visual::VisualSession::default());
+        let placement = crate::pipeline::visual::use_asset_for_need(
+            &state,
+            &edl,
+            &media,
+            &video_need.id,
+            &asset.id,
+        )
+        .unwrap();
+        assert_eq!(placement["placement"]["assetId"], asset.id);
+        assert_eq!(
+            crate::visual_library::VisualLibrary::get_asset(
+                &crate::visual_library::LibraryService::new(),
+                &asset.id,
+            )
+            .unwrap()
+            .id,
+            asset.id
+        );
 
         set_library_root_override(None);
         std::env::remove_var("VIGILCUT_IMAGE_PROVIDER");

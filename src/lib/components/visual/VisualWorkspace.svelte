@@ -26,6 +26,7 @@
     view = $bindable<VisualsViewId>("library"),
     compact = false,
     hideChrome = false,
+    libraryOnly = false,
     onMessage = (_m: string) => {},
     onError = (_e: string) => {},
     onPlanUpdated = (_p: unknown) => {},
@@ -37,6 +38,8 @@
     compact?: boolean;
     /** Oculta header/tabs si el padre ya los muestra */
     hideChrome?: boolean;
+    /** Biblioteca independiente: oculta y bloquea funciones de B-roll. */
+    libraryOnly?: boolean;
     onMessage?: (m: string) => void;
     onError?: (e: string) => void;
     onPlanUpdated?: (p: unknown) => void;
@@ -86,16 +89,16 @@
   $effect(() => {
     if (!didInitView) {
       didInitView = true;
-      view = hasVideo ? "video" : "library";
+      view = libraryOnly ? "library" : hasVideo ? "video" : "library";
       onViewChange(view);
-    } else if (!hasVideo && view === "video") {
+    } else if ((libraryOnly || !hasVideo) && view === "video") {
       view = "library";
       onViewChange(view);
     }
   });
 
   function setView(v: VisualsViewId) {
-    if (v === "video" && !hasVideo) return;
+    if (v === "video" && (libraryOnly || !hasVideo)) return;
     view = v;
     onViewChange(v);
   }
@@ -686,7 +689,8 @@
     </div>
 
     {#if !hideChrome}
-      <div class="grid grid-cols-3 gap-1" role="tablist" aria-label="Vistas de Visuales">
+      <div class="grid gap-1 {libraryOnly ? 'grid-cols-2' : 'grid-cols-3'}" role="tablist" aria-label={libraryOnly ? "Vistas de Biblioteca" : "Vistas de Visuales"}>
+        {#if !libraryOnly}
         <button
           type="button"
           role="tab"
@@ -700,6 +704,7 @@
         >
           Este video
         </button>
+        {/if}
         <button
           type="button"
           role="tab"

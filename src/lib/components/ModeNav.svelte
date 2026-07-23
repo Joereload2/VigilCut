@@ -1,7 +1,7 @@
 <script lang="ts">
   interface Props {
-    mode: "silence" | "clips" | "visual";
-    onMode: (m: "silence" | "clips" | "visual") => void;
+    mode: "silence" | "clips" | "visual" | "library";
+    onMode: (m: "silence" | "clips" | "visual" | "library") => void;
   }
   let { mode, onMode }: Props = $props();
 </script>

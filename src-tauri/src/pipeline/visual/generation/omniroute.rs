@@ -254,9 +254,7 @@ impl OmniRouteImageProvider {
             let status = resp.status();
             if status.is_redirection() {
                 if hop == MAX_REDIRECTS {
-                    return Err(ProviderError::InvalidResponse(
-                        "too many redirects".into(),
-                    ));
+                    return Err(ProviderError::InvalidResponse("too many redirects".into()));
                 }
                 let loc = resp
                     .headers()
@@ -424,7 +422,9 @@ fn validate_download_url(url: &str, base_url: &str) -> Result<reqwest::Url, Prov
         }
     };
     if addrs.is_empty() {
-        return Err(ProviderError::InvalidResponse("DNS returned no addresses".into()));
+        return Err(ProviderError::InvalidResponse(
+            "DNS returned no addresses".into(),
+        ));
     }
     for addr in &addrs {
         if is_forbidden_ip(addr.ip()) {
@@ -636,9 +636,20 @@ mod tests {
 
     #[test]
     fn ssrf_loopback_ok_when_base_local() {
-        assert!(validate_download_url("http://127.0.0.1:20128/img.png", "http://127.0.0.1:20128/v1").is_ok());
-        assert!(validate_download_url("http://localhost:20128/img.png", "http://localhost:20128/v1").is_ok());
-        assert!(validate_download_url("http://127.0.0.1/img.png", "https://api.example.com/v1").is_err());
+        assert!(validate_download_url(
+            "http://127.0.0.1:20128/img.png",
+            "http://127.0.0.1:20128/v1"
+        )
+        .is_ok());
+        assert!(validate_download_url(
+            "http://localhost:20128/img.png",
+            "http://localhost:20128/v1"
+        )
+        .is_ok());
+        assert!(
+            validate_download_url("http://127.0.0.1/img.png", "https://api.example.com/v1")
+                .is_err()
+        );
     }
 
     #[test]
@@ -651,9 +662,7 @@ mod tests {
         assert!(is_forbidden_v4(Ipv4Addr::new(100, 64, 0, 1)));
         assert!(!is_forbidden_v4(Ipv4Addr::new(8, 8, 8, 8)));
         assert!(is_forbidden_v6(Ipv6Addr::LOCALHOST));
-        assert!(is_forbidden_v6(
-            "fc00::1".parse::<Ipv6Addr>().unwrap()
-        ));
+        assert!(is_forbidden_v6("fc00::1".parse::<Ipv6Addr>().unwrap()));
         assert!(is_forbidden_ip(
             "::ffff:127.0.0.1".parse::<IpAddr>().unwrap()
         ));
