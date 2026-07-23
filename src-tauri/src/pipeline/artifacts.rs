@@ -64,11 +64,7 @@ pub async fn write_run_artifacts(
         txt.push_str(&format!("{} {}\n", format_ts(c.at_output), c.title));
     }
     // If we already had a real first chapter at 0, rewrite cleanly
-    if chapters
-        .first()
-        .map(|c| c.at_output < 0.5)
-        .unwrap_or(false)
-    {
+    if chapters.first().map(|c| c.at_output < 0.5).unwrap_or(false) {
         txt.clear();
         for c in &chapters {
             txt.push_str(&format!("{} {}\n", format_ts(c.at_output), c.title));

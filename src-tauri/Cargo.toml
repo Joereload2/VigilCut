@@ -1,10 +1,10 @@
 [package]
 name = "vigilcut"
-version = "1.0.0"
+version = "1.1.0"
 description = "VigilCut Factory — local AI content post-production engine"
 authors = ["VigilCut Contributors"]
 license = "MIT"
-repository = "https://github.com/vigilcut/vigilcut"
+repository = "https://github.com/Joereload2/VigilCut"
 edition = "2021"
 rust-version = "1.77"
 default-run = "vigilcut"
@@ -45,6 +45,17 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dirs = "6"
 walkdir = "2"
 ort = { version = "2.0.0-rc.9", features = ["download-binaries"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+sha2 = "0.10"
+hex = "0.4"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# CI uses clippy -D warnings; allow intentional patterns common in this codebase.
+[lints.clippy]
+too_many_arguments = "allow"
+field_reassign_with_default = "allow"
+type_complexity = "allow"
 
 [profile.release]
 panic = "abort"

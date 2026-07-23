@@ -10,7 +10,7 @@ pub fn detect_breaths(run_id: &str, events: &mut Vec<Event>) {
         .filter(|e| e.event_type == TYPE_AUDIO_SILENCE)
         .filter(|e| {
             let d = e.span.duration();
-            d >= 0.12 && d < 0.45
+            (0.12..0.45).contains(&d)
         })
         .cloned()
         .collect();

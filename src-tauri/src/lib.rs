@@ -1,13 +1,19 @@
 mod commands;
 mod error;
-mod ffmpeg;
+pub mod ffmpeg;
+mod job_control;
 pub mod models;
 pub mod pipeline;
 mod state;
 
 use commands::analyze::AnalysisCache;
+use commands::clipping::ClippingCache;
+use commands::visual::VisualSessionState;
 use commands::watch::InboxWatchState;
+use job_control::JobControl;
+use pipeline::visual::VisualSession;
 use state::AppState;
+use std::sync::Mutex;
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -26,12 +32,16 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .manage(AppState::default())
         .manage(AnalysisCache::default())
+        .manage(ClippingCache::default())
         .manage(InboxWatchState::default())
+        .manage(JobControl::default())
+        .manage(Mutex::new(VisualSession::default()) as VisualSessionState)
         .invoke_handler(tauri::generate_handler![
             // System
             commands::system::get_app_info,
             commands::system::check_ffmpeg,
             commands::system::get_workspace_paths,
+            commands::system::cancel_job,
             // Media
             commands::media::probe_media,
             commands::media::extract_waveform,
@@ -77,11 +87,77 @@ pub fn run() {
             commands::watch::stop_inbox_watch,
             commands::watch::get_inbox_watch_status,
             commands::watch::process_factory_inbox_now,
+            // Intelligent clipping
+            commands::clipping::run_clipping,
+            commands::clipping::get_clipping_run,
+            commands::clipping::update_clip_status,
+            commands::clipping::update_clip_span,
+            commands::clipping::update_clip_framing,
+            commands::clipping::bulk_clip_status,
+            commands::clipping::export_clips,
+            commands::clipping::export_single_clip,
+            commands::clipping::promote_clip_variant,
             // Future-ready stubs
             commands::audio::enhance_audio_preview,
             commands::color::analyze_color_stats,
             commands::subtitles::import_subtitles,
             commands::subtitles::generate_subtitles_whisper,
+            // Visual library + transcript enrichment
+            commands::visual::visual_run_enrichment,
+            commands::visual::visual_transcribe_whisper,
+            commands::visual::visual_whisper_status,
+            commands::visual::visual_install_whisper,
+            commands::visual::visual_list_assets,
+            commands::visual::visual_import_image,
+            commands::visual::visual_attach_image,
+            commands::visual::visual_create_manual_placement,
+            commands::visual::visual_update_placement,
+            commands::visual::visual_snap_placement,
+            commands::visual::visual_evaluate_composition,
+            commands::visual::visual_remove_placement,
+            commands::visual::visual_add_protected_range,
+            commands::visual::visual_remove_protected_range,
+            commands::visual::visual_import_folder,
+            commands::visual::visual_update_asset,
+            commands::visual::visual_list_usage,
+            commands::visual::visual_scan_missing,
+            commands::visual::visual_set_suggestion_status,
+            commands::visual::visual_get_session,
+            commands::visual::visual_check_edl,
+            commands::visual::visual_export_transcript,
+            commands::visual::visual_save_plan,
+            commands::visual::visual_load_plan,
+            commands::visual::visual_render_plan,
+            // Intelligent visual library
+            commands::visual_intel::visual_seed_theme_economy,
+            commands::visual_intel::visual_list_concepts,
+            commands::visual_intel::visual_create_concept,
+            commands::visual_intel::visual_detect_needs,
+            commands::visual_intel::visual_list_needs,
+            commands::visual_intel::visual_coverage,
+            commands::visual_intel::visual_skip_need,
+            commands::visual_intel::visual_cover_needs,
+            commands::visual_intel::visual_worker_tick,
+            commands::visual_intel::visual_list_review_queue,
+            commands::visual_intel::visual_approve_candidate,
+            commands::visual_intel::visual_reject_candidate,
+            commands::visual_intel::visual_apply_needs_to_plan,
+            commands::visual_intel::visual_probe_image_provider,
+            commands::visual_intel::visual_cost_policy,
+            commands::visual_intel::visual_match_need,
+            commands::visual_intel::visual_supervision,
+            commands::visual_intel::visual_search_library_for_need,
+            commands::visual_intel::visual_assign_need_asset,
+            commands::visual_intel::visual_use_asset_for_need,
+            commands::visual_intel::visual_generate_need,
+            commands::visual_intel::visual_cancel_job,
+            commands::visual_intel::visual_regenerate_need,
+            commands::visual_intel::visual_supervision_global,
+            commands::visual_intel::visual_approve_and_use,
+            commands::visual_intel::visual_daily_feed_settings,
+            commands::visual_intel::visual_daily_feed_set_enabled,
+            commands::visual_intel::visual_daily_feed_cycle,
+            commands::visual_intel::visual_daily_week_summary,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -89,6 +165,8 @@ pub fn run() {
             if let Err(e) = state.ensure_dirs() {
                 tracing::warn!("Could not create app directories: {e}");
             }
+            // Resident generation supervisor (Codex CRIT-001): queue + daily without UI ticks
+            pipeline::visual::generation::supervisor::ensure_started();
             tracing::info!("VigilCut started");
             Ok(())
         })

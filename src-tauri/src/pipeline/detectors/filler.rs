@@ -8,12 +8,37 @@ use crate::models::event::{Event, Span};
 pub use crate::models::event::TYPE_SPEECH_FILLER;
 
 const FILLERS_ES: &[&str] = &[
-    "eh", "ehh", "mmm", "mm", "este", "esto", "o sea", "tipo", "digamos", "bueno", "vale",
-    "entonces", "como que", "la verdad", "en plan", "pues", "a ver",
+    "eh",
+    "ehh",
+    "mmm",
+    "mm",
+    "este",
+    "esto",
+    "o sea",
+    "tipo",
+    "digamos",
+    "bueno",
+    "vale",
+    "entonces",
+    "como que",
+    "la verdad",
+    "en plan",
+    "pues",
+    "a ver",
 ];
 const FILLERS_EN: &[&str] = &[
-    "uh", "um", "uhm", "like", "you know", "i mean", "sort of", "kind of", "basically",
-    "actually", "right", "so",
+    "uh",
+    "um",
+    "uhm",
+    "like",
+    "you know",
+    "i mean",
+    "sort of",
+    "kind of",
+    "basically",
+    "actually",
+    "right",
+    "so",
 ];
 
 /// Parse SRT and emit filler events where a cue is mostly a filler token.
@@ -53,7 +78,13 @@ pub fn detect_fillers_from_srt(run_id: &str, srt_path: &Path) -> AppResult<Vec<E
 fn normalize(s: &str) -> String {
     s.to_lowercase()
         .chars()
-        .map(|c| if c.is_alphanumeric() || c.is_whitespace() { c } else { ' ' })
+        .map(|c| {
+            if c.is_alphanumeric() || c.is_whitespace() {
+                c
+            } else {
+                ' '
+            }
+        })
         .collect::<String>()
         .split_whitespace()
         .collect::<Vec<_>>()
@@ -61,10 +92,16 @@ fn normalize(s: &str) -> String {
 }
 
 fn is_filler_line(norm: &str) -> bool {
-    if FILLERS_ES.iter().any(|f| norm == *f || norm.starts_with(&format!("{f} "))) {
+    if FILLERS_ES
+        .iter()
+        .any(|f| norm == *f || norm.starts_with(&format!("{f} ")))
+    {
         return true;
     }
-    if FILLERS_EN.iter().any(|f| norm == *f || norm.starts_with(&format!("{f} "))) {
+    if FILLERS_EN
+        .iter()
+        .any(|f| norm == *f || norm.starts_with(&format!("{f} ")))
+    {
         return true;
     }
     // line is only filler words
@@ -75,7 +112,8 @@ fn is_filler_line(norm: &str) -> bool {
     words.iter().all(|w| {
         FILLERS_ES.contains(w)
             || FILLERS_EN.contains(w)
-            || w.chars().all(|c| c == 'e' || c == 'h' || c == 'm' || c == 'u')
+            || w.chars()
+                .all(|c| c == 'e' || c == 'h' || c == 'm' || c == 'u')
     })
 }
 
@@ -83,7 +121,11 @@ fn parse_srt_cues(text: &str) -> Vec<(f64, f64, String)> {
     let mut out = Vec::new();
     let normalized = text.replace("\r\n", "\n");
     for block in normalized.split("\n\n") {
-        let lines: Vec<&str> = block.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+        let lines: Vec<&str> = block
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect();
         if lines.len() < 2 {
             continue;
         }
@@ -93,7 +135,7 @@ fn parse_srt_cues(text: &str) -> Vec<(f64, f64, String)> {
             continue;
         };
         let start = parse_ts(a.trim());
-        let end = parse_ts(b.trim().split_whitespace().next().unwrap_or(""));
+        let end = parse_ts(b.split_whitespace().next().unwrap_or(""));
         let (Some(start), Some(end)) = (start, end) else {
             continue;
         };

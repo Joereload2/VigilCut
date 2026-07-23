@@ -2,6 +2,10 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AnalysisRun,
   AppInfo,
+  ClipCandidate,
+  ClipFraming,
+  ClippingOptions,
+  ClippingRun,
   ExportEstimate,
   FfmpegStatus,
   MediaInfo,
@@ -85,17 +89,19 @@ export async function resolveAllExceptions(
   return invoke("resolve_all_exceptions", { runId, accept });
 }
 
+/** exceptionMode: "safe" | "supervised" | "aggressive" — default safe */
 export async function queueBatchJob(
   mediaPaths: string[],
   outputDir: string,
-  autoAcceptExceptions = true,
+  exceptionMode: "safe" | "supervised" | "aggressive" = "safe",
   policyPackId = "factory",
 ): Promise<unknown> {
   return invoke("queue_batch_job", {
     mediaPaths,
     outputDir,
     presetId: policyPackId,
-    autoAcceptExceptions,
+    autoAcceptExceptions: exceptionMode === "aggressive",
+    exceptionMode,
     options: null,
   });
 }
@@ -112,12 +118,13 @@ export async function listBatchJobs(): Promise<unknown[]> {
 export async function queueInboxBatch(
   inboxDir: string,
   outputDir: string | null = null,
-  autoAcceptExceptions = true,
+  exceptionMode: "safe" | "supervised" | "aggressive" = "safe",
 ): Promise<unknown> {
   return invoke("queue_inbox_batch", {
     inboxDir,
     outputDir,
-    autoAcceptExceptions,
+    autoAcceptExceptions: exceptionMode === "aggressive",
+    exceptionMode,
   });
 }
 
@@ -259,6 +266,7 @@ export async function exportVideo(params: {
   keepRanges?: [number, number][];
   exportOptions?: ExportOptions;
   colorOptions?: ColorOptions;
+  audioOptions?: import("$lib/types").AudioEnhanceOptions;
   hasAudio?: boolean;
 }): Promise<{ outputPath: string; duration: number; keepCount: number }> {
   return invoke("export_video", {
@@ -268,8 +276,14 @@ export async function exportVideo(params: {
     keepRanges: params.keepRanges ?? null,
     exportOptions: params.exportOptions ?? null,
     colorOptions: params.colorOptions ?? null,
+    audioOptions: params.audioOptions ?? null,
     hasAudio: params.hasAudio ?? null,
   });
+}
+
+export async function cancelJob(): Promise<void> {
+  if (!isTauri()) return;
+  return invoke("cancel_job");
 }
 
 export async function listPresets(): Promise<ProcessingPreset[]> {
@@ -279,6 +293,502 @@ export async function listPresets(): Promise<ProcessingPreset[]> {
 
 export async function savePreset(preset: ProcessingPreset): Promise<ProcessingPreset> {
   return invoke("save_preset", { preset });
+}
+
+// ── Intelligent clipping ───────────────────────────────────────────────────
+
+export async function runClipping(
+  mediaPath: string,
+  options?: ClippingOptions | null,
+  analysisRunId?: string | null,
+): Promise<ClippingRun> {
+  return invoke("run_clipping", {
+    mediaPath,
+    options: options ?? null,
+    analysisRunId: analysisRunId ?? null,
+  });
+}
+
+export async function getClippingRun(runId: string): Promise<ClippingRun> {
+  return invoke("get_clipping_run", { runId });
+}
+
+export async function updateClipStatus(
+  runId: string,
+  candidateId: string,
+  status: string,
+): Promise<ClipCandidate> {
+  return invoke("update_clip_status", { runId, candidateId, status });
+}
+
+export async function updateClipSpan(
+  runId: string,
+  candidateId: string,
+  start: number,
+  end: number,
+): Promise<ClipCandidate> {
+  return invoke("update_clip_span", { runId, candidateId, start, end });
+}
+
+export async function updateClipFraming(
+  runId: string,
+  candidateId: string,
+  framing: ClipFraming,
+): Promise<ClipCandidate> {
+  return invoke("update_clip_framing", { runId, candidateId, framing });
+}
+
+export async function bulkClipStatus(
+  runId: string,
+  status: string,
+  onlyHighConfidence: boolean,
+): Promise<ClippingRun> {
+  return invoke("bulk_clip_status", {
+    runId,
+    status,
+    onlyHighConfidence,
+  });
+}
+
+export async function promoteClipVariant(
+  runId: string,
+  candidateId: string,
+): Promise<ClippingRun> {
+  return invoke("promote_clip_variant", { runId, candidateId });
+}
+
+export async function exportClips(params: {
+  runId: string;
+  outputDir: string;
+  candidateIds?: string[];
+  framingOverride?: ClipFraming | null;
+}): Promise<{
+  results: { candidateId: string; ok: boolean; outputPath?: string; error?: string }[];
+  outputDir: string;
+  run: ClippingRun;
+}> {
+  return invoke("export_clips", {
+    runId: params.runId,
+    outputDir: params.outputDir,
+    candidateIds: params.candidateIds ?? null,
+    framingOverride: params.framingOverride ?? null,
+  });
+}
+
+// ── Visual library + transcript enrichment ───────────────────────────────
+
+export async function visualRunEnrichment(
+  mediaPath: string,
+  analysisRunId?: string | null,
+  transcriptPath?: string | null,
+  preferWhisper = false,
+): Promise<unknown> {
+  return invoke("visual_run_enrichment", {
+    mediaPath,
+    analysisRunId: analysisRunId ?? null,
+    transcriptPath: transcriptPath ?? null,
+    preferWhisper,
+  });
+}
+
+export async function visualTranscribeWhisper(
+  mediaPath: string,
+  analysisRunId?: string | null,
+): Promise<unknown> {
+  return invoke("visual_transcribe_whisper", {
+    mediaPath,
+    analysisRunId: analysisRunId ?? null,
+  });
+}
+
+export async function visualWhisperStatus(): Promise<{
+  available: boolean;
+  kind: string;
+  detail: string;
+  installHint: string;
+}> {
+  return invoke("visual_whisper_status");
+}
+
+export async function visualInstallWhisper(): Promise<string> {
+  return invoke("visual_install_whisper");
+}
+
+export async function visualListAssets(query?: string | null, limit = 100): Promise<unknown> {
+  return invoke("visual_list_assets", { query: query ?? null, limit });
+}
+
+// ── Intelligent visual library ───────────────────────────────────────────
+
+export async function visualSeedThemeEconomy(): Promise<unknown> {
+  return invoke("visual_seed_theme_economy");
+}
+
+export async function visualListConcepts(themeId?: string | null, limit = 100): Promise<unknown> {
+  return invoke("visual_list_concepts", { themeId: themeId ?? null, limit });
+}
+
+export async function visualDetectNeeds(params: {
+  mediaPath: string;
+  analysisRunId?: string | null;
+  maxNeeds?: number;
+}): Promise<unknown> {
+  return invoke("visual_detect_needs", {
+    mediaPath: params.mediaPath,
+    analysisRunId: params.analysisRunId ?? null,
+    maxNeeds: params.maxNeeds ?? 24,
+  });
+}
+
+export async function visualListNeeds(projectKey: string): Promise<unknown> {
+  return invoke("visual_list_needs", { projectKey });
+}
+
+export async function visualCoverage(projectKey: string): Promise<unknown> {
+  return invoke("visual_coverage", { projectKey });
+}
+
+export async function visualCoverNeeds(params: {
+  projectKey: string;
+  generateMissing?: boolean;
+  maxGenerate?: number;
+}): Promise<unknown> {
+  return invoke("visual_cover_needs", {
+    projectKey: params.projectKey,
+    generateMissing: params.generateMissing ?? false,
+    maxGenerate: params.maxGenerate ?? 5,
+  });
+}
+
+export async function visualApplyNeedsToPlan(params: {
+  mediaPath: string;
+  analysisRunId?: string | null;
+  projectKey?: string | null;
+}): Promise<unknown> {
+  return invoke("visual_apply_needs_to_plan", {
+    mediaPath: params.mediaPath,
+    analysisRunId: params.analysisRunId ?? null,
+    projectKey: params.projectKey ?? null,
+  });
+}
+
+export async function visualListReviewQueue(limit = 50): Promise<unknown> {
+  return invoke("visual_list_review_queue", { limit });
+}
+
+export async function visualApproveCandidate(candidateId: string): Promise<unknown> {
+  return invoke("visual_approve_candidate", { candidateId });
+}
+
+export async function visualProbeImageProvider(): Promise<unknown> {
+  return invoke("visual_probe_image_provider");
+}
+
+export async function visualCostPolicy(): Promise<unknown> {
+  return invoke("visual_cost_policy");
+}
+
+export async function visualSkipNeed(needId: string): Promise<unknown> {
+  return invoke("visual_skip_need", { needId });
+}
+
+export async function visualSupervision(projectKey: string): Promise<unknown> {
+  return invoke("visual_supervision", { projectKey });
+}
+
+export async function visualGenerateNeed(needId: string): Promise<unknown> {
+  return invoke("visual_generate_need", { needId });
+}
+
+export async function visualSearchLibraryForNeed(needId: string): Promise<unknown> {
+  return invoke("visual_search_library_for_need", { needId });
+}
+
+export async function visualAssignNeedAsset(needId: string, assetId: string): Promise<unknown> {
+  return invoke("visual_assign_need_asset", { needId, assetId });
+}
+
+/** Single write: assign scene asset + create/replace one placement (PM-003). */
+export async function visualUseAssetForNeed(params: {
+  needId: string;
+  assetId: string;
+  mediaPath: string;
+  analysisRunId?: string | null;
+}): Promise<unknown> {
+  return invoke("visual_use_asset_for_need", {
+    needId: params.needId,
+    assetId: params.assetId,
+    mediaPath: params.mediaPath,
+    analysisRunId: params.analysisRunId ?? null,
+  });
+}
+
+export async function visualCancelJob(jobId: string): Promise<unknown> {
+  return invoke("visual_cancel_job", { jobId });
+}
+
+export async function visualRegenerateNeed(needId: string): Promise<unknown> {
+  return invoke("visual_regenerate_need", { needId });
+}
+
+export async function visualApproveAndUse(params: {
+  candidateId: string;
+  mediaPath?: string | null;
+  analysisRunId?: string | null;
+  place?: boolean;
+}): Promise<unknown> {
+  return invoke("visual_approve_and_use", {
+    candidateId: params.candidateId,
+    mediaPath: params.mediaPath ?? null,
+    analysisRunId: params.analysisRunId ?? null,
+    place: params.place ?? true,
+  });
+}
+
+export async function visualRejectCandidate(
+  candidateId: string,
+  reason?: string | null,
+): Promise<unknown> {
+  return invoke("visual_reject_candidate", {
+    candidateId,
+    reason: reason ?? null,
+  });
+}
+
+/** @deprecated Prefer resident supervisor; kept for CLI/debug. UI must not call this. */
+export async function visualWorkerTick(maxJobs = 3): Promise<unknown> {
+  return invoke("visual_worker_tick", { maxJobs });
+}
+
+export async function visualSupervisionGlobal(): Promise<unknown> {
+  return invoke("visual_supervision_global");
+}
+
+export async function visualDailyFeedSettings(): Promise<unknown> {
+  return invoke("visual_daily_feed_settings");
+}
+
+export async function visualDailyFeedSetEnabled(enabled: boolean): Promise<unknown> {
+  return invoke("visual_daily_feed_set_enabled", { enabled });
+}
+
+export async function visualDailyFeedCycle(): Promise<unknown> {
+  return invoke("visual_daily_feed_cycle");
+}
+
+export async function visualDailyWeekSummary(): Promise<unknown> {
+  return invoke("visual_daily_week_summary");
+}
+
+export async function visualImportImage(
+  path: string,
+  title?: string | null,
+  tags: string[] = [],
+  concepts: string[] = [],
+): Promise<unknown> {
+  return invoke("visual_import_image", { path, title: title ?? null, tags, concepts });
+}
+
+export async function visualUpdateAsset(params: {
+  id: string;
+  title?: string | null;
+  tags?: string[] | null;
+  concepts?: string[] | null;
+  license?: string | null;
+  status?: string | null;
+}): Promise<unknown> {
+  return invoke("visual_update_asset", {
+    id: params.id,
+    title: params.title ?? null,
+    tags: params.tags ?? null,
+    concepts: params.concepts ?? null,
+    license: params.license ?? null,
+    status: params.status ?? null,
+  });
+}
+
+/** Import image and attach as accepted VisualPlan placement at a transcript moment. */
+export async function visualAttachImage(params: {
+  mediaPath: string;
+  analysisRunId?: string | null;
+  path: string;
+  concept: string;
+  sourceStart: number;
+  sourceEnd: number;
+}): Promise<unknown> {
+  return invoke("visual_attach_image", {
+    mediaPath: params.mediaPath,
+    analysisRunId: params.analysisRunId ?? null,
+    path: params.path,
+    concept: params.concept,
+    sourceStart: params.sourceStart,
+    sourceEnd: params.sourceEnd,
+  });
+}
+
+/** Manual placement on output timeline — transcript optional. */
+export async function visualCreateManualPlacement(params: {
+  mediaPath: string;
+  analysisRunId?: string | null;
+  assetId?: string | null;
+  imagePath?: string | null;
+  outputStart: number;
+  outputEnd: number;
+  displayMode?: string;
+  positionX?: number | null;
+  positionY?: number | null;
+  sizeW?: number | null;
+  fit?: string | null;
+  label?: string | null;
+  sourceDuration?: number | null;
+}): Promise<unknown> {
+  return invoke("visual_create_manual_placement", {
+    mediaPath: params.mediaPath,
+    analysisRunId: params.analysisRunId ?? null,
+    assetId: params.assetId ?? null,
+    imagePath: params.imagePath ?? null,
+    outputStart: params.outputStart,
+    outputEnd: params.outputEnd,
+    displayMode: params.displayMode ?? "completa",
+    positionX: params.positionX ?? null,
+    positionY: params.positionY ?? null,
+    sizeW: params.sizeW ?? null,
+    fit: params.fit ?? null,
+    label: params.label ?? null,
+    sourceDuration: params.sourceDuration ?? null,
+  });
+}
+
+export async function visualUpdatePlacement(params: {
+  placementId: string;
+  outputStart?: number | null;
+  outputEnd?: number | null;
+  displayMode?: string | null;
+  positionX?: number | null;
+  positionY?: number | null;
+  sizeW?: number | null;
+  sizeH?: number | null;
+  fit?: string | null;
+  status?: string | null;
+  reviewStatus?: string | null;
+  manualOverride?: boolean | null;
+  relatedText?: string | null;
+  restoreAi?: boolean | null;
+  opacity?: number | null;
+}): Promise<unknown> {
+  return invoke("visual_update_placement", {
+    placementId: params.placementId,
+    outputStart: params.outputStart ?? null,
+    outputEnd: params.outputEnd ?? null,
+    displayMode: params.displayMode ?? null,
+    positionX: params.positionX ?? null,
+    positionY: params.positionY ?? null,
+    sizeW: params.sizeW ?? null,
+    sizeH: params.sizeH ?? null,
+    fit: params.fit ?? null,
+    status: params.status ?? null,
+    reviewStatus: params.reviewStatus ?? null,
+    manualOverride: params.manualOverride ?? null,
+    relatedText: params.relatedText ?? null,
+    restoreAi: params.restoreAi ?? null,
+    opacity: params.opacity ?? null,
+  });
+}
+
+export async function visualSnapPlacement(params: {
+  placementId: string;
+  outputStart: number;
+  outputEnd: number;
+  anchors: number[];
+  threshold?: number | null;
+}): Promise<unknown> {
+  return invoke("visual_snap_placement", {
+    placementId: params.placementId,
+    outputStart: params.outputStart,
+    outputEnd: params.outputEnd,
+    anchors: params.anchors,
+    threshold: params.threshold ?? null,
+  });
+}
+
+export async function visualEvaluateComposition(): Promise<unknown> {
+  return invoke("visual_evaluate_composition");
+}
+
+export async function visualRemovePlacement(placementId: string): Promise<unknown> {
+  return invoke("visual_remove_placement", { placementId });
+}
+
+export async function visualAddProtectedRange(params: {
+  mediaPath: string;
+  analysisRunId?: string | null;
+  outputStart: number;
+  outputEnd: number;
+  reason?: string | null;
+  sourceDuration?: number | null;
+}): Promise<unknown> {
+  return invoke("visual_add_protected_range", {
+    mediaPath: params.mediaPath,
+    analysisRunId: params.analysisRunId ?? null,
+    outputStart: params.outputStart,
+    outputEnd: params.outputEnd,
+    reason: params.reason ?? null,
+    sourceDuration: params.sourceDuration ?? null,
+  });
+}
+
+export async function visualRemoveProtectedRange(rangeId: string): Promise<unknown> {
+  return invoke("visual_remove_protected_range", { rangeId });
+}
+
+export async function visualImportFolder(
+  path: string,
+  tags: string[] = [],
+  concepts: string[] = [],
+  recursive = false,
+): Promise<unknown> {
+  return invoke("visual_import_folder", { path, tags, concepts, recursive });
+}
+
+export async function visualSetSuggestionStatus(
+  suggestionId: string,
+  status: string,
+): Promise<unknown> {
+  return invoke("visual_set_suggestion_status", { suggestionId, status });
+}
+
+export async function visualGetSession(): Promise<unknown> {
+  return invoke("visual_get_session");
+}
+
+export async function visualExportTranscript(
+  outDir: string,
+  stem?: string | null,
+): Promise<unknown> {
+  return invoke("visual_export_transcript", { outDir, stem: stem ?? null });
+}
+
+export async function visualSavePlan(path?: string | null): Promise<string> {
+  return invoke("visual_save_plan", { path: path ?? null });
+}
+
+export async function visualListUsage(
+  assetId?: string | null,
+  limit = 50,
+): Promise<unknown> {
+  return invoke("visual_list_usage", { assetId: assetId ?? null, limit });
+}
+
+export async function visualScanMissing(): Promise<number> {
+  return invoke("visual_scan_missing");
+}
+
+export async function visualRenderPlan(
+  cutVideoPath: string,
+  outputPath: string,
+  mediaPath: string,
+): Promise<string> {
+  return invoke("visual_render_plan", { cutVideoPath, outputPath, mediaPath });
 }
 
 /** Demo segments for Vite-only UI work without backend. */

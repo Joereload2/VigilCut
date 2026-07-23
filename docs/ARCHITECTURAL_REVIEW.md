@@ -6,7 +6,21 @@
 **Filosofía:** *La IA trabaja. El humano únicamente supervisa.*  
 **Horizonte:** 5 años · comprensión de vídeo, no solo recorte de silencios  
 
-Este documento es el resultado de **tres iteraciones completas de análisis**, cada una diseñada para destruir las conclusiones de la anterior. No valida el estado actual; lo juzga.
+Este documento es el resultado de **tres iteraciones completas de análisis**, cada una diseñada para destruir las conclusiones de la anterior. Conserva el diagnóstico histórico.
+
+## Actualización 2026-07-20 (v1.1.0 hardening)
+
+| Diagnóstico histórico (este doc) | Estado 1.1 |
+|----------------------------------|------------|
+| Silero “placeholder” / fake path | **Corregido** — ONNX real + SHA-256 en setup:models |
+| Batch force-accept silencioso | **Corregido** — modo Safe por defecto; Aggressive explícito |
+| Segment como verdad de export | **Parcial** — factory path usa EDL; UI K/X aún dual |
+| Stubs sin honestidad | **Parcial** — audio enhance en export; Whisper opt-in |
+| Scopes Tauri abiertos | **Mejorado** — sin `**` global; `$HOME/**` y dirs estándar |
+| Docs desalineadas | **En progreso** — ver CHANGELOG 1.1 + HARDENING_1_1.md |
+
+**Vigente aún:** dual Segment/EDL en UI, supervised batch resume UI, broker de features completo, face tracking.  
+**Detalle:** `docs/HARDENING_1_1.md`.
 
 ---
 

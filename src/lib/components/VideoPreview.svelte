@@ -3,6 +3,16 @@
   import { formatTime } from "$lib/types";
   import { convertFileSrc } from "@tauri-apps/api/core";
   import { isTauri } from "$lib/utils/tauri";
+  import VisualLiveOverlay from "./visual/VisualLiveOverlay.svelte";
+
+  interface Props {
+    /**
+     * Compact: fixed max height so timeline + tools always fit on screen.
+     * Video scales with object-contain (not 1:1 pixels).
+     */
+    compact?: boolean;
+  }
+  let { compact = true }: Props = $props();
 
   let videoEl = $state<HTMLVideoElement | null>(null);
   let loadError = $state<string | null>(null);
@@ -11,28 +21,47 @@
   let seekingProgrammatically = $state(false);
 
   const isEdited = $derived(projectStore.previewMode === "edited");
+  const hasLiveVisual = $derived(
+    projectStore.visualPlacements.some((p) => p.status === "active"),
+  );
   const editedDuration = $derived(Math.max(projectStore.keptDuration, 0.001));
-  const editedClock = $derived(projectStore.sourceToEdited(projectStore.currentTime));
-  const displayDuration = $derived(isEdited ? editedDuration : Math.max(projectStore.duration, 0.001));
+  const editedClock = $derived(
+    projectStore.localKeepRanges().length > 0
+      ? projectStore.sourceToEdited(projectStore.currentTime)
+      : projectStore.currentTime,
+  );
+  const displayDuration = $derived(
+    isEdited ? editedDuration : Math.max(projectStore.duration, 0.001),
+  );
   const displayClock = $derived(isEdited ? editedClock : projectStore.currentTime);
 
-  const src = $derived.by(() => {
-    const p = projectStore.mediaPath;
+  function fileToSrc(p: string | null): string | null {
     if (!p || p.startsWith("demo://")) return null;
     if (isTauri()) {
       try {
-        return convertFileSrc(p.replace(/\\/g, "/"));
+        // Keep native separators; convertFileSrc handles Windows paths
+        return convertFileSrc(p);
       } catch (e) {
-        console.error("convertFileSrc failed", e);
-        return null;
+        console.error("convertFileSrc failed", e, p);
+        try {
+          return convertFileSrc(p.replace(/\\/g, "/"));
+        } catch (e2) {
+          console.error("convertFileSrc fallback failed", e2);
+          return null;
+        }
       }
     }
     if (p.startsWith("blob:") || p.startsWith("http")) return p;
     return null;
-  });
+  }
+
+  /** One video only: the project media (cut preview skips silences in “Cortado”). */
+  const src = $derived.by(() => fileToSrc(projectStore.mediaPath));
 
   const canPreviewCut = $derived(
-    projectStore.segments.length > 0 && projectStore.keepCount > 0,
+    projectStore.localKeepRanges().length > 0 ||
+      (projectStore.segments.length > 0 && projectStore.keepCount > 0) ||
+      (projectStore.keepRanges?.length ?? 0) > 0,
   );
 
   $effect(() => {
@@ -177,17 +206,17 @@
     };
   });
 
-  // External seek from timeline (source time) when paused
+  // External seek from timeline when paused
   $effect(() => {
     const v = videoEl;
     if (!v || !ready || projectStore.isPlaying) return;
     const t = projectStore.currentTime;
     if (Math.abs(v.currentTime - t) > 0.12) {
-      setSourceTime(
-        projectStore.previewMode === "edited"
-          ? projectStore.advanceEditedPlayback(t).time
-          : t,
-      );
+      if (projectStore.previewMode === "edited") {
+        setSourceTime(projectStore.advanceEditedPlayback(t).time);
+      } else {
+        setSourceTime(t);
+      }
     }
   });
 
@@ -253,7 +282,9 @@
     if (mode === "edited") {
       const { time } = projectStore.advanceEditedPlayback(projectStore.currentTime);
       setSourceTime(time);
-      projectStore.statusMessage = "Vista del video cortado";
+      projectStore.statusMessage = hasLiveVisual
+        ? "Resultado (cortes + imágenes en vivo)"
+        : "Vista del video cortado";
     } else {
       projectStore.statusMessage = "Vista del original";
     }
@@ -282,26 +313,79 @@
     window.addEventListener("vigilcut:listen-result", handler);
     return () => window.removeEventListener("vigilcut:listen-result", handler);
   });
+
+  // Clipping panel: jump to candidate start (optional end → auto-pause)
+  let clipEndStop = $state<number | null>(null);
+
+  $effect(() => {
+    const handler = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ t?: number; end?: number; play?: boolean }>).detail;
+      const t = detail?.t;
+      if (typeof t !== "number" || !Number.isFinite(t)) return;
+      projectStore.previewMode = "original";
+      setSourceTime(t);
+      clipEndStop =
+        typeof detail?.end === "number" && Number.isFinite(detail.end) ? detail.end : null;
+      const shouldPlay = detail?.play !== false;
+      if (shouldPlay && videoEl && src) {
+        void videoEl.play().catch(() => {
+          /* autoplay policies */
+        });
+      }
+    };
+    window.addEventListener("vigilcut:play-from", handler);
+    return () => window.removeEventListener("vigilcut:play-from", handler);
+  });
+
+  $effect(() => {
+    const v = videoEl;
+    if (!v) return;
+    const onTimeClip = () => {
+      if (clipEndStop == null) return;
+      if (v.currentTime >= clipEndStop - 0.05) {
+        v.pause();
+        setSourceTime(clipEndStop);
+        clipEndStop = null;
+        projectStore.statusMessage = "Fin del clip";
+      }
+    };
+    v.addEventListener("timeupdate", onTimeClip);
+    return () => v.removeEventListener("timeupdate", onTimeClip);
+  });
 </script>
 
-<div class="panel flex min-h-0 flex-1 flex-col overflow-hidden">
-  <div class="flex flex-wrap items-center justify-between gap-2 border-b border-surface-800 px-3 py-1.5">
-    <span class="text-xs font-semibold text-surface-300">Vista previa</span>
+<div
+  class="panel flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden"
+  style="box-sizing:border-box; height:100%"
+>
+  <div
+    class="flex shrink-0 flex-wrap items-center justify-between gap-1 border-b border-surface-800 px-2 py-1 sm:px-3 sm:py-1.5"
+  >
+    <span class="text-[11px] font-semibold text-surface-300 sm:text-xs">Vista previa</span>
 
-    <div class="flex flex-wrap items-center gap-2">
+    <div class="flex flex-wrap items-center gap-1 sm:gap-2">
       <button
         type="button"
-        class="btn h-8 bg-vigil-600 px-3 text-xs font-bold text-white hover:bg-vigil-500 disabled:opacity-40"
+        class="btn h-7 border border-surface-600 bg-surface-800 px-2 text-[11px] font-bold text-white hover:bg-surface-700 disabled:opacity-40 sm:h-8 sm:px-3 sm:text-xs"
+        disabled={!src || !ready}
+        onclick={togglePlay}
+        title="Espacio — play / pausa"
+      >
+        {projectStore.isPlaying ? "⏸ Pausa" : "▶ Play"}
+      </button>
+      <button
+        type="button"
+        class="btn h-7 bg-vigil-600 px-2 text-[11px] font-bold text-white hover:bg-vigil-500 disabled:opacity-40 sm:h-8 sm:px-3 sm:text-xs"
         disabled={!canPreviewCut || !src}
         onclick={listenCutResult}
         title="Reproduce el resultado final (salta cortes)"
       >
-        ▶ Oír video cortado
+        ▶ Oír cortado
       </button>
-      <div class="flex items-center rounded-lg border border-surface-700 bg-surface-950 p-0.5 text-[11px]">
+      <div class="flex items-center rounded-lg border border-surface-700 bg-surface-950 p-0.5 text-[10px] sm:text-[11px]">
         <button
           type="button"
-          class="rounded-md px-2.5 py-1 font-medium transition
+          class="rounded-md px-2 py-0.5 font-medium transition
             {!isEdited ? 'bg-surface-700 text-white' : 'text-surface-400 hover:text-surface-200'}"
           onclick={() => setMode("original")}
         >
@@ -309,36 +393,115 @@
         </button>
         <button
           type="button"
-          class="rounded-md px-2.5 py-1 font-medium transition
+          class="rounded-md px-2 py-0.5 font-medium transition
             {isEdited ? 'bg-vigil-600 text-white' : 'text-surface-400 hover:text-surface-200'}"
           onclick={() => setMode("edited")}
           disabled={!canPreviewCut}
           title={canPreviewCut
-            ? "Resultado final saltando cortes"
+            ? "Un solo resultado: cortes + imágenes superpuestas"
             : "Marca tramos a mantener"}
         >
-          Cortado
+          {hasLiveVisual ? "Resultado" : "Cortado"}
         </button>
       </div>
     </div>
   </div>
 
-  <div class="relative flex min-h-0 flex-1 items-center justify-center bg-black">
+  <!-- Stage fills remaining panel height (parent controls size — 70% column layout) -->
+  <div
+    class="relative flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden bg-black"
+  >
     {#if src}
+      <!-- Single video layer -->
       <!-- svelte-ignore a11y_media_has_caption -->
       <video
         bind:this={videoEl}
-        class="max-h-full max-w-full cursor-pointer outline-none"
+        class="h-full max-h-full w-full max-w-full cursor-pointer object-contain outline-none"
         playsinline
         preload="auto"
+        controls={false}
         onclick={togglePlay}
       ></video>
 
+      <!-- Live B-roll: same composition model as FFmpeg export -->
+      <VisualLiveOverlay
+        issues={projectStore.visualIssues}
+        spatialZones={projectStore.visualSpatialZones}
+        onLayoutChange={(id, x, y, w, h) => {
+          // Optimistic local update for snappy drag
+          projectStore.visualPlacements = projectStore.visualPlacements.map((p) =>
+            p.id === id
+              ? {
+                  ...p,
+                  layout: {
+                    x,
+                    y,
+                    w,
+                    h: h ?? p.layout?.h ?? 0,
+                    opacity: p.layout?.opacity ?? 0.95,
+                  },
+                }
+              : p,
+          );
+          window.dispatchEvent(
+            new CustomEvent("vigilcut:visual-layout", {
+              detail: { id, x, y, w, h },
+            }),
+          );
+        }}
+      />
+
+      {#if !projectStore.isPlaying && ready}
+        <!-- Keep play chrome under B-roll (z-15+) so fullscreen images stay visible -->
+        <button
+          type="button"
+          class="pointer-events-auto absolute inset-0 z-[8] flex items-center justify-center bg-black/15"
+          class:opacity-0={hasLiveVisual &&
+            projectStore.visualPlacements.some(
+              (p) =>
+                p.status === "active" &&
+                projectStore.outputClock() >= p.outputStart &&
+                projectStore.outputClock() < p.outputEnd,
+            )}
+          class:pointer-events-none={hasLiveVisual &&
+            projectStore.visualPlacements.some(
+              (p) =>
+                p.status === "active" &&
+                projectStore.outputClock() >= p.outputStart &&
+                projectStore.outputClock() < p.outputEnd,
+            )}
+          onclick={togglePlay}
+          aria-label="Reproducir"
+        >
+          <span
+            class="flex h-14 w-14 items-center justify-center rounded-full bg-vigil-600/90 text-2xl text-white shadow-xl"
+            >▶</span
+          >
+        </button>
+      {/if}
+
       {#if isEdited && canPreviewCut}
         <div
-          class="pointer-events-none absolute left-3 top-3 rounded-full border border-vigil-600/50 bg-vigil-950/90 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-vigil-300"
+          class="pointer-events-none absolute left-3 top-3 z-20 rounded-full border border-vigil-600/50 bg-vigil-950/90 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-vigil-300"
         >
-          Resultado · sin cortes
+          {#if hasLiveVisual}
+            Resultado · en vivo
+            {#if projectStore.autoCutCount > 0}
+              · {projectStore.autoCutCount} cortes
+            {/if}
+            · {projectStore.visualPlacements.filter((p) => p.status === "active").length} img
+          {:else}
+            Resultado · pausas fuera
+            {#if projectStore.autoCutCount > 0}
+              · {projectStore.autoCutCount} cortes
+            {/if}
+          {/if}
+        </div>
+      {:else if ready}
+        <div
+          class="pointer-events-none absolute left-3 top-3 z-20 rounded-full border border-surface-600/50 bg-surface-950/80 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-surface-300"
+        >
+          Original (con silencios)
         </div>
       {/if}
 
@@ -354,20 +517,40 @@
           class="absolute inset-x-4 bottom-4 rounded-lg border border-cut/40 bg-surface-950/95 p-3 text-center text-xs text-cut"
         >
           {loadError}
+          <p class="mt-1 break-all text-[10px] text-surface-500">{projectStore.mediaPath}</p>
         </div>
       {/if}
     {:else}
       <div class="p-6 text-center text-sm text-surface-500">
         Abre un video para previsualizar el original y el resultado cortado.
+        {#if projectStore.mediaPath}
+          <p class="mt-2 text-xs text-cut">No se pudo crear URL de previsualización.</p>
+        {/if}
       </div>
     {/if}
   </div>
 
-  <!-- Scrubber: edited timeline when in cut preview -->
-  <div class="border-t border-surface-800 px-3 pt-2">
+  <!-- One compact transport row (no second tall control band) -->
+  <div
+    class="flex shrink-0 flex-wrap items-center gap-1.5 border-t border-surface-800 px-2 py-1 sm:gap-2 sm:px-3"
+  >
+    <button class="btn-ghost px-1.5 text-[10px]" onclick={() => seekDisplay(-5)} disabled={!src}
+      >−5s</button
+    >
+    <button
+      class="btn-secondary min-w-[3.5rem] px-2 py-1 text-[11px] font-semibold"
+      onclick={togglePlay}
+      disabled={!src || (isEdited && !canPreviewCut)}
+      title="Espacio"
+    >
+      {projectStore.isPlaying ? "Pausa" : "Play"}
+    </button>
+    <button class="btn-ghost px-1.5 text-[10px]" onclick={() => seekDisplay(5)} disabled={!src}
+      >+5s</button
+    >
     <input
       type="range"
-      class="w-full accent-vigil-500 disabled:opacity-40"
+      class="min-w-[6rem] max-w-full flex-1 accent-vigil-500 disabled:opacity-40"
       min={0}
       max={displayDuration}
       step={0.05}
@@ -375,31 +558,7 @@
       disabled={!src || !ready}
       oninput={onScrub}
     />
-    <div class="mt-0.5 flex justify-between text-[10px] text-surface-500">
-      <span>{isEdited ? "Línea del video final" : "Línea del original"}</span>
-      <span class="font-mono"
-        >{formatTime(displayClock)} / {formatTime(displayDuration)}</span
-      >
-    </div>
-  </div>
-
-  <div class="flex items-center gap-2 px-3 py-2">
-    <button class="btn-ghost px-2 text-xs" onclick={() => seekDisplay(-5)} disabled={!src}
-      >−5s</button
-    >
-    <button
-      class="btn-secondary min-w-[4.5rem] font-semibold"
-      onclick={togglePlay}
-      disabled={!src || (isEdited && !canPreviewCut)}
-      title="Espacio"
-    >
-      {projectStore.isPlaying ? "Pausa" : "Play"}
-    </button>
-    <button class="btn-ghost px-2 text-xs" onclick={() => seekDisplay(5)} disabled={!src}
-      >+5s</button
-    >
-
-    <span class="font-mono text-xs text-surface-300">
+    <span class="shrink-0 font-mono text-[10px] text-surface-300">
       {formatTime(displayClock, true)}
       <span class="text-surface-600">/</span>
       {formatTime(displayDuration)}

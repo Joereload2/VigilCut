@@ -36,10 +36,7 @@ pub fn enhance_audio_preview(options: AudioEnhanceOptions) -> AppResult<AudioEnh
     }
     if options.normalize {
         // loudnorm two-pass is ideal; single-pass for preview graph
-        filters.push(format!(
-            "loudnorm=I={}:TP=-1.5:LRA=11",
-            options.target_lufs
-        ));
+        filters.push(format!("loudnorm=I={}:TP=-1.5:LRA=11", options.target_lufs));
     }
 
     let graph = filters.join(",");

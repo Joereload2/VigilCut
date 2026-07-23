@@ -1,6 +1,6 @@
 {
   "name": "vigilcut",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Local AI content factory engine — Events → Policy → EDL → Artifacts",
   "type": "module",
   "license": "MIT",
@@ -14,16 +14,21 @@
     "tauri:build": "tauri build",
     "setup:ffmpeg": "node scripts/setup-ffmpeg.mjs",
     "setup:models": "node scripts/setup-models.mjs",
+    "setup:whisper": "node scripts/setup-whisper.mjs",
     "dev:win": "powershell -ExecutionPolicy Bypass -File scripts/dev.ps1",
     "check:all": "powershell -ExecutionPolicy Bypass -File scripts/check.ps1",
     "cli": "cargo run --manifest-path src-tauri/Cargo.toml --bin vigilcut-cli --",
     "cli:release": "cargo run --manifest-path src-tauri/Cargo.toml --release --bin vigilcut-cli --",
     "test": "powershell -ExecutionPolicy Bypass -File scripts/test-all.ps1",
     "test:unit": "cargo test --manifest-path src-tauri/Cargo.toml --lib",
-    "test:smoke": "cargo test --manifest-path src-tauri/Cargo.toml --test smoke_pipeline -- --nocapture",
-    "test:e2e": "cargo test --manifest-path src-tauri/Cargo.toml --test e2e_factory -- --nocapture",
+    "test:unit:visual": "cargo test --manifest-path src-tauri/Cargo.toml --lib pipeline::visual -- --nocapture",
+    "test:smoke": "cargo test --manifest-path src-tauri/Cargo.toml --test smoke_pipeline --test smoke_clipping --test smoke_visual --test smoke_visual_intel -- --nocapture",
+    "test:e2e": "cargo test --manifest-path src-tauri/Cargo.toml --test e2e_factory --test e2e_clipping -- --nocapture",
+    "test:clippy": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
+    "test:fmt": "cargo fmt --manifest-path src-tauri/Cargo.toml -- --check",
     "launcher": "powershell -ExecutionPolicy Bypass -File scripts/create-launcher.ps1",
-    "lint": "eslint src --ext .ts,.svelte"
+    "lint": "npm run check",
+    "typecheck": "svelte-check --tsconfig ./tsconfig.json"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.2.0",

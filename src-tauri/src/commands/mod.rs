@@ -1,6 +1,7 @@
 pub mod analyze;
 pub mod audio;
 pub mod batch;
+pub mod clipping;
 pub mod color;
 pub mod export;
 pub mod factory;
@@ -11,4 +12,6 @@ pub mod subtitles;
 pub mod system;
 pub mod timeline;
 pub mod vad;
+pub mod visual;
+pub mod visual_intel;
 pub mod watch;

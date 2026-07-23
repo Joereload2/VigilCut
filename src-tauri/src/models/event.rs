@@ -33,7 +33,7 @@ pub struct Event {
     pub event_type: String,
     pub detector: String,
     pub span: Span,
-    /// Confidence 0..1
+    /// Operational / heuristic decision score 0..1 (not a calibrated probability).
     pub score: f64,
     pub payload: serde_json::Value,
     pub tags: Vec<String>,
