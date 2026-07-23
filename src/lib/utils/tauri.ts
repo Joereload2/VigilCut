@@ -865,3 +865,18 @@ export function demoSegments(duration = 60): Segment[] {
   }
   return segs;
 }
+export async function librarySyncStatus(): Promise<unknown> {
+  return invoke("library_sync_status");
+}
+
+export async function librarySyncHealthCheck(): Promise<unknown> {
+  return invoke("library_sync_health_check");
+}
+
+export async function librarySyncEnqueueAsset(assetId: string): Promise<unknown> {
+  return invoke("library_sync_enqueue_asset", { assetId });
+}
+
+export async function librarySyncRunOnce(): Promise<unknown> {
+  return invoke("library_sync_run_once");
+}

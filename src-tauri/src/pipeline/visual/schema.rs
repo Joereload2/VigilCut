@@ -385,6 +385,21 @@ fn migrate_v2(conn: &Connection) -> AppResult<()> {
             generations INTEGER NOT NULL DEFAULT 0,
             paid_spend REAL NOT NULL DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS sync_queue (
+            id TEXT PRIMARY KEY,
+            entity_type TEXT NOT NULL,
+            entity_id TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            attempt INTEGER NOT NULL DEFAULT 0,
+            last_error TEXT,
+            next_attempt_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(entity_type, entity_id, operation)
+        );
+        CREATE INDEX IF NOT EXISTS idx_sync_queue_ready
+          ON sync_queue(status, next_attempt_at, created_at);
         "#,
     )
     .map_err(|e| AppError::Message(e.to_string()))?;

@@ -2,3 +2,4 @@
 //! New commands must call `LibraryService` rather than B-roll pipeline modules.
 
 pub mod library_commands;
+pub mod sync_commands;

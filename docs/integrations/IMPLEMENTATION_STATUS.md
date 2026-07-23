@@ -11,7 +11,7 @@ This file records verified evidence after each isolated implementation gate.
 | Codecov | experimental | this integration commit | 100 instrumented tests; 182547-byte report; full gate passes | Real local report; remote upload unobserved | Codecov onboarding/OIDC workflow must be observed |
 | CodeRabbit | blocked | this integration commit | Official schema keys and full gate pass | Real configuration; no review observed | GitHub App authorization required |
 | Pollinations | experimental | this integration commit | Safe catalogue probe 421 ms; 2 provider tests; full gate passes | Real catalogue; no image generation | API key, Pollen authorization, and per-model license verification required |
-| Supabase runtime | pending | - | - | - | Development credentials required for real verification |
+| Supabase runtime | blocked | this integration commit | 2 sync/security tests, migration idempotency, 5 domain tests, full gate pass | Real local queue/client code; remote untested | Dev project, CLI, RLS hardening, credentials, advisors required |
 | Sentry ADR | pending | - | - | - | No SDK or telemetry authorized |
 
 ## Stage record: independent library
@@ -117,3 +117,24 @@ This file records verified evidence after each isolated implementation gate.
   independent assets.
 - Final gate: check, build, fmt, clippy, 44 visual tests, 2 Pollinations tests,
   and 7 smoke tests passed on 2026-07-23.
+## Stage record: Supabase runtime
+
+- Implemented: opt-in Rust client, publishable/user-token contract, fixed URL
+  allow-list, secret-key rejection, health/push code, additive SQLite queue,
+  idempotent claim/retry, commands, and local-only UI status.
+- Tested: queue deduplication/resume mock, local continuity, disabled default,
+  secret rejection, SQLite migration idempotency, 5 independent-domain tests,
+  and complete local gate.
+- Real: SQLite queue and compiled HTTP client paths.
+- Not run: any Supabase request, migration, Storage upload/download, pull, or
+  advisor; no credentials or CLI are available.
+- Security blocker: existing migration has broad Storage policies and a public
+  SECURITY DEFINER helper. Runtime additionally requires RLS_VERIFIED.
+- Dependencies added: none.
+- Cost observed: 0.
+- Authorization required: development project/credentials and later separate
+  production approval.
+- Rollback: remove optional client/commands/UI and additive queue code without
+  deleting local assets.
+- Final gate: check, build, fmt, clippy, 5 domain tests, 44 visual tests, and 7
+  smoke tests passed on 2026-07-23.

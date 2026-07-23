@@ -2,3 +2,5 @@
 //! only behind the optional sync phase.
 
 pub use crate::pipeline::visual::library::library_root;
+
+pub mod supabase_storage;

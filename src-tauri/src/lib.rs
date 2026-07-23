@@ -165,6 +165,10 @@ pub fn run() {
             commands::visual_intel::visual_daily_feed_set_enabled,
             commands::visual_intel::visual_daily_feed_cycle,
             commands::visual_intel::visual_daily_week_summary,
+            visual_library::commands::sync_commands::library_sync_status,
+            visual_library::commands::sync_commands::library_sync_health_check,
+            visual_library::commands::sync_commands::library_sync_enqueue_asset,
+            visual_library::commands::sync_commands::library_sync_run_once,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
