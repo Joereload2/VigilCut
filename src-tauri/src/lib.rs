@@ -147,6 +147,7 @@ pub fn run() {
             commands::visual_intel::visual_match_need,
             commands::visual_intel::visual_supervision,
             commands::visual_intel::visual_search_library_for_need,
+            commands::visual_intel::visual_assign_need_asset,
             commands::visual_intel::visual_generate_need,
             commands::visual_intel::visual_cancel_job,
             commands::visual_intel::visual_regenerate_need,

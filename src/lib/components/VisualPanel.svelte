@@ -4,11 +4,11 @@
   import * as api from "$lib/utils/tauri";
   import VideoPreview from "./VideoPreview.svelte";
   import SupervisedTimeline from "./visual/SupervisedTimeline.svelte";
+  import HorizontalProps from "./visual/HorizontalProps.svelte";
   import VisualWorkspace from "./visual/VisualWorkspace.svelte";
   import type {
     Asset,
     CompositionIssue,
-    DisplayMode,
     Suggestion,
     VisualPlacement,
     VisualPlan,
@@ -23,9 +23,6 @@
   let resolvedBasePath = $state<string | null>(null);
   let previewPhase = $state<"idle" | "preparing" | "rendering" | "ready">("idle");
 
-  let displayMode = $state<DisplayMode>("completa");
-  let outputStart = $state(0);
-  let outputEnd = $state(4);
   let selectedPlacementId = $state<string | null>(null);
 
   let assets = $state<Asset[]>([]);
@@ -34,23 +31,8 @@
   let transcriptSegs = $state<
     { id?: string; text: string; span: { start: number; end: number } }[]
   >([]);
-  let whisperOk = $state(false);
-  let whisperKind = $state("");
-  let preferBusyWhisper = $state(false);
-  /** Intelligent library coverage (optional project key from detect needs) */
+  /** Intelligent library project key (shared with VisualWorkspace) */
   let projectKey = $state<string | null>(null);
-  let coverage = $state<{
-    total?: number;
-    reused?: number;
-    generated?: number;
-    waiting?: number;
-    needsReview?: number;
-    uncovered?: number;
-    failed?: number;
-    skipped?: number;
-  } | null>(null);
-  let reviewQueue = $state<{ id: string; qaReason?: string; localPath?: string }[]>([]);
-  let intelBusy = $state(false);
 
   const duration = $derived(
     projectStore.estimate?.estimatedDuration ??
@@ -375,100 +357,8 @@
     }
   }
 
-  async function refreshWhisper() {
-    try {
-      const w = await api.visualWhisperStatus();
-      whisperOk = w.available;
-      whisperKind = w.kind;
-    } catch {
-      whisperOk = false;
-    }
-  }
-
-  function usePlayhead() {
-    // Place on the same timeline shown in the main player (output clock)
-    const t = projectStore.outputClock() || 0;
-    outputStart = Math.max(0, t - 0.2);
-    outputEnd = Math.min(duration, t + 3.8);
-  }
-
-  async function placeImageFile() {
-    if (!projectStore.mediaPath || !api.isTauri()) {
-      error = "Abre un video primero";
-      return;
-    }
-    if (outputEnd <= outputStart) {
-      error = "El fin debe ser mayor que el inicio";
-      return;
-    }
-    try {
-      const { open } = await import("@tauri-apps/plugin-dialog");
-      const p = await open({
-        multiple: false,
-        filters: [{ name: "Imagen", extensions: ["jpg", "jpeg", "png", "webp"] }],
-        title: `Imagen ${displayMode} ${outputStart.toFixed(1)}–${outputEnd.toFixed(1)}s`,
-      });
-      if (typeof p !== "string") return;
-      busy = true;
-      error = null;
-      const res = (await api.visualCreateManualPlacement({
-        mediaPath: projectStore.mediaPath,
-        analysisRunId: projectStore.analysisRun?.id ?? null,
-        imagePath: p,
-        outputStart,
-        outputEnd,
-        displayMode,
-        sourceDuration: projectStore.duration,
-        label: p.split(/[/\\]/).pop() ?? "imagen",
-      })) as { plan?: VisualPlan; message?: string; placement?: VisualPlacement };
-      plan = res.plan ?? plan;
-      if (res.placement) selectedPlacementId = res.placement.id;
-      lastMessage = res.message || "Imagen en la línea de tiempo (vista principal)";
-      projectStore.statusMessage = lastMessage;
-      // Stay on the single result timeline so overlays appear immediately
-      if (projectStore.previewMode !== "edited" && projectStore.localKeepRanges().length > 0) {
-        projectStore.previewMode = "edited";
-      }
-      // Jump playhead into the placement so fullscreen/overlay is visible now
-      if (projectStore.localKeepRanges().length > 0) {
-        projectStore.currentTime = projectStore.editedToSource(outputStart + 0.05);
-      } else {
-        projectStore.currentTime = outputStart + 0.05;
-      }
-      projectStore.isPlaying = false;
-      await refreshAssets();
-      syncPlanToPlayer(plan);
       
-    } catch (e) {
-      error = String(e);
-    } finally {
-      busy = false;
-    }
-  }
-
-
-  async function protectRange() {
-    if (!projectStore.mediaPath) return;
-    try {
-      busy = true;
-      const p = (await api.visualAddProtectedRange({
-        mediaPath: projectStore.mediaPath,
-        analysisRunId: projectStore.analysisRun?.id ?? null,
-        outputStart,
-        outputEnd,
-        reason: "Sin B-roll (usuario)",
-        sourceDuration: projectStore.duration,
-      })) as VisualPlan;
-      plan = p;
-      lastMessage = `Protegido ${outputStart.toFixed(1)}–${outputEnd.toFixed(1)}s`;
-    } catch (e) {
-      error = String(e);
-    } finally {
-      busy = false;
-    }
-  }
-
-  async function updateSelected(patch: {
+    async function updateSelected(patch: {
     outputStart?: number;
     outputEnd?: number;
     displayMode?: string;
@@ -556,73 +446,9 @@
     }
   }
 
-  async function runWhisper() {
-    if (!projectStore.mediaPath) {
-      error = "Abre un video";
-      return;
-    }
-    busy = true;
-    preferBusyWhisper = true;
-    projectStore.busy = true;
-    projectStore.setProgress(5, "Whisper…", "whisper");
-    try {
-      const res = (await api.visualTranscribeWhisper(
-        projectStore.mediaPath,
-        projectStore.analysisRun?.id ?? null,
-      )) as {
-        transcript?: { segments?: typeof transcriptSegs };
-        plan?: VisualPlan;
-        suggestions?: Suggestion[];
-      };
-      transcriptSegs = res.transcript?.segments ?? [];
-      if (res.plan) plan = res.plan;
-      if (res.suggestions) suggestions = res.suggestions;
-      lastMessage = `Texto: ${transcriptSegs.length} frases`;
-    } catch (e) {
-      error = String(e);
-    } finally {
-      busy = false;
-      preferBusyWhisper = false;
-      projectStore.busy = false;
-      projectStore.clearProgress();
-      await refreshWhisper();
-    }
-  }
-
-  async function pickSrt() {
-    if (!api.isTauri() || !projectStore.mediaPath) return;
-    const { open } = await import("@tauri-apps/plugin-dialog");
-    const p = await open({
-      multiple: false,
-      filters: [{ name: "SRT", extensions: ["srt", "vtt"] }],
-    });
-    if (typeof p !== "string") return;
-    busy = true;
-    try {
-      const res = (await api.visualRunEnrichment(
-        projectStore.mediaPath,
-        projectStore.analysisRun?.id ?? null,
-        p,
-        false,
-      )) as { transcript?: { segments?: typeof transcriptSegs }; plan?: VisualPlan };
-      transcriptSegs = res.transcript?.segments ?? [];
-      if (res.plan) plan = res.plan;
-      lastMessage = `SRT cargado · ${transcriptSegs.length} frases`;
-    } catch (e) {
-      error = String(e);
-    } finally {
-      busy = false;
-    }
-  }
-
-  $effect(() => {
+      $effect(() => {
     void refreshAssets();
     void refreshSession();
-    void refreshWhisper();
-    // Init interval from playhead once
-    if (outputStart === 0 && outputEnd === 4 && playhead > 0.5) {
-      usePlayhead();
-    }
   });
 
   // New video → reset visual pre-result (still the same project when path stable)
@@ -678,6 +504,20 @@
         onSnapMove={snapPlacement}
       />
     </div>
+    {#if selectedPlacement}
+      <div class="max-h-28 shrink-0 overflow-y-auto rounded-lg border border-surface-800 bg-surface-900/50 p-1">
+        <HorizontalProps
+          placement={selectedPlacement}
+          thumbPath={selectedThumb}
+          {issues}
+          {busy}
+          onUpdate={updateSelected}
+          onRemove={removeSelected}
+          onApplySuggestion={applyIssueSuggestion}
+          onExport={placements.length > 0 ? renderPlan : undefined}
+        />
+      </div>
+    {/if}
   </div>
 
   <!-- RIGHT 30%: Visuales unificado (Este video | Biblioteca | Por revisar) -->

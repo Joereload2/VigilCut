@@ -504,6 +504,10 @@ export async function visualSearchLibraryForNeed(needId: string): Promise<unknow
   return invoke("visual_search_library_for_need", { needId });
 }
 
+export async function visualAssignNeedAsset(needId: string, assetId: string): Promise<unknown> {
+  return invoke("visual_assign_need_asset", { needId, assetId });
+}
+
 export async function visualCancelJob(jobId: string): Promise<unknown> {
   return invoke("visual_cancel_job", { jobId });
 }

@@ -198,31 +198,55 @@
     pickerMatches = [];
     try {
       const res = (await api.visualSearchLibraryForNeed(n.need.id)) as {
-        candidates?: { asset?: MediaAsset; assetId?: string; id?: string }[];
-        matched?: boolean;
-        need?: { matchedAssetId?: string };
+        candidates?: {
+          assetId?: string;
+          asset_id?: string;
+          assetTitle?: string;
+          thumbnailPath?: string | null;
+          score?: number;
+        }[];
       };
-      // ranked candidates may be match objects — fall back to list filter
-      if (Array.isArray(res.candidates) && res.candidates.length) {
-        const ids = res.candidates
-          .map((c) => (c as { assetId?: string }).assetId || (c as { id?: string }).id)
-          .filter(Boolean) as string[];
-        pickerMatches = assets.filter((a) => ids.includes(a.id));
-        if (pickerMatches.length === 0) {
-          // try titles from need terms
-          const terms = (n.need.terms ?? []).map((t) => t.toLowerCase());
-          pickerMatches = assets
-            .filter((a) => {
-              const blob = `${a.title} ${(a.concepts ?? []).join(" ")} ${(a.tags ?? []).join(" ")}`.toLowerCase();
-              return terms.some((t) => blob.includes(t));
-            })
-            .slice(0, 8);
+      const ranked = Array.isArray(res.candidates) ? res.candidates : [];
+      const byId = new Map(assets.map((a) => [a.id, a]));
+      const fromRank: MediaAsset[] = [];
+      for (const c of ranked) {
+        const id = c.assetId || c.asset_id;
+        if (!id) continue;
+        const full = byId.get(id);
+        if (full) {
+          fromRank.push(full);
+        } else {
+          fromRank.push({
+            id,
+            kind: "image",
+            managedPath: c.thumbnailPath || "",
+            thumbnailPath: c.thumbnailPath,
+            sha256: "",
+            title: c.assetTitle || id.slice(0, 8),
+            tags: [],
+            concepts: [],
+            width: 0,
+            height: 0,
+            orientation: "landscape",
+            mimeType: "image/*",
+            fileSize: 0,
+            licenseStatus: "unknown",
+            timesUsed: 0,
+            allowSameVideoRepeat: false,
+            minimumVideosBeforeReuse: 0,
+            status: "active",
+            createdAt: "",
+            updatedAt: "",
+          } as MediaAsset);
         }
+      }
+      if (fromRank.length > 0) {
+        pickerMatches = fromRank.slice(0, 8);
       } else {
         const terms = (n.need.terms ?? [n.need.label]).map((t) => t.toLowerCase());
         pickerMatches = assets
           .filter((a) => {
-            const blob = `${a.title} ${(a.concepts ?? []).join(" ")}`.toLowerCase();
+            const blob = `${a.title} ${(a.concepts ?? []).join(" ")} ${(a.tags ?? []).join(" ")}`.toLowerCase();
             return terms.some((t) => t.length > 2 && blob.includes(t));
           })
           .slice(0, 8);
@@ -238,7 +262,7 @@
     if (!pickerNeed || !projectStore.mediaPath) return;
     busy = true;
     try {
-      // Place via manual placement at need times
+      await api.visualAssignNeedAsset(pickerNeed.need.id, assetId);
       const s = pickerNeed.need.outputStart ?? 0;
       const e = pickerNeed.need.outputEnd ?? s + 4;
       const res = (await api.visualCreateManualPlacement({
@@ -252,16 +276,58 @@
         label: pickerNeed.need.label,
       })) as { plan?: unknown; message?: string };
       if (res.plan) onPlanUpdated(res.plan);
-      // mark need covered if API allows via match
       try {
-        await api.visualSearchLibraryForNeed(pickerNeed.need.id);
+        const applied = (await api.visualApplyNeedsToPlan({
+          mediaPath: projectStore.mediaPath,
+          analysisRunId: projectStore.analysisRun?.id ?? null,
+          projectKey: projectKey ?? pickerNeed.need.projectKey,
+        })) as { plan?: unknown };
+        if (applied.plan) onPlanUpdated(applied.plan);
       } catch {
-        /* ok */
+        /* placement already done */
       }
       onMessage(res.message ?? "Imagen en el video");
       pickerOpen = false;
       pickerNeed = null;
       await refreshSnap();
+      await loadAssets(searchQ.trim() || null);
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      busy = false;
+    }
+  }
+
+  /** Import and place at current playhead (no need required). */
+  async function placeAtPlayhead() {
+    if (!projectStore.mediaPath || !api.isTauri()) {
+      onError("Abre un video primero");
+      return;
+    }
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const p = await open({
+        multiple: false,
+        filters: [{ name: "Imagen", extensions: ["png", "jpg", "jpeg", "webp"] }],
+      });
+      if (typeof p !== "string") return;
+      busy = true;
+      const t = projectStore.outputClock() || 0;
+      const s = Math.max(0, t - 0.2);
+      const e = s + 3.8;
+      const res = (await api.visualCreateManualPlacement({
+        mediaPath: projectStore.mediaPath,
+        analysisRunId: projectStore.analysisRun?.id ?? null,
+        imagePath: p,
+        outputStart: s,
+        outputEnd: e,
+        displayMode: "completa",
+        sourceDuration: projectStore.duration,
+        label: p.split(/[/\\]/).pop() ?? "imagen",
+      })) as { plan?: unknown; message?: string };
+      if (res.plan) onPlanUpdated(res.plan);
+      await loadAssets(null);
+      onMessage(res.message ?? "Imagen colocada en el playhead");
     } catch (e) {
       onError(String(e));
     } finally {
@@ -650,6 +716,7 @@
           onDetect={() => void detect()}
           onPrimary={primaryNeed}
           onCancel={(id) => void cancelJob(id)}
+          onPlacePlayhead={() => void placeAtPlayhead()}
         />
       {/if}
     {:else if view === "library"}

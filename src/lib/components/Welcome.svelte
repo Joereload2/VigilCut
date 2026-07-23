@@ -143,9 +143,9 @@
             onclick={() => (onGoVisual ? onGoVisual() : onOpen())}
           >
             <div class="text-xl">🖼</div>
-            <div class="mt-1.5 text-sm font-bold text-white">Visual · B-roll</div>
+            <div class="mt-1.5 text-sm font-bold text-white">Visuales</div>
             <div class="mt-1 text-[10px] leading-snug text-surface-400">
-              Transcripción, biblioteca de imágenes, sugerencias y overlay.
+              Biblioteca, momentos del video y revisión — sin video también.
             </div>
           </button>
         </div>

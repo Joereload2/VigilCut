@@ -157,6 +157,18 @@ pub fn visual_search_library_for_need(need_id: String) -> AppResult<serde_json::
     }))
 }
 
+/// Human chose a specific library asset for a scene (picker "Usar esta imagen").
+#[tauri::command]
+pub fn visual_assign_need_asset(need_id: String, asset_id: String) -> AppResult<serde_json::Value> {
+    let mut need = get_need(&need_id)?;
+    need.matched_asset_id = Some(asset_id);
+    need.coverage = NeedCoverage::Covered;
+    need.match_reasons = vec!["user_selected".into()];
+    need.updated_at = chrono::Utc::now().to_rfc3339();
+    update_need(&need)?;
+    Ok(serde_json::json!({ "need": need, "ok": true }))
+}
+
 #[tauri::command]
 pub fn visual_list_needs(project_key: String) -> AppResult<serde_json::Value> {
     let needs = list_needs(&project_key)?;

@@ -10,6 +10,7 @@
     onDetect,
     onPrimary,
     onCancel,
+    onPlacePlayhead = undefined as (() => void) | undefined,
   }: {
     needs?: NeedSupervision[];
     coverage?: CoverageSummary | null;
@@ -17,6 +18,7 @@
     onDetect: () => void;
     onPrimary: (n: NeedSupervision) => void;
     onCancel: (jobId: string) => void;
+    onPlacePlayhead?: (() => void) | undefined;
   } = $props();
 
   const total = $derived(coverage?.total ?? needs.length);
@@ -95,13 +97,25 @@
 
 <div class="flex min-h-0 flex-col gap-2 overflow-y-auto text-[11px]">
   <div class="rounded-lg border border-surface-800 bg-surface-950/60 p-2">
-    <div class="flex items-center justify-between gap-2">
+    <div class="flex flex-wrap items-center justify-between gap-2">
       <p class="font-medium text-surface-100">
         {coveredN} de {total || "—"} momentos visuales están cubiertos
       </p>
-      <button type="button" class="btn-ghost shrink-0 text-[10px]" disabled={busy} onclick={onDetect}>
-        Detectar nuevamente
-      </button>
+      <div class="flex flex-wrap gap-1">
+        {#if onPlacePlayhead}
+          <button
+            type="button"
+            class="btn-secondary shrink-0 text-[10px]"
+            disabled={busy}
+            onclick={onPlacePlayhead}
+          >
+            + Imagen en playhead
+          </button>
+        {/if}
+        <button type="button" class="btn-ghost shrink-0 text-[10px]" disabled={busy} onclick={onDetect}>
+          Detectar nuevamente
+        </button>
+      </div>
     </div>
     <div class="mt-1.5 h-1.5 overflow-hidden rounded-full bg-surface-800">
       <div class="h-full rounded-full bg-sky-500 transition-all" style="width: {pct}%"></div>
