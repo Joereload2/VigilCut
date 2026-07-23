@@ -7,7 +7,7 @@ This file records verified evidence after each isolated implementation gate.
 |-------|--------|--------|---------|-----------|----------|
 | Biblioteca independiente | verified | this phase commit | `diff --check`, check, build, fmt, clippy, 42 visual tests, and 7 smoke tests pass | Real SQLite/filesystem; mock image provider | None |
 | Worker/Scheduler | verified | this phase commit | Full gate passes; 44 visual and 7 smoke tests | Real SQLite supervisor; mock provider | None |
-| Dependabot | pending | - | - | - | GitHub activation to verify |
+| Dependabot | verified | this integration commit | YAML assertions and full gate pass | Real configuration; GitHub run not observed | Must reach default branch; security settings and labels require GitHub verification |
 | Codecov | pending | - | - | - | External upload/authorization may be required |
 | CodeRabbit | pending | - | - | - | GitHub App authorization required |
 | Pollinations | pending | - | - | - | Terms, license, free route, and network probe required |
@@ -49,3 +49,18 @@ This file records verified evidence after each isolated implementation gate.
 - Authorization required: none.
 - Rollback: revert the phase commit; persisted queued jobs remain compatible.
 - Final gate: `git diff --check`, check, build, fmt, clippy, 44 visual tests, and 7 smoke tests passed on 2026-07-23.
+## Stage record: Dependabot
+
+- Implemented: weekly npm and Cargo updates, PR limit 3 per ecosystem,
+  minor/patch grouping, major-version ignore rules, labels, and no auto-merge.
+- Tested: YAML parsing and structural assertions plus the complete local gate.
+- Real: repository configuration is valid locally.
+- Not yet observed: GitHub has not read the feature-branch file and no
+  Dependabot PR has been created.
+- Dependencies added: none.
+- Cost observed: 0.
+- Authorization required: repository settings for alerts/security updates and
+  creation or verification of the configured labels.
+- Rollback: remove `.github/dependabot.yml`.
+- Final gate: check, build, fmt, clippy, 44 visual tests, and 7 smoke tests
+  passed on 2026-07-23; YAML-specific assertions passed.
