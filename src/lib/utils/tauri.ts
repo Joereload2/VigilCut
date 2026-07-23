@@ -492,6 +492,38 @@ export async function visualLibraryDashboard(): Promise<unknown> {
   return invoke("visual_library_dashboard");
 }
 
+export type CreateLibraryRequestInput = {
+  title: string;
+  targetCount: number;
+  desiredFormat: "16:9" | "9:16" | "1:1" | "4:5";
+  positiveContexts: string[];
+  negativeContexts: string[];
+  hardExclusions: string[];
+  priority: number;
+};
+
+export async function visualLibraryCreateRequest(
+  input: CreateLibraryRequestInput,
+): Promise<unknown> {
+  return invoke("visual_library_create_request", { input });
+}
+
+export async function visualLibraryPreviewRequest(requestId: string): Promise<unknown> {
+  return invoke("visual_library_preview_request", { requestId });
+}
+
+export async function visualLibraryConfirmRequest(requestId: string): Promise<unknown> {
+  return invoke("visual_library_confirm_request", { requestId });
+}
+
+export async function visualLibraryListRequests(limit = 30): Promise<unknown> {
+  return invoke("visual_library_list_requests", { limit });
+}
+
+export async function visualLibraryCancelRequest(requestId: string): Promise<unknown> {
+  return invoke("visual_library_cancel_request", { requestId });
+}
+
 export async function visualSkipNeed(needId: string): Promise<unknown> {
   return invoke("visual_skip_need", { needId });
 }

@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use crate::error::{AppError, AppResult};
 
-pub const SCHEMA_VERSION: i32 = 4;
+pub const SCHEMA_VERSION: i32 = 5;
 
 pub fn migrate(conn: &Connection) -> AppResult<()> {
     conn.execute_batch(
@@ -97,7 +97,51 @@ pub fn migrate(conn: &Connection) -> AppResult<()> {
         .map_err(|e| AppError::Message(e.to_string()))?;
     }
 
+    let ver: i32 = conn
+        .query_row(
+            "SELECT value FROM schema_meta WHERE key = 'version'",
+            [],
+            |r| {
+                let s: String = r.get(0)?;
+                Ok(s.parse::<i32>().unwrap_or(0))
+            },
+        )
+        .unwrap_or(4);
+
+    if ver < 5 {
+        migrate_v5(conn)?;
+        conn.execute(
+            "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('version','5')",
+            [],
+        )
+        .map_err(|e| AppError::Message(e.to_string()))?;
+    }
+
     Ok(())
+}
+
+fn migrate_v5(conn: &Connection) -> AppResult<()> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS library_requests (
+            id TEXT PRIMARY KEY,
+            concept_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            target_count INTEGER NOT NULL,
+            desired_format TEXT NOT NULL DEFAULT '16:9',
+            positive_contexts TEXT NOT NULL DEFAULT '[]',
+            negative_contexts TEXT NOT NULL DEFAULT '[]',
+            hard_exclusions TEXT NOT NULL DEFAULT '[]',
+            priority INTEGER NOT NULL DEFAULT 50,
+            status TEXT NOT NULL DEFAULT 'draft',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_library_requests_status
+            ON library_requests(status, created_at DESC);
+        "#,
+    )
+    .map_err(|e| AppError::Message(e.to_string()))
 }
 
 /// Lease/recovery columns for Codex CRIT-002 / HIGH-004.
@@ -377,7 +421,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(v, "4");
+        assert_eq!(v, "5");
         let n: i64 = conn
             .query_row("SELECT COUNT(*) FROM visual_concepts", [], |r| r.get(0))
             .unwrap();

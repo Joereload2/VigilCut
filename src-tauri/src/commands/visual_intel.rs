@@ -548,6 +548,43 @@ pub fn visual_library_dashboard() -> AppResult<serde_json::Value> {
 }
 
 #[tauri::command]
+pub fn visual_library_create_request(
+    input: crate::pipeline::visual::library_requests::CreateLibraryRequest,
+) -> AppResult<serde_json::Value> {
+    Ok(serde_json::to_value(
+        crate::pipeline::visual::library_requests::create_request(input)?,
+    )?)
+}
+
+#[tauri::command]
+pub fn visual_library_confirm_request(request_id: String) -> AppResult<serde_json::Value> {
+    Ok(serde_json::to_value(
+        crate::pipeline::visual::library_requests::confirm(&request_id)?,
+    )?)
+}
+
+#[tauri::command]
+pub fn visual_library_preview_request(request_id: String) -> AppResult<serde_json::Value> {
+    Ok(serde_json::to_value(
+        crate::pipeline::visual::library_requests::preview(&request_id)?,
+    )?)
+}
+
+#[tauri::command]
+pub fn visual_library_list_requests(limit: Option<usize>) -> AppResult<serde_json::Value> {
+    Ok(serde_json::to_value(
+        crate::pipeline::visual::library_requests::list_requests(limit.unwrap_or(30))?,
+    )?)
+}
+
+#[tauri::command]
+pub fn visual_library_cancel_request(request_id: String) -> AppResult<serde_json::Value> {
+    Ok(serde_json::to_value(
+        crate::pipeline::visual::library_requests::cancel(&request_id)?,
+    )?)
+}
+
+#[tauri::command]
 pub fn visual_match_need(need_id: String) -> AppResult<serde_json::Value> {
     let mut need = get_need(&need_id)?;
     let ranked = match_need(&need, &MatchOptions::default());
