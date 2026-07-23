@@ -143,9 +143,9 @@
             onclick={() => (onGoVisual ? onGoVisual() : onOpen())}
           >
             <div class="text-xl">🖼</div>
-            <div class="mt-1.5 text-sm font-bold text-white">Visuales</div>
+            <div class="mt-1.5 text-sm font-bold text-white">Biblioteca Visual</div>
             <div class="mt-1 text-[10px] leading-snug text-surface-400">
-              Biblioteca, momentos del video y revisión — sin video también.
+              Gestiona imágenes y conceptos sin abrir un video. B-roll se usa después, dentro de cada video.
             </div>
           </button>
         </div>
