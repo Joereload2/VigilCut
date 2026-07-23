@@ -19,7 +19,7 @@ use crate::pipeline::visual::generation::supervision::{
 };
 use crate::pipeline::visual::generation::worker::{
     cover_project_needs, human_approve_candidate, human_reject_candidate,
-    human_reject_candidate_with_reason, list_pending_review, worker_tick,
+    human_reject_candidate_with_reason, list_pending_review,
 };
 use crate::pipeline::visual::intelligent_match::{apply_best_match, MatchOptions};
 use crate::pipeline::visual::needs::{
@@ -213,12 +213,6 @@ pub async fn visual_cover_needs(
         max_generate.unwrap_or(5),
     )
     .await
-}
-
-#[tauri::command]
-pub async fn visual_worker_tick(max_jobs: Option<u32>) -> AppResult<serde_json::Value> {
-    let n = worker_tick(max_jobs.unwrap_or(3)).await?;
-    Ok(serde_json::json!({ "processed": n }))
 }
 
 #[tauri::command]

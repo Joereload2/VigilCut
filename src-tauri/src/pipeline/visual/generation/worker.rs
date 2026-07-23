@@ -897,10 +897,9 @@ pub async fn cover_project_needs(
         }
     }
 
-    let mut processed = 0u32;
-    if generate_missing {
-        processed = worker_tick(max_generate).await?;
-    }
+    // Enqueue only. The resident Rust supervisor owns execution; callers and
+    // Svelte never become an implicit worker.
+    let processed = 0u32;
 
     let summary = crate::pipeline::visual::needs::coverage_for_project(project_key)?;
     Ok(serde_json::json!({
@@ -910,4 +909,55 @@ pub async fn cover_project_needs(
         "coverage": summary,
         "needs": list_needs(project_key)?,
     }))
+}
+#[cfg(test)]
+mod resident_worker_tests {
+    use super::*;
+    use crate::models::visual_intel::VisualNeed;
+    use crate::pipeline::visual::generation::supervision::{cancel_job, get_job};
+    use crate::pipeline::visual::library::{lock_library_for_test, set_library_root_override};
+    use crate::pipeline::visual::needs::save_needs;
+
+    #[test]
+    fn enqueue_is_immediate_and_video_has_priority_over_daily() {
+        let _lock = lock_library_for_test();
+        let dir = std::env::temp_dir().join(format!("vc-priority-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        set_library_root_override(Some(dir.clone()));
+        std::env::set_var("VIGILCUT_IMAGE_PROVIDER", "mock");
+        std::env::set_var("VIGILCUT_OPPORTUNISTIC", "1");
+        std::env::remove_var("OMNIROUTE_BASE_URL");
+
+        let mut daily = VisualNeed::from_label("daily_feed", "daily_priority_fixture");
+        let mut video = VisualNeed::from_label("video-project", "video_priority_fixture");
+        save_needs(&[daily.clone(), video.clone()]).unwrap();
+        let daily_job =
+            queue_generation_with_key(&mut daily, true, "test:daily:priority", "daily_feed")
+                .unwrap()
+                .expect("daily job must enqueue");
+        let video_job =
+            queue_generation_with_key(&mut video, false, "test:video:priority", "video_need")
+                .unwrap()
+                .expect("video job must enqueue");
+
+        assert_eq!(get_job(&daily_job).unwrap().status, "queued");
+        assert_eq!(get_job(&video_job).unwrap().status, "queued");
+        assert!(
+            crate::pipeline::visual::generation::supervision::latest_candidate_for_need(&daily.id)
+                .unwrap()
+                .is_none()
+        );
+        let claimed = claim_next_job().unwrap().expect("queued job");
+        assert_eq!(claimed.0, video_job);
+        assert_eq!(claimed.7, "video_need");
+
+        // Leave no running fixture behind; cancellation semantics for queued jobs
+        // are covered independently by supervision tests.
+        mark_job(&video_job, JobStatus::Cancelled, Some("test cleanup")).unwrap();
+        cancel_job(&daily_job).unwrap();
+        set_library_root_override(None);
+        std::env::remove_var("VIGILCUT_IMAGE_PROVIDER");
+        std::env::remove_var("VIGILCUT_OPPORTUNISTIC");
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

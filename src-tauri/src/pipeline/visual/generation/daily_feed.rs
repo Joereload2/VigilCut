@@ -26,7 +26,35 @@ pub struct DailyFeedSettings {
 }
 
 pub fn settings_json() -> AppResult<serde_json::Value> {
-    Ok(serde_json::to_value(load_settings()?)?)
+    let settings = load_settings()?;
+    let next_check_at = next_check_at(&settings);
+    let mut value = serde_json::to_value(&settings)?;
+    if let Some(object) = value.as_object_mut() {
+        object.insert(
+            "nextCheckAt".into(),
+            next_check_at
+                .map(serde_json::Value::String)
+                .unwrap_or(serde_json::Value::Null),
+        );
+        object.insert(
+            "executor".into(),
+            serde_json::Value::String("resident_rust".into()),
+        );
+    }
+    Ok(value)
+}
+
+fn next_check_at(settings: &DailyFeedSettings) -> Option<String> {
+    if !settings.enabled {
+        return None;
+    }
+    let last = settings.last_cycle_at.as_deref()?;
+    let last = chrono::DateTime::parse_from_rfc3339(last).ok()?;
+    Some(
+        (last.with_timezone(&chrono::Utc)
+            + chrono::Duration::minutes(settings.interval_minutes.max(1) as i64))
+        .to_rfc3339(),
+    )
 }
 
 pub fn load_settings() -> AppResult<DailyFeedSettings> {
@@ -398,6 +426,29 @@ mod tests {
         std::env::remove_var("VIGILCUT_IMAGE_PROVIDER");
         std::env::remove_var("VIGILCUT_OPPORTUNISTIC");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn scheduler_computes_successive_persisted_checks() {
+        let mut settings = DailyFeedSettings {
+            enabled: true,
+            max_per_day: 3,
+            interval_minutes: 60,
+            last_cycle_at: Some("2026-07-23T10:00:00Z".into()),
+            consecutive_failures: 0,
+            paused_until: None,
+        };
+        assert_eq!(
+            next_check_at(&settings).as_deref(),
+            Some("2026-07-23T11:00:00+00:00")
+        );
+        settings.last_cycle_at = Some("2026-07-23T11:00:00Z".into());
+        assert_eq!(
+            next_check_at(&settings).as_deref(),
+            Some("2026-07-23T12:00:00+00:00")
+        );
+        settings.enabled = false;
+        assert_eq!(next_check_at(&settings), None);
     }
 
     #[tokio::test]

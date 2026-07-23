@@ -35,6 +35,7 @@
   let dailyOpen = $state(false);
   let dailyEnabled = $state(false);
   let weekMsg = $state("");
+  let dailyNextCheck = $state<string | null>(null);
   let imgLoading = $state(false);
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let rejectOpen = $state(false);
@@ -130,8 +131,10 @@
     try {
       const s = (await api.visualDailyFeedSettings()) as {
         enabled?: boolean;
+        nextCheckAt?: string | null;
       };
       dailyEnabled = !!s.enabled;
+      dailyNextCheck = s.nextCheckAt ?? null;
       const w = (await api.visualDailyWeekSummary()) as { message?: string };
       weekMsg = w.message ?? "";
     } catch {
@@ -274,6 +277,7 @@
     if (pollTimer) return;
     pollTimer = setInterval(async () => {
       try {
+        await loadDailySettings();
         await refresh();
       } catch {
         /* ignore */
@@ -294,23 +298,12 @@
       await api.visualDailyFeedSetEnabled(v);
       dailyEnabled = v;
       if (v) {
-        // Optional kick; supervisor also runs on interval when idle
-        const r = (await api.visualDailyFeedCycle()) as {
-          ok?: boolean;
-          reason?: string;
-          action?: string;
-        };
-        onMessage(
-          r.ok
-            ? r.action === "queued"
-              ? "Daily: job en cola (solo gratis verificado / mock)"
-              : "Alimentación diaria: ciclo ok"
-            : `Daily: ${r.reason ?? "ok"}`,
-        );
+        onMessage("Alimentación diaria activada; el supervisor Rust ejecutará el próximo ciclo");
         startPoll();
       }
       const w = (await api.visualDailyWeekSummary()) as { message?: string };
       weekMsg = w.message ?? "";
+      await loadDailySettings();
       await refresh();
     } catch (e) {
       onError(String(e));
@@ -726,6 +719,9 @@
         />
         Activar cuando la app está abierta (solo gratis verificado / mock)
       </label>
+      {#if dailyNextCheck}
+        <p class="mt-1 text-[10px] text-surface-500">Próxima comprobación: {new Date(dailyNextCheck).toLocaleString()}</p>
+      {/if}
       {#if weekMsg}
         <p class="mt-1 text-[10px] text-surface-500">{weekMsg}</p>
       {/if}

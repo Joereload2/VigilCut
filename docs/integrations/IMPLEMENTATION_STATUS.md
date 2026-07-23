@@ -6,7 +6,7 @@ This file records verified evidence after each isolated implementation gate.
 | Etapa | Estado | Commit | Pruebas | Real/Mock | Bloqueos |
 |-------|--------|--------|---------|-----------|----------|
 | Biblioteca independiente | verified | this phase commit | `diff --check`, check, build, fmt, clippy, 42 visual tests, and 7 smoke tests pass | Real SQLite/filesystem; mock image provider | None |
-| Worker/Scheduler | pending | - | - | - | - |
+| Worker/Scheduler | verified | this phase commit | Full gate passes; 44 visual and 7 smoke tests | Real SQLite supervisor; mock provider | None |
 | Dependabot | pending | - | - | - | GitHub activation to verify |
 | Codecov | pending | - | - | - | External upload/authorization may be required |
 | CodeRabbit | pending | - | - | - | GitHub App authorization required |
@@ -33,3 +33,19 @@ This file records verified evidence after each isolated implementation gate.
   pre-existing accessibility warning in `ExportSuccess.svelte`; there are no
   Svelte errors. Visual tests: 42 passed. Smoke tests: 7 passed. The Windows
   linker emits an informational import-library message.
+## Stage record: resident worker and scheduler
+
+- Implemented: enqueue-only UI commands, resident Rust execution, persistent
+  next-check reporting, video-over-daily priority, and removal of the Tauri
+  worker-tick surface.
+- Tested so far: queued state without inline candidate, video priority, two
+  successive interval calculations, disabled scheduler, stale-job recovery,
+  cancellation, daily cap, cooldown, and rejection/regeneration.
+- Real: SQLite queue, leases, wake signal, scheduler settings, and cancellation
+  state.
+- Simulated: provider generation uses only the local mock in tests.
+- Dependencies added: none.
+- Cost observed: 0.
+- Authorization required: none.
+- Rollback: revert the phase commit; persisted queued jobs remain compatible.
+- Final gate: `git diff --check`, check, build, fmt, clippy, 44 visual tests, and 7 smoke tests passed on 2026-07-23.

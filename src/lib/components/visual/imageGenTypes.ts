@@ -113,6 +113,8 @@ export interface SupervisionSnapshot {
     enabled?: boolean;
     maxPerDay?: number;
     intervalMinutes?: number;
+    nextCheckAt?: string | null;
+    executor?: "resident_rust";
   };
 }
 

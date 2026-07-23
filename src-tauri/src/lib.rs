@@ -138,7 +138,6 @@ pub fn run() {
             commands::visual_intel::visual_coverage,
             commands::visual_intel::visual_skip_need,
             commands::visual_intel::visual_cover_needs,
-            commands::visual_intel::visual_worker_tick,
             commands::visual_intel::visual_list_review_queue,
             commands::visual_intel::visual_approve_candidate,
             commands::visual_intel::visual_reject_candidate,
