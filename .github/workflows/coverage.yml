@@ -1,0 +1,48 @@
+name: Rust coverage
+
+on:
+  push:
+    branches: [main, master, "feat/**"]
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: coverage-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Generate Rust coverage
+        run: >-
+          cargo llvm-cov
+          --manifest-path src-tauri/Cargo.toml
+          --lib
+          --codecov
+          --output-path codecov.json
+      - name: Verify report
+        shell: pwsh
+        run: |
+          if (-not (Test-Path codecov.json)) { throw "codecov.json missing" }
+          if ((Get-Item codecov.json).Length -le 100) { throw "codecov.json is unexpectedly small" }
+      - name: Upload coverage
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./codecov.json
+          flags: rust
+          name: vigilcut-rust
+          use_oidc: true
+          fail_ci_if_error: false

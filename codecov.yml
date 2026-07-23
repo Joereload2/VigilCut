@@ -1,0 +1,30 @@
+coverage:
+  precision: 2
+  round: down
+  range: "60...80"
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 2%
+        informational: true
+    patch:
+      default:
+        target: 70%
+        threshold: 2%
+        informational: true
+
+comment:
+  layout: "reach,diff,flags,files"
+  behavior: default
+  require_changes: true
+
+flags:
+  rust:
+    paths:
+      - src-tauri/src/
+    carryforward: false
+
+ignore:
+  - "src-tauri/target/**"
+  - "src-tauri/src/bin/**"

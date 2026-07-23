@@ -8,7 +8,7 @@ This file records verified evidence after each isolated implementation gate.
 | Biblioteca independiente | verified | this phase commit | `diff --check`, check, build, fmt, clippy, 42 visual tests, and 7 smoke tests pass | Real SQLite/filesystem; mock image provider | None |
 | Worker/Scheduler | verified | this phase commit | Full gate passes; 44 visual and 7 smoke tests | Real SQLite supervisor; mock provider | None |
 | Dependabot | verified | this integration commit | YAML assertions and full gate pass | Real configuration; GitHub run not observed | Must reach default branch; security settings and labels require GitHub verification |
-| Codecov | pending | - | - | - | External upload/authorization may be required |
+| Codecov | experimental | this integration commit | 100 instrumented tests; 182547-byte report; full gate passes | Real local report; remote upload unobserved | Codecov onboarding/OIDC workflow must be observed |
 | CodeRabbit | pending | - | - | - | GitHub App authorization required |
 | Pollinations | pending | - | - | - | Terms, license, free route, and network probe required |
 | Supabase runtime | pending | - | - | - | Development credentials required for real verification |
@@ -64,3 +64,20 @@ This file records verified evidence after each isolated implementation gate.
 - Rollback: remove `.github/dependabot.yml`.
 - Final gate: check, build, fmt, clippy, 44 visual tests, and 7 smoke tests
   passed on 2026-07-23; YAML-specific assertions passed.
+## Stage record: Codecov
+
+- Implemented: isolated Rust coverage workflow, OIDC upload, informational 70%
+  patch target, 2% threshold, rust flag, and ignored local report artifact.
+- Tested: workflow/config YAML assertions, 100 instrumented Rust library tests,
+  parsed 182,547-byte report with 91 files, and the complete local gate.
+- Measurement: 44.67% approximate Rust line entries globally; 59.44% for
+  paths containing `visual`.
+- Real: local coverage generation with cargo-llvm-cov 0.8.7.
+- Not yet observed: GitHub Actions upload and Codecov patch display.
+- Dependencies added: none to VigilCut; cargo-llvm-cov is a developer tool.
+- Cost observed: 0.
+- Authorization required: Codecov repository onboarding if OIDC is not
+  accepted automatically.
+- Rollback: remove the coverage workflow and `codecov.yml`.
+- Final gate: check, build, fmt, clippy, 44 visual tests, and 7 smoke tests
+  passed on 2026-07-23 in addition to the instrumented run.
