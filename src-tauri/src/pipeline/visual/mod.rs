@@ -6,6 +6,7 @@ pub mod generation;
 pub mod intelligent_match;
 pub mod layout;
 pub mod library;
+pub mod library_dashboard;
 pub mod match_rank;
 pub mod needs;
 pub mod qa;

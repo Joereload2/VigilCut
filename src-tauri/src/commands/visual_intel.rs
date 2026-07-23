@@ -541,6 +541,13 @@ pub fn visual_cost_policy() -> AppResult<serde_json::Value> {
 }
 
 #[tauri::command]
+pub fn visual_library_dashboard() -> AppResult<serde_json::Value> {
+    Ok(serde_json::to_value(
+        crate::pipeline::visual::library_dashboard::dashboard()?,
+    )?)
+}
+
+#[tauri::command]
 pub fn visual_match_need(need_id: String) -> AppResult<serde_json::Value> {
     let mut need = get_need(&need_id)?;
     let ranked = match_need(&need, &MatchOptions::default());

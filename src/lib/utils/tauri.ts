@@ -488,6 +488,10 @@ export async function visualCostPolicy(): Promise<unknown> {
   return invoke("visual_cost_policy");
 }
 
+export async function visualLibraryDashboard(): Promise<unknown> {
+  return invoke("visual_library_dashboard");
+}
+
 export async function visualSkipNeed(needId: string): Promise<unknown> {
   return invoke("visual_skip_need", { needId });
 }

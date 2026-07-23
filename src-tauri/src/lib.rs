@@ -144,6 +144,7 @@ pub fn run() {
             commands::visual_intel::visual_apply_needs_to_plan,
             commands::visual_intel::visual_probe_image_provider,
             commands::visual_intel::visual_cost_policy,
+            commands::visual_intel::visual_library_dashboard,
             commands::visual_intel::visual_match_need,
             commands::visual_intel::visual_supervision,
             commands::visual_intel::visual_search_library_for_need,
