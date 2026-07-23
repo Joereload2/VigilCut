@@ -143,23 +143,86 @@ pub fn queue_generation_with_key(
     need.coverage = NeedCoverage::Generating;
     need.updated_at = now;
     update_need(need)?;
+    super::supervisor::request_wake();
     Ok(Some(id))
 }
 
-/// Process one queued job. Returns job id if worked.
-pub async fn process_next_job() -> AppResult<Option<String>> {
-    let job = {
-        let conn = open_db()?;
-        // Prefer video needs over daily_feed
-        conn.query_row(
-            r#"SELECT id, need_id, prompt, negative_prompt, attempt, max_attempts, is_paid, status,
-                      COALESCE(origin,'video_need')
-               FROM generation_jobs
-               WHERE status = 'queued'
+const LEASE_SECS: i64 = 120;
+const WORKER_ID: &str = "local-supervisor";
+
+/// Requeue stuck `running` jobs after crash/restart (Codex CRIT-002).
+pub fn recover_stale_running() -> AppResult<u32> {
+    let conn = open_db()?;
+    let now = chrono::Utc::now();
+    // Any running with expired or null lease
+    let n = conn
+        .execute(
+            r#"UPDATE generation_jobs
+               SET status='queued', stage='queued', locked_by=NULL, lease_expires_at=NULL,
+                   last_error=COALESCE(last_error,'') || ' [recovered stale running]',
+                   updated_at=?1
+               WHERE status='running'
+                 AND (lease_expires_at IS NULL OR lease_expires_at < ?1)"#,
+            params![now.to_rfc3339()],
+        )
+        .map_err(|e| AppError::Message(e.to_string()))?;
+    Ok(n as u32)
+}
+
+/// Atomic claim of next queued job (Codex HIGH-004).
+fn claim_next_job() -> AppResult<
+    Option<(
+        String,
+        Option<String>,
+        String,
+        String,
+        u32,
+        u32,
+        bool,
+        String,
+    )>,
+> {
+    let conn = open_db()?;
+    let now = chrono::Utc::now();
+    let lease = (now + chrono::Duration::seconds(LEASE_SECS)).to_rfc3339();
+    let now_s = now.to_rfc3339();
+
+    // Find candidate id first
+    let id: Option<String> = conn
+        .query_row(
+            r#"SELECT id FROM generation_jobs
+               WHERE status='queued'
                ORDER BY CASE COALESCE(origin,'video_need') WHEN 'video_need' THEN 0 ELSE 1 END,
                         created_at ASC
                LIMIT 1"#,
             [],
+            |r| r.get(0),
+        )
+        .ok();
+    let Some(id) = id else {
+        return Ok(None);
+    };
+
+    // Claim only if still queued
+    let changed = conn
+        .execute(
+            r#"UPDATE generation_jobs
+               SET status='running', stage='preparing', attempt=attempt+1,
+                   locked_by=?1, lease_expires_at=?2, updated_at=?3
+               WHERE id=?4 AND status='queued'"#,
+            params![WORKER_ID, lease, now_s, id],
+        )
+        .map_err(|e| AppError::Message(e.to_string()))?;
+    if changed == 0 {
+        return Ok(None);
+    }
+
+    let row = conn
+        .query_row(
+            r#"SELECT id, need_id, prompt, negative_prompt, attempt, max_attempts, is_paid,
+                      COALESCE(origin,'video_need')
+               FROM generation_jobs WHERE id=?1"#,
+            params![id],
             |r| {
                 Ok((
                     r.get::<_, String>(0)?,
@@ -170,35 +233,35 @@ pub async fn process_next_job() -> AppResult<Option<String>> {
                     r.get::<_, i64>(5)? as u32,
                     r.get::<_, i64>(6)? != 0,
                     r.get::<_, String>(7)?,
-                    r.get::<_, String>(8)?,
                 ))
             },
         )
-        .ok()
-    };
-    let Some((id, need_id, prompt, negative, attempt, max_attempts, is_paid, _, job_origin)) = job
+        .map_err(|e| AppError::Message(e.to_string()))?;
+    Ok(Some(row))
+}
+
+/// Process one claimed job. Returns job id if worked.
+pub async fn process_next_job() -> AppResult<Option<String>> {
+    let Some((id, need_id, prompt, negative, attempt, max_attempts, is_paid, job_origin)) =
+        claim_next_job()?
     else {
         return Ok(None);
     };
 
+    let cancel_flag = super::supervisor::cancel_registry::register(&id);
+
     let policy = CostPolicy::from_env();
     if is_paid && !policy.paid_providers_enabled {
         mark_job(&id, JobStatus::BlockedPolicy, Some("paid disabled"))?;
+        super::supervisor::cancel_registry::clear(&id);
         return Ok(Some(id));
     }
 
+    if super::supervision::is_cancel_requested(&id)
+        || super::supervisor::cancel_registry::is_cancelled(&cancel_flag)
     {
-        let conn = open_db()?;
-        let now = chrono::Utc::now().to_rfc3339();
-        conn.execute(
-            "UPDATE generation_jobs SET status=?1, attempt=?2, stage='preparing', updated_at=?3 WHERE id=?4",
-            params![JobStatus::Running.as_str(), (attempt + 1) as i64, now, id],
-        )
-        .map_err(|e| AppError::Message(e.to_string()))?;
-    }
-
-    if super::supervision::is_cancel_requested(&id) {
         mark_job(&id, JobStatus::Cancelled, Some("cancelled by user"))?;
+        super::supervisor::cancel_registry::clear(&id);
         return Ok(Some(id));
     }
 
@@ -215,17 +278,44 @@ pub async fn process_next_job() -> AppResult<Option<String>> {
     };
 
     let _ = super::supervision::set_job_stage(&id, "generating");
-    if super::supervision::is_cancel_requested(&id) {
+    if super::supervision::is_cancel_requested(&id)
+        || super::supervisor::cancel_registry::is_cancelled(&cancel_flag)
+    {
         mark_job(&id, JobStatus::Cancelled, Some("cancelled by user"))?;
+        super::supervisor::cancel_registry::clear(&id);
         return Ok(Some(id));
     }
 
-    match provider.generate(&req).await {
+    // Cooperative cancel: race generate vs cancel flag polling
+    let gen_fut = provider.generate(&req);
+    let cancel_fut = async {
+        loop {
+            if super::supervision::is_cancel_requested(&id)
+                || super::supervisor::cancel_registry::is_cancelled(&cancel_flag)
+            {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    };
+
+    let gen_result = tokio::select! {
+        r = gen_fut => r,
+        _ = cancel_fut => {
+            mark_job(&id, JobStatus::Cancelled, Some("cancelled by user during generate"))?;
+            super::supervisor::cancel_registry::clear(&id);
+            return Ok(Some(id));
+        }
+    };
+
+    match gen_result {
         Ok(result) => {
-            if super::supervision::is_cancel_requested(&id) {
-                // Drop incomplete if possible
+            if super::supervision::is_cancel_requested(&id)
+                || super::supervisor::cancel_registry::is_cancelled(&cancel_flag)
+            {
                 let _ = std::fs::remove_file(&result.local_path);
                 mark_job(&id, JobStatus::Cancelled, Some("cancelled by user"))?;
+                super::supervisor::cancel_registry::clear(&id);
                 return Ok(Some(id));
             }
             increment_generation_counter()?;
@@ -360,6 +450,9 @@ pub async fn process_next_job() -> AppResult<Option<String>> {
                         .map_err(|e| AppError::Message(e.to_string()))?;
                     }
                     mark_job(&id, JobStatus::Succeeded, None)?;
+                    if job_origin == "daily_feed" {
+                        let _ = super::daily_feed::bump_metric_public("needs_review");
+                    }
                     if let Some(nid) = need_id {
                         if let Ok(mut need) = get_need(&nid) {
                             need.coverage = NeedCoverage::NeedsReview;
@@ -410,11 +503,12 @@ pub async fn process_next_job() -> AppResult<Option<String>> {
                     }
                 }
             }
+            super::supervisor::cancel_registry::clear(&id);
             Ok(Some(id))
         }
         Err(e) => {
             let msg = e.to_string();
-            if attempt + 1 >= max_attempts {
+            if attempt >= max_attempts {
                 mark_job(&id, JobStatus::Failed, Some(&msg))?;
                 if let Some(nid) = need_id {
                     if let Ok(mut need) = get_need(&nid) {
@@ -426,7 +520,8 @@ pub async fn process_next_job() -> AppResult<Option<String>> {
             } else {
                 let conn = open_db()?;
                 conn.execute(
-                    "UPDATE generation_jobs SET status=?1, last_error=?2, updated_at=?3 WHERE id=?4",
+                    "UPDATE generation_jobs SET status=?1, stage='queued', locked_by=NULL, lease_expires_at=NULL,
+                     last_error=?2, updated_at=?3 WHERE id=?4",
                     params![
                         JobStatus::Queued.as_str(),
                         msg,
@@ -436,6 +531,7 @@ pub async fn process_next_job() -> AppResult<Option<String>> {
                 )
                 .map_err(|e| AppError::Message(e.to_string()))?;
             }
+            super::supervisor::cancel_registry::clear(&id);
             Ok(Some(id))
         }
     }
@@ -443,9 +539,23 @@ pub async fn process_next_job() -> AppResult<Option<String>> {
 
 fn mark_job(id: &str, status: JobStatus, err: Option<&str>) -> AppResult<()> {
     let conn = open_db()?;
+    let stage = match status {
+        JobStatus::Cancelled => "cancelled",
+        JobStatus::Succeeded => "succeeded",
+        JobStatus::Failed => "failed",
+        JobStatus::BlockedPolicy => "blocked",
+        JobStatus::Queued => "queued",
+        JobStatus::Running => "running",
+    };
     conn.execute(
-        "UPDATE generation_jobs SET status=?1, last_error=?2, updated_at=?3 WHERE id=?4",
-        params![status.as_str(), err, chrono::Utc::now().to_rfc3339(), id],
+        "UPDATE generation_jobs SET status=?1, stage=?2, last_error=?3, locked_by=NULL, lease_expires_at=NULL, updated_at=?4 WHERE id=?5",
+        params![
+            status.as_str(),
+            stage,
+            err,
+            chrono::Utc::now().to_rfc3339(),
+            id
+        ],
     )
     .map_err(|e| AppError::Message(e.to_string()))?;
     Ok(())
@@ -468,14 +578,14 @@ fn promote_candidate(
         .and_then(|id| get_need(id).ok())
         .map(|n| n.terms)
         .unwrap_or_default();
+    // Codex HIGH-003: AI license is Unknown until evidence exists; not Owned/commercial by default.
     let mut asset = import_image(
         path,
         Some(title),
         concepts.clone(),
         concepts,
-        LicenseStatus::Owned,
+        LicenseStatus::Unknown,
     )?;
-    // Enrich provenance on row
     let conn = open_db()?;
     let prov = AssetProvenance {
         source: "ai_generated".into(),
@@ -488,7 +598,7 @@ fn promote_candidate(
     };
     let prov_s = serde_json::to_string(&prov).unwrap_or_else(|_| "{}".into());
     conn.execute(
-        "UPDATE media_assets SET provenance_json=?1, qa_status=?2, commercial_use=1, source=?3, updated_at=?4 WHERE id=?5",
+        "UPDATE media_assets SET provenance_json=?1, qa_status=?2, commercial_use=0, license_status='unknown', source=?3, updated_at=?4 WHERE id=?5",
         params![
             prov_s,
             QaStatus::Approved.as_str(),
@@ -500,6 +610,8 @@ fn promote_candidate(
     .map_err(|e| AppError::Message(e.to_string()))?;
     asset.provenance = Some(prov);
     asset.qa_status = QaStatus::Approved;
+    asset.license_status = LicenseStatus::Unknown;
+    asset.commercial_use = Some(false);
     Ok(asset)
 }
 
@@ -515,34 +627,79 @@ pub async fn worker_tick(max_jobs: u32) -> AppResult<u32> {
     Ok(n)
 }
 
-/// Human approve a candidate → library asset (idempotent: second call returns same asset).
+/// Human approve a candidate → library asset (idempotent + claim conditional).
 pub fn human_approve_candidate(candidate_id: &str) -> AppResult<MediaAsset> {
     let conn = open_db()?;
-    let (path, need_id, job_id, status, existing_asset): (
-        String,
-        Option<String>,
-        String,
-        String,
-        Option<String>,
-    ) = conn
-        .query_row(
-            "SELECT local_path, need_id, job_id, status, approved_asset_id FROM generated_candidates WHERE id = ?1",
-            params![candidate_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
-        )
-        .map_err(|e| AppError::NotFound(e.to_string()))?;
+    // BEGIN IMMEDIATE for exclusive claim
+    conn.execute_batch("BEGIN IMMEDIATE")
+        .map_err(|e| AppError::Message(e.to_string()))?;
+
+    let claim = conn.query_row(
+        "SELECT local_path, need_id, job_id, status, approved_asset_id, COALESCE(origin,'video_need')
+         FROM generated_candidates WHERE id = ?1",
+        params![candidate_id],
+        |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, Option<String>>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, Option<String>>(4)?,
+                r.get::<_, String>(5)?,
+            ))
+        },
+    );
+    let (path, need_id, job_id, status, existing_asset, origin) = match claim {
+        Ok(v) => v,
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            return Err(AppError::NotFound(e.to_string()));
+        }
+    };
+
     if let Some(aid) = existing_asset.filter(|s| !s.is_empty()) {
+        let _ = conn.execute_batch("COMMIT");
         return crate::pipeline::visual::library::get_asset_by_id(&aid);
     }
-    if status == "rejected" || status == "discarded" {
+    if status == "rejected" || status == "discarded" || status == "approved" {
+        let _ = conn.execute_batch("ROLLBACK");
+        return Err(AppError::Invalid(format!(
+            "Candidato en estado '{status}' no se puede aprobar de nuevo."
+        )));
+    }
+
+    // Conditional claim: only if not yet approved
+    let claimed = conn
+        .execute(
+            "UPDATE generated_candidates SET status='approving', updated_at=?1
+             WHERE id=?2 AND (approved_asset_id IS NULL OR approved_asset_id='')
+               AND status NOT IN ('rejected','discarded','approved')",
+            params![chrono::Utc::now().to_rfc3339(), candidate_id],
+        )
+        .unwrap_or(0);
+    if claimed == 0 {
+        let _ = conn.execute_batch("ROLLBACK");
         return Err(AppError::Invalid(
-            "Este candidato fue rechazado y no se puede aprobar.".into(),
+            "Otro proceso ya está aprobando este candidato.".into(),
         ));
     }
+    let _ = conn.execute_batch("COMMIT");
+
     let path = std::path::PathBuf::from(path);
     if !path.is_file() {
+        let conn = open_db()?;
+        let _ = conn.execute(
+            "UPDATE generated_candidates SET status=?1, updated_at=?2 WHERE id=?3",
+            params![
+                CandidateStatus::Rejected.as_str(),
+                chrono::Utc::now().to_rfc3339(),
+                candidate_id
+            ],
+        );
         return Err(AppError::NotFound(path.display().to_string()));
     }
+
+    let conn = open_db()?;
     let (prompt, neg, provider, model): (String, String, Option<String>, Option<String>) = conn
         .query_row(
             "SELECT prompt, negative_prompt, provider, model FROM generation_jobs WHERE id = ?1",
@@ -550,6 +707,7 @@ pub fn human_approve_candidate(candidate_id: &str) -> AppResult<MediaAsset> {
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )
         .unwrap_or_else(|_| (String::new(), String::new(), None, None));
+
     let asset = promote_candidate(
         candidate_id,
         &path,
@@ -559,24 +717,54 @@ pub fn human_approve_candidate(candidate_id: &str) -> AppResult<MediaAsset> {
         model.as_deref().unwrap_or("unknown"),
         need_id.as_deref(),
     )?;
-    conn.execute(
-        "UPDATE generated_candidates SET status=?1, approved_asset_id=?2, updated_at=?3 WHERE id=?4",
-        params![
-            CandidateStatus::Approved.as_str(),
-            asset.id,
-            chrono::Utc::now().to_rfc3339(),
-            candidate_id
-        ],
-    )
-    .map_err(|e| AppError::Message(e.to_string()))?;
-    if let Some(nid) = need_id {
-        if let Ok(mut need) = get_need(&nid) {
+
+    // Finalize candidate + need without nested connections (avoids SQLite lock)
+    let conn = open_db()?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let n = conn
+        .execute(
+            "UPDATE generated_candidates SET status=?1, approved_asset_id=?2, updated_at=?3
+             WHERE id=?4 AND (approved_asset_id IS NULL OR approved_asset_id='')",
+            params![
+                CandidateStatus::Approved.as_str(),
+                asset.id,
+                now,
+                candidate_id
+            ],
+        )
+        .map_err(|e| AppError::Message(e.to_string()))?;
+    if n == 0 {
+        // Another writer won the race — return existing asset if any
+        if let Ok(existing) = conn.query_row(
+            "SELECT approved_asset_id FROM generated_candidates WHERE id=?1",
+            params![candidate_id],
+            |r| r.get::<_, Option<String>>(0),
+        ) {
+            if let Some(aid) = existing.filter(|s| !s.is_empty()) {
+                return crate::pipeline::visual::library::get_asset_by_id(&aid);
+            }
+        }
+        return Err(AppError::Invalid(
+            "No se pudo finalizar la aprobación del candidato.".into(),
+        ));
+    }
+    drop(conn);
+
+    if let Some(nid) = &need_id {
+        if let Ok(mut need) = get_need(nid) {
             need.matched_asset_id = Some(asset.id.clone());
             need.coverage = NeedCoverage::Covered;
             need.updated_at = chrono::Utc::now().to_rfc3339();
             update_need(&need)?;
         }
     }
+
+    // Metrics for daily
+    if origin == "daily_feed" {
+        let _ = crate::pipeline::visual::generation::daily_feed::bump_metric_public("approved");
+        let _ = crate::pipeline::visual::generation::daily_feed::bump_metric_public("concepts_covered");
+    }
+
     Ok(asset)
 }
 
@@ -599,8 +787,10 @@ pub fn human_reject_candidate_with_reason(
         ],
     )
     .map_err(|e| AppError::Message(e.to_string()))?;
-    // Free the need for regenerate
     if let Ok(c) = super::supervision::get_candidate(candidate_id) {
+        if c.origin == "daily_feed" {
+            let _ = crate::pipeline::visual::generation::daily_feed::bump_metric_public("rejected");
+        }
         if let Some(nid) = c.need_id {
             if let Ok(mut n) = get_need(&nid) {
                 n.coverage = NeedCoverage::Uncovered;

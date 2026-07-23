@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use crate::error::{AppError, AppResult};
 
-pub const SCHEMA_VERSION: i32 = 3;
+pub const SCHEMA_VERSION: i32 = 4;
 
 pub fn migrate(conn: &Connection) -> AppResult<()> {
     conn.execute_batch(
@@ -77,6 +77,49 @@ pub fn migrate(conn: &Connection) -> AppResult<()> {
         .map_err(|e| AppError::Message(e.to_string()))?;
     }
 
+    let ver: i32 = conn
+        .query_row(
+            "SELECT value FROM schema_meta WHERE key = 'version'",
+            [],
+            |r| {
+                let s: String = r.get(0)?;
+                Ok(s.parse::<i32>().unwrap_or(0))
+            },
+        )
+        .unwrap_or(3);
+
+    if ver < 4 {
+        migrate_v4(conn)?;
+        conn.execute(
+            "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('version','4')",
+            [],
+        )
+        .map_err(|e| AppError::Message(e.to_string()))?;
+    }
+
+    Ok(())
+}
+
+/// Lease/recovery columns for Codex CRIT-002 / HIGH-004.
+fn migrate_v4(conn: &Connection) -> AppResult<()> {
+    let alters = [
+        "ALTER TABLE generation_jobs ADD COLUMN locked_by TEXT",
+        "ALTER TABLE generation_jobs ADD COLUMN lease_expires_at TEXT",
+        "ALTER TABLE generation_jobs ADD COLUMN attempt_version INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE generated_candidates ADD COLUMN concept_title TEXT",
+        "ALTER TABLE generated_candidates ADD COLUMN need_label TEXT",
+    ];
+    for sql in alters {
+        let _ = conn.execute(sql, []);
+    }
+    // Recover any stuck running jobs from previous process
+    let _ = conn.execute(
+        "UPDATE generation_jobs SET status='queued', stage='queued', locked_by=NULL, lease_expires_at=NULL,
+         last_error=COALESCE(last_error,'') || ' [requeued after restart]',
+         updated_at=datetime('now')
+         WHERE status='running'",
+        [],
+    );
     Ok(())
 }
 
@@ -334,7 +377,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(v, "3");
+        assert_eq!(v, "4");
         let n: i64 = conn
             .query_row("SELECT COUNT(*) FROM visual_concepts", [], |r| r.get(0))
             .unwrap();

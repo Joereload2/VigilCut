@@ -150,6 +150,7 @@ pub fn run() {
             commands::visual_intel::visual_generate_need,
             commands::visual_intel::visual_cancel_job,
             commands::visual_intel::visual_regenerate_need,
+            commands::visual_intel::visual_supervision_global,
             commands::visual_intel::visual_approve_and_use,
             commands::visual_intel::visual_daily_feed_settings,
             commands::visual_intel::visual_daily_feed_set_enabled,
@@ -162,6 +163,8 @@ pub fn run() {
             if let Err(e) = state.ensure_dirs() {
                 tracing::warn!("Could not create app directories: {e}");
             }
+            // Resident generation supervisor (Codex CRIT-001): queue + daily without UI ticks
+            pipeline::visual::generation::supervisor::ensure_started();
             tracing::info!("VigilCut started");
             Ok(())
         })

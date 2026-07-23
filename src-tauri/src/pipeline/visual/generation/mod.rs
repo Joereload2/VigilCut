@@ -6,6 +6,7 @@ pub mod mock;
 pub mod omniroute;
 pub mod provider;
 pub mod supervision;
+pub mod supervisor;
 pub mod worker;
 
 #[cfg(test)]
