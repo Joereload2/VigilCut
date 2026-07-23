@@ -782,6 +782,7 @@
         {busy}
         sceneLabel={sceneContext ? sceneLabelShort : null}
         onSelect={(id) => (selectedAssetId = id)}
+        onReview={() => setView("review")}
         onSave={saveAsset}
         onArchive={(id) => setStatus(id, "archived")}
         onRestore={(id) => setStatus(id, "active")}

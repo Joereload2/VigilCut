@@ -1,4 +1,5 @@
 <script lang="ts">
+  import LibraryControlCenter from "./LibraryControlCenter.svelte";
   import AssetCard from "./library/AssetCard.svelte";
   import AssetInspector from "./library/AssetInspector.svelte";
   import { filterAssets, sortAssets, type QuickFilter } from "./library/libraryFilters";
@@ -22,6 +23,7 @@
     onRestore,
     onBlock,
     onUseInScene = undefined as ((id: string) => void) | undefined,
+    onReview = () => {},
   }: {
     assets?: MediaAsset[];
     loading?: boolean;
@@ -39,8 +41,10 @@
     onRestore: (id: string) => Promise<void>;
     onBlock: (id: string) => Promise<void>;
     onUseInScene?: ((id: string) => void) | undefined;
+    onReview?: () => void;
   } = $props();
 
+  let section = $state<"control" | "assets">("control");
   let quick = $state<QuickFilter>("all");
   let sort = $state<"recent" | "used" | "quality" | "title">("recent");
   let more = $state(false);
@@ -57,6 +61,32 @@
 </script>
 
 <div class="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden text-[11px]">
+  <div class="grid shrink-0 grid-cols-2 gap-1 rounded-lg bg-surface-900 p-1" role="tablist" aria-label="Secciones de Biblioteca">
+    <button
+      type="button"
+      role="tab"
+      aria-selected={section === "control"}
+      class="rounded-md px-2 py-1.5 text-[10px] font-semibold {section === 'control' ? 'bg-violet-600 text-white' : 'text-surface-400 hover:bg-surface-800'}"
+      onclick={() => (section = "control")}
+    >
+      Buscar y completar
+    </button>
+    <button
+      type="button"
+      role="tab"
+      aria-selected={section === "assets"}
+      class="rounded-md px-2 py-1.5 text-[10px] font-semibold {section === 'assets' ? 'bg-violet-600 text-white' : 'text-surface-400 hover:bg-surface-800'}"
+      onclick={() => (section = "assets")}
+    >
+      Imágenes alojadas ({assets.length})
+    </button>
+  </div>
+
+  {#if section === "control"}
+    <div class="min-h-0 flex-1 overflow-y-auto pr-1">
+      <LibraryControlCenter {onReview} />
+    </div>
+  {:else}
   <div class="flex shrink-0 flex-wrap items-center gap-1">
     {#each [
       ["all", "Todas"],
@@ -155,4 +185,5 @@
       {/if}
     </div>
   </div>
+  {/if}
 </div>
