@@ -536,8 +536,13 @@ export async function visualRejectCandidate(
   });
 }
 
+/** @deprecated Prefer resident supervisor; kept for CLI/debug. UI must not call this. */
 export async function visualWorkerTick(maxJobs = 3): Promise<unknown> {
   return invoke("visual_worker_tick", { maxJobs });
+}
+
+export async function visualSupervisionGlobal(): Promise<unknown> {
+  return invoke("visual_supervision_global");
 }
 
 export async function visualDailyFeedSettings(): Promise<unknown> {

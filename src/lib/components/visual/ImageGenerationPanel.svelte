@@ -5,6 +5,7 @@
   import {
     costLabel,
     formatTimeRange,
+    isMockProvider,
     stateColor,
     type CandidateView,
     type NeedSupervision,
@@ -79,6 +80,7 @@
       downloading: "Descargando",
       file_review: "Revisando archivo",
       evaluating: "Evaluando imagen",
+      cancelling: "Cancelando…",
       cancelled: "Cancelada",
     };
     return m[stage ?? ""] ?? (stage ? stage.replaceAll("_", " ") : "—");
@@ -104,30 +106,36 @@
   }
 
   async function refresh() {
-    if (!projectKey) return;
     try {
-      const s = (await api.visualSupervision(projectKey)) as SupervisionSnapshot;
-      snap = s;
-      dailyEnabled = !!s.dailyFeed?.enabled;
-      if (!selectedId && s.needs[0]) selectedId = s.needs[0].need.id;
-      if (selectedId && !s.needs.some((n) => n.need.id === selectedId)) {
-        selectedId = s.needs[0]?.need.id ?? null;
+      if (projectKey) {
+        const s = (await api.visualSupervision(projectKey)) as SupervisionSnapshot;
+        snap = s;
+        dailyEnabled = !!s.dailyFeed?.enabled;
+        if (!selectedId && s.needs[0]) selectedId = s.needs[0].need.id;
+        if (selectedId && !s.needs.some((n) => n.need.id === selectedId)) {
+          selectedId = s.needs[0]?.need.id ?? null;
+        }
+      } else {
+        // Global daily/pending without video project (Codex HIGH-008)
+        const s = (await api.visualSupervisionGlobal()) as SupervisionSnapshot;
+        snap = s;
+        dailyEnabled = !!s.dailyFeed?.enabled;
       }
     } catch (e) {
       onError(String(e));
     }
   }
 
-  async function resumeQueue() {
+  async function loadDailySettings() {
     try {
-      await api.visualWorkerTick(3);
-      await refresh();
-      const still = snap?.needs.some((n) =>
-        ["queued", "processing"].includes(n.uiState),
-      );
-      if (still) startPoll();
+      const s = (await api.visualDailyFeedSettings()) as {
+        enabled?: boolean;
+      };
+      dailyEnabled = !!s.enabled;
+      const w = (await api.visualDailyWeekSummary()) as { message?: string };
+      weekMsg = w.message ?? "";
     } catch {
-      /* offline / empty */
+      /* ignore */
     }
   }
 
@@ -180,7 +188,7 @@
       onMessage(
         res.action === "reused"
           ? "Imagen reutilizada de la biblioteca"
-          : "Generación iniciada — revisa el resultado cuando esté listo",
+          : "En cola — el supervisor genera en segundo plano (mock = simulación, no IA)",
       );
       startPoll();
     } catch (e) {
@@ -195,7 +203,8 @@
     try {
       await api.visualCancelJob(jobId);
       await refresh();
-      onMessage("Generación cancelada");
+      onMessage("Cancelación solicitada");
+      startPoll();
     } catch (e) {
       onError(String(e));
     } finally {
@@ -260,18 +269,19 @@
     }
   }
 
+  /** Poll snapshot only — never drive the worker from the UI (Codex CRIT-001). */
   function startPoll() {
     if (pollTimer) return;
     pollTimer = setInterval(async () => {
       try {
-        await api.visualWorkerTick(2);
         await refresh();
       } catch {
         /* ignore */
       }
-      const still = snap?.needs.some((n) =>
-        ["queued", "processing"].includes(n.uiState),
-      );
+      const still =
+        snap?.needs.some((n) =>
+          ["queued", "processing", "cancelling"].includes(n.uiState),
+        ) || dailyPending.length > 0;
       if (!still && pollTimer) {
         clearInterval(pollTimer);
         pollTimer = null;
@@ -284,24 +294,38 @@
       await api.visualDailyFeedSetEnabled(v);
       dailyEnabled = v;
       if (v) {
-        const r = (await api.visualDailyFeedCycle()) as { ok?: boolean; reason?: string };
-        onMessage(r.ok ? "Alimentación diaria: ciclo ejecutado" : `Daily: ${r.reason ?? "ok"}`);
+        // Optional kick; supervisor also runs on interval when idle
+        const r = (await api.visualDailyFeedCycle()) as {
+          ok?: boolean;
+          reason?: string;
+          action?: string;
+        };
+        onMessage(
+          r.ok
+            ? r.action === "queued"
+              ? "Daily: job en cola (solo gratis verificado / mock)"
+              : "Alimentación diaria: ciclo ok"
+            : `Daily: ${r.reason ?? "ok"}`,
+        );
         startPoll();
       }
       const w = (await api.visualDailyWeekSummary()) as { message?: string };
       weekMsg = w.message ?? "";
+      await refresh();
     } catch (e) {
       onError(String(e));
     }
   }
 
   $effect(() => {
-    if (projectKey) {
-      void (async () => {
-        await refresh();
-        await resumeQueue();
-      })();
-    }
+    void (async () => {
+      await loadDailySettings();
+      await refresh();
+      const still = snap?.needs.some((n) =>
+        ["queued", "processing", "cancelling"].includes(n.uiState),
+      );
+      if (still) startPoll();
+    })();
     return () => {
       if (pollTimer) clearInterval(pollTimer);
       pollTimer = null;
@@ -559,6 +583,11 @@
           {:else}
             <p class="text-amber-200/80">Archivo no disponible (eliminado o ruta inválida).</p>
           {/if}
+          {#if isMockProvider(c.provider)}
+            <p class="rounded bg-violet-950/50 px-2 py-1 text-[10px] font-medium text-violet-200">
+              Simulación (mock) — no es IA
+            </p>
+          {/if}
           <div class="grid grid-cols-2 gap-x-2 text-[10px] text-surface-400">
             <span>{c.width ?? "?"}×{c.height ?? "?"}</span>
             <span>{c.mimeType ?? "—"}</span>
@@ -571,6 +600,7 @@
               <span>Técnica: {(c.technicalScore * 100).toFixed(0)}%</span>
             {/if}
             <span class="col-span-2">Origen: {c.origin === "daily_feed" ? "Alimentación diaria" : "Video"}</span>
+            <span class="col-span-2">Proveedor: {c.provider ?? "—"} · {c.model ?? "—"}</span>
           </div>
           {#if c.qaReason}
             <p class="text-surface-400">{c.qaReason}</p>
@@ -673,7 +703,7 @@
     </div>
   {/if}
 
-  <!-- Daily feed collapsed -->
+  <!-- Daily feed: available without projectKey (Codex HIGH-008) -->
   <div class="rounded-lg border border-surface-800/80 bg-surface-950/40 p-2">
     <button
       type="button"
@@ -684,6 +714,9 @@
       <span class="text-surface-500">{dailyOpen ? "▾" : "▸"}</span>
     </button>
     {#if dailyOpen}
+      <p class="mt-1 text-[10px] text-surface-500">
+        Solo mock local o ruta free_verified. No usa free_configured. El supervisor corre en segundo plano.
+      </p>
       <label class="mt-2 flex cursor-pointer items-center gap-2 text-surface-300">
         <input
           type="checkbox"
@@ -691,7 +724,7 @@
           checked={dailyEnabled}
           onchange={(e) => toggleDaily((e.currentTarget as HTMLInputElement).checked)}
         />
-        Activar cuando la app está abierta (solo gratis/local)
+        Activar cuando la app está abierta (solo gratis verificado / mock)
       </label>
       {#if weekMsg}
         <p class="mt-1 text-[10px] text-surface-500">{weekMsg}</p>
@@ -700,25 +733,40 @@
         <p class="mt-2 text-[10px] font-medium text-amber-200">
           {dailyPending.length} candidato(s) diarios por revisar
         </p>
-        {#each dailyPending.slice(0, 3) as dc (dc.id)}
+        {#each dailyPending.slice(0, 5) as dc (dc.id)}
           <div class="mt-1 flex items-center gap-2 rounded border border-surface-800 p-1">
             {#if dc.fileExists && dc.localPath}
               {@const u = fileUrl(dc.localPath)}
-              {#if u}<img src={u} alt="" class="h-8 w-8 rounded object-cover" />{/if}
+              {#if u}<img
+                  src={u}
+                  alt={dc.conceptTitle || dc.needLabel || "Candidato diario"}
+                  class="h-8 w-8 rounded object-cover"
+                />{/if}
             {/if}
-            <span class="min-w-0 flex-1 truncate text-[10px] text-surface-400">{dc.id.slice(0, 8)}…</span>
+            <div class="min-w-0 flex-1">
+              <p class="truncate text-[10px] text-surface-200">
+                {dc.conceptTitle || dc.needLabel || "Concepto"}
+              </p>
+              {#if isMockProvider(dc.provider)}
+                <p class="text-[9px] text-violet-300">Simulación (mock)</p>
+              {/if}
+            </div>
             <button
               type="button"
               class="btn-primary px-1 py-0 text-[9px]"
-              onclick={() => approve(dc, false)}>OK</button
+              aria-label="Aprobar en biblioteca {dc.conceptTitle || ''}"
+              onclick={() => approve(dc, false)}>Aprobar</button
             >
             <button
               type="button"
               class="btn-ghost px-1 py-0 text-[9px]"
-              onclick={() => reject(dc)}>No</button
+              aria-label="Rechazar {dc.conceptTitle || ''}"
+              onclick={() => reject(dc)}>Rechazar</button
             >
           </div>
         {/each}
+      {:else}
+        <p class="mt-2 text-[10px] text-surface-500">Sin candidatos diarios pendientes.</p>
       {/if}
     {/if}
   </div>

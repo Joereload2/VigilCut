@@ -4,6 +4,7 @@ export type UiState =
   | "uncovered"
   | "queued"
   | "processing"
+  | "cancelling"
   | "reviewing"
   | "needs_human_review"
   | "approved"
@@ -89,6 +90,8 @@ export interface CandidateView {
   createdAt: string;
   updatedAt: string;
   fileExists: boolean;
+  conceptTitle?: string | null;
+  needLabel?: string | null;
 }
 
 export interface NeedSupervision {
@@ -119,12 +122,17 @@ export function costLabel(kind?: string | null, freeVerified?: boolean): string 
     case "free_configured":
       return freeVerified ? "Gratis verificado" : "Gratis configurado, no verificado";
     case "local":
-      return "Generación local";
+      return "Simulación local (mock)";
     case "paid":
       return "Pagado";
     default:
       return "Coste desconocido";
   }
+}
+
+/** Mock is a synthetic fixture — never market as real local AI (Codex MED-002). */
+export function isMockProvider(provider?: string | null): boolean {
+  return (provider ?? "").toLowerCase() === "mock";
 }
 
 export function stateColor(state: string): string {
@@ -136,6 +144,7 @@ export function stateColor(state: string): string {
       return "text-amber-300 border-amber-800/50 bg-amber-950/30";
     case "processing":
     case "queued":
+    case "cancelling":
       return "text-sky-300 border-sky-800/50 bg-sky-950/30";
     case "failed":
       return "text-red-300 border-red-900/40 bg-red-950/30";
