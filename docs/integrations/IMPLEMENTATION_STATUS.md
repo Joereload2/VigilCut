@@ -153,3 +153,17 @@ This file records verified evidence after each isolated implementation gate.
 - Authorization required: future product/privacy approval before implementing
   any opt-in diagnostics.
 - Rollback: remove the ADR; no runtime behavior or data is affected.
+## Stage record: deferred external tools
+
+- Implemented: decision triggers and adoption evidence for Braintrust,
+  Langfuse, Comet Opik, Cloudinary, Neon, Turso, Upstash, Portkey, Auth0,
+  Clerk, Render, Vercel, and Netlify.
+- Tested: document review plus the complete local gate.
+- Real: roadmap only.
+- Not implemented: configurations, SDKs, accounts, deployments, or network
+  integrations for any listed tool.
+- Dependencies added: none.
+- Cost observed: 0.
+- Authorization required: a future ADR and explicit approval for any service
+  that transmits data, creates cost, or changes production.
+- Rollback: remove the roadmap; runtime behavior is unaffected.
