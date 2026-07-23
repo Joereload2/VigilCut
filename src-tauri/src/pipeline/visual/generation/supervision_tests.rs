@@ -94,4 +94,57 @@ mod tests {
         let _ = job2;
         let _ = NeedCoverage::Uncovered;
     }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn recover_stale_running_then_process() {
+        use crate::pipeline::visual::generation::worker::recover_stale_running;
+        use crate::pipeline::visual::library::open_db;
+        use rusqlite::params;
+
+        let _lock = crate::pipeline::visual::library::lock_library_for_test();
+        let dir = std::env::temp_dir().join(format!("vc-recover-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        set_library_root_override(Some(dir.clone()));
+        std::env::set_var("VIGILCUT_IMAGE_PROVIDER", "mock");
+        std::env::set_var("VIGILCUT_REQUIRE_HUMAN_QA", "0");
+        std::env::remove_var("OMNIROUTE_BASE_URL");
+
+        let mut need = VisualNeed::from_label("recover-proj", "stale_running_need");
+        need.terms = vec!["stale_running_need".into()];
+        save_needs(std::slice::from_ref(&need)).unwrap();
+        let job_id = queue_generation_for_need(&mut need, false)
+            .unwrap()
+            .expect("job");
+
+        // Simulate crash mid-run: stuck running with expired lease
+        {
+            let conn = open_db().unwrap();
+            conn.execute(
+                "UPDATE generation_jobs SET status='running', stage='generating',
+                 lease_expires_at='2000-01-01T00:00:00Z', locked_by='dead' WHERE id=?1",
+                params![job_id],
+            )
+            .unwrap();
+        }
+
+        let n = recover_stale_running().unwrap();
+        assert!(n >= 1, "should requeue stale running");
+        let j = get_job(&job_id).unwrap();
+        assert_eq!(j.status, "queued");
+
+        let processed = worker_tick(2).await.unwrap();
+        assert!(processed >= 1);
+        let j2 = get_job(&job_id).unwrap();
+        assert!(
+            j2.status == "succeeded" || j2.status == "failed",
+            "got {}",
+            j2.status
+        );
+
+        set_library_root_override(None);
+        std::env::remove_var("VIGILCUT_IMAGE_PROVIDER");
+        std::env::remove_var("VIGILCUT_REQUIRE_HUMAN_QA");
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

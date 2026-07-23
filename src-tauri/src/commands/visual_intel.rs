@@ -25,7 +25,7 @@ use crate::pipeline::visual::generation::worker::{
 use crate::pipeline::visual::intelligent_match::{apply_best_match, match_need, MatchOptions};
 use crate::pipeline::visual::needs::{
     coverage_for_project, detect_needs_from_semantics, get_need, list_needs, merge_detected_needs,
-    save_needs, skip_need, update_need,
+    skip_need, update_need,
 };
 use crate::pipeline::visual::save_visual_plan;
 
@@ -226,6 +226,15 @@ pub fn visual_supervision(project_key: String) -> AppResult<serde_json::Value> {
     Ok(serde_json::to_value(supervision_snapshot(&project_key)?)?)
 }
 
+/// Global daily/pending snapshot without a video project (Codex HIGH-008).
+#[tauri::command]
+pub fn visual_supervision_global() -> AppResult<serde_json::Value> {
+    Ok(serde_json::to_value(
+        crate::pipeline::visual::generation::supervision::supervision_snapshot_global()?,
+    )?)
+}
+
+/// Enqueue-only: returns after commit; supervisor processes the queue (Codex CRIT-001).
 #[tauri::command]
 pub async fn visual_generate_need(need_id: String) -> AppResult<serde_json::Value> {
     let mut need = get_need(&need_id)?;
@@ -239,14 +248,12 @@ pub async fn visual_generate_need(need_id: String) -> AppResult<serde_json::Valu
         }));
     }
     let job_id = queue_generation_for_need(&mut need, false)?;
-    // Process immediately (one tick) so UI updates without separate button
-    let processed = worker_tick(1).await.unwrap_or(0);
     Ok(serde_json::json!({
         "action": "queued",
         "jobId": job_id,
-        "processed": processed,
         "need": get_need(&need_id)?,
         "snapshot": supervision_snapshot(&need.project_key)?,
+        "message": "En cola — el supervisor generará la imagen en segundo plano",
     }))
 }
 
@@ -255,16 +262,16 @@ pub fn visual_cancel_job(job_id: String) -> AppResult<serde_json::Value> {
     Ok(serde_json::to_value(cancel_job(&job_id)?)?)
 }
 
+/// Enqueue-only regenerate (Codex CRIT-001 / HIGH-007).
 #[tauri::command]
 pub async fn visual_regenerate_need(need_id: String) -> AppResult<serde_json::Value> {
     let job_id = queue_regenerate(&need_id)?;
-    let processed = worker_tick(1).await.unwrap_or(0);
     let need = get_need(&need_id)?;
     Ok(serde_json::json!({
         "jobId": job_id,
-        "processed": processed,
         "need": need,
         "snapshot": supervision_snapshot(&need.project_key)?,
+        "message": "Regeneración en cola",
     }))
 }
 
@@ -288,37 +295,54 @@ pub async fn visual_approve_and_use(
             if let Some(nid) = cand.need_id {
                 let need = get_need(&nid)?;
                 if let (Some(s), Some(e)) = (need.output_start, need.output_end) {
-                    let edl = edl_helper(&analysis, analysis_run_id.as_deref(), &mp)
-                        .unwrap_or_else(|_| {
-                            crate::models::edl::Edl::from_remove_spans(&mp, 60.0, &[])
-                        });
-                    let mut g = visual
-                        .lock()
-                        .map_err(|e| AppError::Message(e.to_string()))?;
-                    let fp = edl_fingerprint(&edl.keep_ranges());
-                    if g.plan.is_none() {
-                        g.plan = Some(crate::models::visual::VisualPlan::new(&fp, &mp, fp.clone()));
-                    }
-                    if let Some(plan) = g.plan.as_mut() {
-                        let exists = plan
-                            .placements
-                            .iter()
-                            .any(|p| p.asset_id == asset.id && (p.output_start - s).abs() < 0.2);
-                        if !exists {
-                            let mut pl = VisualPlacement::manual(
-                                &asset.id,
-                                s,
-                                e,
-                                PlacementMode::Fullframe,
-                                PlacementLayout::for_mode(PlacementMode::Fullframe),
-                                "cover",
-                                Some(need.label.clone()),
-                            );
-                            pl.provenance = "library_generated".into();
-                            plan.placements.push(pl);
-                            plan.touch();
-                            let _ = save_visual_plan(plan, None);
-                            placement_added = true;
+                    // Codex HIGH-005: never invent a 60s EDL — require real analysis
+                    match edl_helper(&analysis, analysis_run_id.as_deref(), &mp) {
+                        Ok(edl) => {
+                            let mut g = visual
+                                .lock()
+                                .map_err(|err| AppError::Message(err.to_string()))?;
+                            let fp = edl_fingerprint(&edl.keep_ranges());
+                            if g.plan.is_none() {
+                                g.plan = Some(crate::models::visual::VisualPlan::new(
+                                    &fp,
+                                    &mp,
+                                    fp.clone(),
+                                ));
+                            }
+                            if let Some(plan) = g.plan.as_mut() {
+                                let exists = plan.placements.iter().any(|p| {
+                                    p.asset_id == asset.id && (p.output_start - s).abs() < 0.2
+                                });
+                                if !exists {
+                                    let mut pl = VisualPlacement::manual(
+                                        &asset.id,
+                                        s,
+                                        e,
+                                        PlacementMode::Fullframe,
+                                        PlacementLayout::for_mode(PlacementMode::Fullframe),
+                                        "cover",
+                                        Some(need.label.clone()),
+                                    );
+                                    pl.provenance = "library_generated".into();
+                                    plan.placements.push(pl);
+                                    plan.touch();
+                                    save_visual_plan(plan, None).map_err(|err| {
+                                        AppError::Message(format!(
+                                            "Aprobada en biblioteca pero no se pudo guardar el plan: {err}"
+                                        ))
+                                    })?;
+                                    placement_added = true;
+                                }
+                            }
+                        }
+                        Err(edl_err) => {
+                            // Asset already approved; report place failure explicitly
+                            return Ok(serde_json::json!({
+                                "asset": asset,
+                                "placementAdded": false,
+                                "placeError": edl_err.to_string(),
+                                "message": "Imagen aprobada en la biblioteca. No se pudo colocar: analiza el video (EDL) primero.",
+                            }));
                         }
                     }
                 }
@@ -343,12 +367,17 @@ pub fn visual_daily_feed_settings() -> AppResult<serde_json::Value> {
 
 #[tauri::command]
 pub fn visual_daily_feed_set_enabled(enabled: bool) -> AppResult<serde_json::Value> {
-    Ok(serde_json::to_value(daily_feed::set_enabled(enabled)?)?)
+    let s = daily_feed::set_enabled(enabled)?;
+    if enabled {
+        crate::pipeline::visual::generation::supervisor::request_wake();
+    }
+    Ok(serde_json::to_value(s)?)
 }
 
+/// Manual/debug cycle; production path is the resident supervisor.
 #[tauri::command]
 pub async fn visual_daily_feed_cycle() -> AppResult<serde_json::Value> {
-    daily_feed::run_daily_cycle().await
+    daily_feed::run_daily_cycle_forced().await
 }
 
 #[tauri::command]

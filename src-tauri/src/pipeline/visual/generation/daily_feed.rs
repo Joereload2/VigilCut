@@ -10,7 +10,7 @@ use crate::models::visual_intel::{NeedCoverage, VisualNeed};
 use crate::pipeline::visual::concepts::list_concepts;
 use crate::pipeline::visual::generation::cost::{can_enqueue_generation, CostGate};
 use crate::pipeline::visual::generation::provider::select_provider;
-use crate::pipeline::visual::generation::worker::{queue_generation_with_key, worker_tick};
+use crate::pipeline::visual::generation::worker::queue_generation_with_key;
 use crate::pipeline::visual::intelligent_match::{apply_best_match, MatchOptions};
 use crate::pipeline::visual::library::open_db;
 
@@ -56,11 +56,18 @@ pub fn set_enabled(enabled: bool) -> AppResult<DailyFeedSettings> {
         params![enabled as i64, chrono::Utc::now().to_rfc3339()],
     )
     .map_err(|e| AppError::Message(e.to_string()))?;
+    if enabled {
+        super::supervisor::request_wake();
+    }
     load_settings()
 }
 
 fn today() -> String {
     chrono::Utc::now().format("%Y-%m-%d").to_string()
+}
+
+pub fn bump_metric_public(field: &str) -> AppResult<()> {
+    bump_metric(field)
 }
 
 fn bump_metric(field: &str) -> AppResult<()> {
@@ -108,9 +115,19 @@ pub fn week_summary() -> AppResult<serde_json::Value> {
     }))
 }
 
+/// Supervisor path: respects `interval_minutes` and `last_cycle_at`.
+pub async fn run_daily_cycle() -> AppResult<serde_json::Value> {
+    run_daily_cycle_inner(false).await
+}
+
+/// Manual/UI path: skip interval wait once (still free_verified-only).
+pub async fn run_daily_cycle_forced() -> AppResult<serde_json::Value> {
+    run_daily_cycle_inner(true).await
+}
+
 /// One low-frequency cycle: find priority concept without coverage → match or mock generate.
 /// Never runs paid. Video jobs (queued) take priority — skip if video queue busy.
-pub async fn run_daily_cycle() -> AppResult<serde_json::Value> {
+async fn run_daily_cycle_inner(force: bool) -> AppResult<serde_json::Value> {
     let settings = load_settings()?;
     let _ = bump_metric("checks");
     if !settings.enabled {
@@ -120,6 +137,22 @@ pub async fn run_daily_cycle() -> AppResult<serde_json::Value> {
         if let Ok(until_dt) = chrono::DateTime::parse_from_rfc3339(until) {
             if until_dt > chrono::Utc::now() {
                 return Ok(serde_json::json!({ "ok": false, "reason": "paused", "until": until }));
+            }
+        }
+    }
+    // Interval gate (Codex CRIT-001) — supervisor must not hammer every idle tick
+    if !force {
+        if let Some(last) = &settings.last_cycle_at {
+            if let Ok(last_dt) = chrono::DateTime::parse_from_rfc3339(last) {
+                let next = last_dt.with_timezone(&chrono::Utc)
+                    + chrono::Duration::minutes(settings.interval_minutes.max(1) as i64);
+                if chrono::Utc::now() < next {
+                    return Ok(serde_json::json!({
+                        "ok": false,
+                        "reason": "interval",
+                        "nextAt": next.to_rfc3339(),
+                    }));
+                }
             }
         }
     }
@@ -143,11 +176,15 @@ pub async fn run_daily_cycle() -> AppResult<serde_json::Value> {
 
     let policy = CostPolicy::from_env();
     let provider = select_provider(policy.paid_providers_enabled);
-    if !provider.is_free_tier() && provider.name() != "mock" {
+    // Codex CRIT-006: only local mock or capability free_verified — never free_configured alone
+    let free_verified = provider.name() == "mock"
+        || capability_free_verified(provider.name()).unwrap_or(false);
+    if !free_verified {
         return Ok(serde_json::json!({
             "ok": false,
             "reason": "no_free_route",
-            "note": "No hay ruta gratuita/local verificada para daily feed"
+            "note": "Daily feed exige mock local o free_verified=true (no basta free_configured)",
+            "provider": provider.name(),
         }));
     }
     let _ = bump_metric("free_routes");
@@ -220,13 +257,15 @@ pub async fn run_daily_cycle() -> AppResult<serde_json::Value> {
         CostGate::Allow { .. } => {}
     }
 
-    let idem = format!("daily:{}:v1", concept.id);
+    // Versioned idempotency so reject can regenerate (Codex HIGH-001)
+    let version = next_daily_version(&concept.id)?;
+    let idem = format!("daily:{}:v{}", concept.id, version);
     need.coverage = NeedCoverage::Uncovered;
     match queue_generation_with_key(&mut need, true, &idem, "daily_feed") {
         Ok(Some(job_id)) => {
             let _ = bump_metric("attempts");
-            let processed = worker_tick(1).await.unwrap_or(0);
-            // reset consecutive failures on enqueue
+            super::supervisor::request_wake();
+            // reset consecutive failures on enqueue; supervisor processes the job
             let conn = open_db()?;
             let _ = conn.execute(
                 "UPDATE daily_feed_settings SET consecutive_failures=0, last_cycle_at=?1, updated_at=?1 WHERE id=1",
@@ -234,9 +273,8 @@ pub async fn run_daily_cycle() -> AppResult<serde_json::Value> {
             );
             Ok(serde_json::json!({
                 "ok": true,
-                "action": "generated",
+                "action": "queued",
                 "jobId": job_id,
-                "processed": processed,
                 "conceptId": concept.id,
             }))
         }
@@ -259,6 +297,32 @@ pub async fn run_daily_cycle() -> AppResult<serde_json::Value> {
     }
 }
 
+fn next_daily_version(concept_id: &str) -> AppResult<i64> {
+    let conn = open_db()?;
+    let n: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM generation_jobs WHERE origin='daily_feed' AND idempotency_key LIKE ?1",
+            params![format!("daily:{concept_id}:%")],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    Ok(n + 1)
+}
+
+fn capability_free_verified(provider: &str) -> AppResult<bool> {
+    let conn = open_db()?;
+    let ok: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM provider_capabilities
+             WHERE provider=?1 AND last_probe_ok=1 AND free_tier=1
+               AND COALESCE(notes,'') LIKE '%free_verified%'",
+            params![provider],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    Ok(ok > 0)
+}
+
 /// Integration test path: force one daily mock generation then reuse on video need.
 #[cfg(test)]
 mod tests {
@@ -279,15 +343,45 @@ mod tests {
 
         let _ = seed_economy_theme().unwrap();
         set_enabled(true).unwrap();
-        let r = run_daily_cycle().await.unwrap();
-        // may generate or reuse
-        assert!(r.get("ok").is_some());
+        let r = run_daily_cycle_forced().await.unwrap();
+        assert_eq!(r.get("ok").and_then(|v| v.as_bool()), Some(true));
 
-        // process any queue
-        let _ = worker_tick(3).await;
+        // process any queue (tests call worker_tick; production uses supervisor)
+        let _ = crate::pipeline::visual::generation::worker::worker_tick(3).await;
+
+        // Prefer reuse path on second cycle for same concept space
+        let r2 = run_daily_cycle_forced().await.unwrap();
+        assert!(r2.get("ok").is_some());
 
         set_library_root_override(None);
         std::env::remove_var("VIGILCUT_IMAGE_PROVIDER");
+        std::env::remove_var("VIGILCUT_OPPORTUNISTIC");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn daily_blocks_unverified_free_configured() {
+        let _lock = crate::pipeline::visual::library::lock_library_for_test();
+        let dir = std::env::temp_dir().join(format!("vc-daily-gate-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        set_library_root_override(Some(dir.clone()));
+        // OmniRoute selected only when base URL is set; free_configured must not pass daily
+        std::env::remove_var("VIGILCUT_IMAGE_PROVIDER");
+        std::env::set_var("OMNIROUTE_BASE_URL", "http://127.0.0.1:9/v1");
+        std::env::set_var("OMNIROUTE_FREE_TIER", "1");
+        std::env::set_var("VIGILCUT_OPPORTUNISTIC", "1");
+        let _ = seed_economy_theme().unwrap();
+        set_enabled(true).unwrap();
+        let r = run_daily_cycle_forced().await.unwrap();
+        assert_eq!(r.get("ok").and_then(|v| v.as_bool()), Some(false));
+        assert_eq!(
+            r.get("reason").and_then(|v| v.as_str()),
+            Some("no_free_route")
+        );
+        set_library_root_override(None);
+        std::env::remove_var("OMNIROUTE_BASE_URL");
+        std::env::remove_var("OMNIROUTE_FREE_TIER");
         std::env::remove_var("VIGILCUT_OPPORTUNISTIC");
         let _ = std::fs::remove_dir_all(dir);
     }

@@ -60,6 +60,11 @@ pub struct CandidateView {
     pub created_at: String,
     pub updated_at: String,
     pub file_exists: bool,
+    /// Human-readable concept/need labels for daily review (Codex MED-001).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub concept_title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub need_label: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -113,6 +118,13 @@ pub fn map_ui_state(
                 return ("queued".into(), "Esperando turno".into(), "cancel".into());
             }
             JobStatus::Running => {
+                if j.cancel_requested || j.stage == "cancelling" {
+                    return (
+                        "cancelling".into(),
+                        "Cancelando…".into(),
+                        "wait".into(),
+                    );
+                }
                 let label = match j.stage.as_str() {
                     "preparing" => "Preparando solicitud",
                     "waiting_provider" => "Esperando proveedor",
@@ -120,6 +132,7 @@ pub fn map_ui_state(
                     "downloading" => "Descargando",
                     "file_review" => "Revisando archivo",
                     "evaluating" => "Evaluando imagen",
+                    "cancelling" => "Cancelando…",
                     _ => "Generando imagen",
                 };
                 return ("processing".into(), label.into(), "cancel".into());
@@ -213,6 +226,7 @@ pub fn get_candidate(id: &str) -> AppResult<CandidateView> {
         .as_ref()
         .map(|p| std::path::Path::new(p).is_file())
         .unwrap_or(false);
+    enrich_candidate_labels(&mut c);
     Ok(c)
 }
 
@@ -240,7 +254,31 @@ fn row_candidate(r: &rusqlite::Row<'_>) -> rusqlite::Result<CandidateView> {
         created_at: r.get(19)?,
         updated_at: r.get(20)?,
         file_exists: false,
+        concept_title: None,
+        need_label: None,
     })
+}
+
+fn enrich_candidate_labels(c: &mut CandidateView) {
+    if let Some(nid) = &c.need_id {
+        if let Ok(n) = get_need(nid) {
+            c.need_label = Some(n.label.clone());
+            c.concept_title = Some(n.label);
+        }
+    }
+    if c.concept_title.is_none() {
+        // Fall back to job prompt prefix for daily rows without need linkage
+        if let Ok(conn) = open_db() {
+            if let Ok(prompt) = conn.query_row(
+                "SELECT prompt FROM generation_jobs WHERE id=?1",
+                params![c.job_id],
+                |r| r.get::<_, String>(0),
+            ) {
+                let short: String = prompt.chars().take(48).collect();
+                c.concept_title = Some(short);
+            }
+        }
+    }
 }
 
 pub fn latest_candidate_for_need(need_id: &str) -> AppResult<Option<CandidateView>> {
@@ -264,6 +302,7 @@ pub fn latest_candidate_for_need(need_id: &str) -> AppResult<Option<CandidateVie
             .as_ref()
             .map(|p| std::path::Path::new(p).is_file())
             .unwrap_or(false);
+        enrich_candidate_labels(&mut c);
         return Ok(Some(c));
     }
     Ok(None)
@@ -320,6 +359,19 @@ pub fn supervision_snapshot(project_key: &str) -> AppResult<SupervisionSnapshot>
     })
 }
 
+/// Snapshot without project needs — daily feed + global pending review (HIGH-008).
+pub fn supervision_snapshot_global() -> AppResult<SupervisionSnapshot> {
+    let pending = list_pending_candidates(50)?;
+    let daily = crate::pipeline::visual::generation::daily_feed::settings_json()?;
+    Ok(SupervisionSnapshot {
+        project_key: String::new(),
+        coverage: CoverageSummary::default(),
+        needs: Vec::new(),
+        pending_review: pending,
+        daily_feed: daily,
+    })
+}
+
 pub fn list_pending_candidates(limit: usize) -> AppResult<Vec<CandidateView>> {
     let conn = open_db()?;
     let limit = limit.clamp(1, 100) as i64;
@@ -344,20 +396,22 @@ pub fn list_pending_candidates(limit: usize) -> AppResult<Vec<CandidateView>> {
             .as_ref()
             .map(|p| std::path::Path::new(p).is_file())
             .unwrap_or(false);
+        enrich_candidate_labels(&mut c);
         out.push(c);
     }
     Ok(out)
 }
 
-/// Cancel job: queued → cancelled; running → cancel_requested.
+/// Cancel job: queued → cancelled; running → cancel_requested + in-process abort flag.
 pub fn cancel_job(job_id: &str) -> AppResult<JobView> {
     let mut job = get_job(job_id)?;
+    crate::pipeline::visual::generation::supervisor::cancel_registry::request_cancel(job_id);
     match JobStatus::parse(&job.status) {
         JobStatus::Queued => {
             let conn = open_db()?;
             let now = chrono::Utc::now().to_rfc3339();
             conn.execute(
-                "UPDATE generation_jobs SET status='cancelled', stage='cancelled', updated_at=?1 WHERE id=?2",
+                "UPDATE generation_jobs SET status='cancelled', stage='cancelled', cancel_requested=1, updated_at=?1 WHERE id=?2",
                 params![now, job_id],
             )
             .map_err(|e| AppError::Message(e.to_string()))?;
@@ -373,7 +427,7 @@ pub fn cancel_job(job_id: &str) -> AppResult<JobView> {
             let conn = open_db()?;
             let now = chrono::Utc::now().to_rfc3339();
             conn.execute(
-                "UPDATE generation_jobs SET cancel_requested=1, updated_at=?1 WHERE id=?2",
+                "UPDATE generation_jobs SET cancel_requested=1, stage='cancelling', updated_at=?1 WHERE id=?2",
                 params![now, job_id],
             )
             .map_err(|e| AppError::Message(e.to_string()))?;
@@ -404,22 +458,14 @@ pub fn set_job_stage(job_id: &str, stage: &str) -> AppResult<()> {
     Ok(())
 }
 
-/// New generation after reject — new idempotency version.
+/// New generation after reject — enqueue first, discard previous only on success (HIGH-007).
 pub fn queue_regenerate(need_id: &str) -> AppResult<String> {
     let mut need = get_need(need_id)?;
-    // Discard previous candidate
-    if let Ok(Some(c)) = latest_candidate_for_need(need_id) {
-        let conn = open_db()?;
-        let _ = conn.execute(
-            "UPDATE generated_candidates SET status='discarded', updated_at=?1 WHERE id=?2",
-            params![chrono::Utc::now().to_rfc3339(), c.id],
-        );
-    }
     let version = {
         let conn = open_db()?;
         let n: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM generation_jobs WHERE need_id = ?1",
+                "SELECT COALESCE(MAX(attempt_version),0) FROM generation_jobs WHERE need_id = ?1",
                 params![need_id],
                 |r| r.get(0),
             )
@@ -427,8 +473,30 @@ pub fn queue_regenerate(need_id: &str) -> AppResult<String> {
         n + 1
     };
     let idem = format!("need:{need_id}:v{version}");
-    super::worker::queue_generation_with_key(&mut need, false, &idem, "video_need")?
-        .ok_or_else(|| AppError::Invalid("No se pudo encolar (política de coste)".into()))
+    let job_id = super::worker::queue_generation_with_key(&mut need, false, &idem, "video_need")?
+        .ok_or_else(|| AppError::Invalid("No se pudo encolar (política de coste)".into()))?;
+
+    // Only after successful enqueue: mark previous review candidates discarded
+    if let Ok(Some(c)) = latest_candidate_for_need(need_id) {
+        if c.job_id != job_id {
+            let conn = open_db()?;
+            let _ = conn.execute(
+                "UPDATE generated_candidates SET status='discarded', updated_at=?1
+                 WHERE id=?2 AND status IN ('needs_human_review','automated_review','generated','rejected')",
+                params![chrono::Utc::now().to_rfc3339(), c.id],
+            );
+        }
+    }
+    // Bump attempt_version on new job
+    {
+        let conn = open_db()?;
+        let _ = conn.execute(
+            "UPDATE generation_jobs SET attempt_version=?1 WHERE id=?2",
+            params![version, job_id],
+        );
+    }
+    super::supervisor::request_wake();
+    Ok(job_id)
 }
 
 pub fn cost_label(kind: &str, free_verified: bool) -> String {
