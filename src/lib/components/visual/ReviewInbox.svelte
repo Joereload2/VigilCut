@@ -24,8 +24,12 @@
   let postRejectId = $state<string | null>(null);
   let postRejectNeedId = $state<string | null>(null);
 
-  const forVideo = $derived(candidates.filter((c) => c.origin !== "daily_feed"));
-  const forLibrary = $derived(candidates.filter((c) => c.origin === "daily_feed"));
+  const forVideo = $derived(
+    candidates.filter((c) => c.origin !== "daily_feed" && c.origin !== "library_request"),
+  );
+  const forLibrary = $derived(
+    candidates.filter((c) => c.origin === "daily_feed" || c.origin === "library_request"),
+  );
 
   function fileUrl(path?: string | null) {
     if (!path) return null;
