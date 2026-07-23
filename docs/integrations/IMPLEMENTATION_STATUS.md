@@ -5,14 +5,14 @@ This file records verified evidence after each isolated implementation gate.
 
 | Etapa | Estado | Commit | Pruebas | Real/Mock | Bloqueos |
 |-------|--------|--------|---------|-----------|----------|
-| Biblioteca independiente | verified | this phase commit | `diff --check`, check, build, fmt, clippy, 42 visual tests, and 7 smoke tests pass | Real SQLite/filesystem; mock image provider | None |
-| Worker/Scheduler | verified | this phase commit | Full gate passes; 44 visual and 7 smoke tests | Real SQLite supervisor; mock provider | None |
-| Dependabot | verified | this integration commit | YAML assertions and full gate pass | Real configuration; GitHub run not observed | Must reach default branch; security settings and labels require GitHub verification |
-| Codecov | experimental | this integration commit | 100 instrumented tests; 182547-byte report; full gate passes | Real local report; remote upload unobserved | Codecov onboarding/OIDC workflow must be observed |
-| CodeRabbit | blocked | this integration commit | Official schema keys and full gate pass | Real configuration; no review observed | GitHub App authorization required |
-| Pollinations | experimental | this integration commit | Safe catalogue probe 421 ms; 2 provider tests; full gate passes | Real catalogue; no image generation | API key, Pollen authorization, and per-model license verification required |
-| Supabase runtime | blocked | this integration commit | 2 sync/security tests, migration idempotency, 5 domain tests, full gate pass | Real local queue/client code; remote untested | Dev project, CLI, RLS hardening, credentials, advisors required |
-| Sentry ADR | deferred | this decision commit | ADR review and full local gate | Real privacy decision; no SDK | Product/privacy approval required before any opt-in implementation |
+| Biblioteca independiente | verified | `b517e59` | `diff --check`, check, build, fmt, clippy, 42 visual tests, and 7 smoke tests pass | Real SQLite/filesystem; mock image provider | None |
+| Worker/Scheduler | verified | `f5e8575` | Full gate passes; 44 visual and 7 smoke tests | Real SQLite supervisor; mock provider | None |
+| Dependabot | verified | `cc17b50` | YAML assertions and full gate pass | Real configuration; GitHub run not observed | Must reach default branch; security settings and labels require GitHub verification |
+| Codecov | experimental | `ec18547` | 100 instrumented tests; 182547-byte report; full gate passes | Real local report; remote upload unobserved | Codecov onboarding/OIDC workflow must be observed |
+| CodeRabbit | blocked | `9999e04` | Official schema keys and full gate pass | Real configuration; no review observed | GitHub App authorization required |
+| Pollinations | experimental | `b83d9e2` | Safe catalogue probe 421 ms; 2 provider tests; full gate passes | Real catalogue; no image generation | API key, Pollen authorization, and per-model license verification required |
+| Supabase runtime | blocked | `f9732d2` | 2 sync/security tests, migration idempotency, 5 domain tests, full gate pass | Real local queue/client code; remote untested | Dev project, CLI, RLS hardening, credentials, advisors required |
+| Sentry ADR | deferred | `e34fb2e` | ADR review and full local gate | Real privacy decision; no SDK | Product/privacy approval required before any opt-in implementation |
 
 ## Stage record: independent library
 
