@@ -46,8 +46,8 @@
       : 'border-surface-800 bg-surface-900/40 text-surface-400 hover:border-surface-600 hover:text-surface-200'}"
     onclick={() => onMode("visual")}
   >
-    <span class="text-sm font-bold">🖼 Visual</span>
-    <span class="text-[10px] leading-snug opacity-75">B-roll / biblioteca</span>
+    <span class="text-sm font-bold">🖼 Visuales</span>
+    <span class="text-[10px] leading-snug opacity-75">Este video · Biblioteca · Revisar</span>
   </button>
 
   <div class="mt-auto rounded-lg border border-surface-800/80 bg-surface-900/50 p-2 text-[9px] leading-relaxed text-surface-500">

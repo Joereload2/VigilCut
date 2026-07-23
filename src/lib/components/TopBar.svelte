@@ -50,7 +50,7 @@
     {hasProject ? "Otro" : "Abrir"}
   </button>
 
-  {#if hasProject && onMode}
+  {#if onMode}
     <div class="min-w-0 max-w-[min(100%,28rem)] flex-1 sm:flex-none">
       <ModeTabs {mode} onMode={onMode} />
     </div>

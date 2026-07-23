@@ -570,6 +570,24 @@ export async function visualImportImage(
   return invoke("visual_import_image", { path, title: title ?? null, tags, concepts });
 }
 
+export async function visualUpdateAsset(params: {
+  id: string;
+  title?: string | null;
+  tags?: string[] | null;
+  concepts?: string[] | null;
+  license?: string | null;
+  status?: string | null;
+}): Promise<unknown> {
+  return invoke("visual_update_asset", {
+    id: params.id,
+    title: params.title ?? null,
+    tags: params.tags ?? null,
+    concepts: params.concepts ?? null,
+    license: params.license ?? null,
+    status: params.status ?? null,
+  });
+}
+
 /** Import image and attach as accepted VisualPlan placement at a transcript moment. */
 export async function visualAttachImage(params: {
   mediaPath: string;

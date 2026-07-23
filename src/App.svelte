@@ -11,6 +11,7 @@
   import RightDock from "$lib/components/RightDock.svelte";
   import Timeline from "$lib/components/Timeline.svelte";
   import VisualPanel from "$lib/components/VisualPanel.svelte";
+  import VisualWorkspace from "$lib/components/visual/VisualWorkspace.svelte";
   import AuxTabShell from "$lib/components/AuxTabShell.svelte";
   import { projectStore } from "$lib/stores/project.svelte";
   import type { FfmpegStatus, JobProgress } from "$lib/types";
@@ -280,7 +281,20 @@
     onReanalyze={() => projectStore.reanalyze()}
   />
 
-  {#if !projectStore.mediaPath}
+  {#if workspaceTab === "visual" && !projectStore.mediaPath}
+    <!-- Visuales sin video: Biblioteca + Por revisar (UNIFIED_VISUALS_UX_SPEC) -->
+    <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-2">
+      <VisualWorkspace
+        onMessage={(m) => {
+          projectStore.statusMessage = m;
+          showToast(m);
+        }}
+        onError={(e) => {
+          projectStore.error = e;
+        }}
+      />
+    </div>
+  {:else if !projectStore.mediaPath}
     <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <Welcome
         onOpen={openFile}
@@ -294,7 +308,6 @@
         }}
         onGoVisual={() => {
           workspaceTab = "visual";
-          void openFile();
         }}
         onOpenPath={(path) => {
           void projectStore.openMedia(path);
