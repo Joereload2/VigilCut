@@ -12,7 +12,7 @@ This file records verified evidence after each isolated implementation gate.
 | CodeRabbit | blocked | this integration commit | Official schema keys and full gate pass | Real configuration; no review observed | GitHub App authorization required |
 | Pollinations | experimental | this integration commit | Safe catalogue probe 421 ms; 2 provider tests; full gate passes | Real catalogue; no image generation | API key, Pollen authorization, and per-model license verification required |
 | Supabase runtime | blocked | this integration commit | 2 sync/security tests, migration idempotency, 5 domain tests, full gate pass | Real local queue/client code; remote untested | Dev project, CLI, RLS hardening, credentials, advisors required |
-| Sentry ADR | pending | - | - | - | No SDK or telemetry authorized |
+| Sentry ADR | deferred | this decision commit | ADR review and full local gate | Real privacy decision; no SDK | Product/privacy approval required before any opt-in implementation |
 
 ## Stage record: independent library
 
@@ -138,3 +138,18 @@ This file records verified evidence after each isolated implementation gate.
   deleting local assets.
 - Final gate: check, build, fmt, clippy, 5 domain tests, 44 visual tests, and 7
   smoke tests passed on 2026-07-23.
+## Stage record: Sentry privacy decision
+
+- Implemented: an ADR defining telemetry disabled by default, explicit
+  revocable consent, a typed event allow-list, forbidden content, redaction,
+  retention, cost controls, and objective acceptance tests.
+- Tested: document review plus the complete local gate.
+- Real: enforceable implementation requirements and a decision not to install
+  the SDK.
+- Not implemented: Sentry SDK, DSN, event transport, analytics, replay,
+  profiling, screenshots, attachments, or active telemetry.
+- Dependencies added: none.
+- Cost observed: 0.
+- Authorization required: future product/privacy approval before implementing
+  any opt-in diagnostics.
+- Rollback: remove the ADR; no runtime behavior or data is affected.
