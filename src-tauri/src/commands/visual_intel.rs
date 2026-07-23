@@ -577,6 +577,29 @@ pub fn visual_library_preview_request(request_id: String) -> AppResult<serde_jso
 }
 
 #[tauri::command]
+pub fn visual_library_use_existing(
+    request_id: String,
+    asset_id: String,
+) -> AppResult<serde_json::Value> {
+    Ok(serde_json::to_value(
+        crate::pipeline::visual::library_requests::use_existing(&request_id, &asset_id)?,
+    )?)
+}
+#[tauri::command]
+pub fn visual_library_regenerate_request(
+    request_id: String,
+    prompt: String,
+    negative_prompt: String,
+) -> AppResult<serde_json::Value> {
+    Ok(serde_json::to_value(
+        crate::pipeline::visual::library_requests::regenerate(
+            &request_id,
+            prompt,
+            negative_prompt,
+        )?,
+    )?)
+}
+#[tauri::command]
 pub fn visual_library_list_requests(limit: Option<usize>) -> AppResult<serde_json::Value> {
     Ok(serde_json::to_value(
         crate::pipeline::visual::library_requests::list_requests(limit.unwrap_or(30))?,

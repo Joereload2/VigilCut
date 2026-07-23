@@ -148,6 +148,13 @@ pub fn import_image(
         )));
     }
 
+    let source_meta = std::fs::metadata(source)?;
+    const MAX_IMPORT_BYTES: u64 = 100 * 1024 * 1024;
+    if source_meta.len() > MAX_IMPORT_BYTES {
+        return Err(AppError::Invalid(
+            "La imagen supera el límite de 100 MB.".into(),
+        ));
+    }
     let sha = sha256_file(source)?;
     let conn = open_db()?;
     if let Ok(existing) = conn.query_row(
@@ -161,6 +168,11 @@ pub fn import_image(
     let img =
         image::open(source).map_err(|e| AppError::Invalid(format!("Imagen inválida: {e}")))?;
     let (w, h) = (img.width(), img.height());
+    if u64::from(w) * u64::from(h) > 80_000_000 {
+        return Err(AppError::Invalid(
+            "La imagen supera el límite de 80 megapíxeles.".into(),
+        ));
+    }
     let orientation = if w >= h { "landscape" } else { "portrait" };
     let file_size = std::fs::metadata(source)?.len();
     let id = uuid::Uuid::new_v4().to_string();
@@ -454,7 +466,7 @@ pub fn list_assets(query: Option<&str>, limit: usize) -> AppResult<Vec<MediaAsse
         let like = format!("%{}%", q.to_lowercase());
         let mut stmt = conn
             .prepare(&format!(
-                "{SELECT_ALL} WHERE lower(title) LIKE ?1 OR lower(tags) LIKE ?1 OR lower(concepts) LIKE ?1
+                "{SELECT_ALL} WHERE lower(title) LIKE ?1 OR lower(COALESCE(description,')) LIKE ?1 OR lower(tags) LIKE ?1 OR lower(concepts) LIKE ?1 OR lower(COALESCE(category,')) LIKE ?1 OR lower(COALESCE(source,')) LIKE ?1 OR lower(COALESCE(aspect_ratio,')) LIKE ?1
                  ORDER BY updated_at DESC LIMIT ?2"
             ))
             .map_err(|e| AppError::Message(e.to_string()))?;
@@ -717,6 +729,13 @@ pub fn import_image_detailed(
         return Err(AppError::Invalid(format!(
             "Formato no soportado: {ext}. Usa jpg/png/webp."
         )));
+    }
+    let source_meta = std::fs::metadata(source)?;
+    const MAX_IMPORT_BYTES: u64 = 100 * 1024 * 1024;
+    if source_meta.len() > MAX_IMPORT_BYTES {
+        return Err(AppError::Invalid(
+            "La imagen supera el límite de 100 MB.".into(),
+        ));
     }
     let sha = sha256_file(source)?;
     let conn = open_db()?;

@@ -889,8 +889,8 @@ pub fn import_library_image(
                 source: IngestionSource::ManualImport.as_str().into(),
                 ..Default::default()
             },
-            license_status: crate::models::visual::LicenseStatus::Owned,
-            commercial_use: Some(true),
+            license_status: crate::models::visual::LicenseStatus::Unknown,
+            commercial_use: None,
             qa_status: QaStatus::Approved,
             technical_score: None,
             semantic_score: None,

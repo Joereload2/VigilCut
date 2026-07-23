@@ -99,4 +99,24 @@ docs/visual-library/
 - Real Supabase cloud deploy from CI without secrets  
 - Paid provider spend  
 - Embedding index  
-- Automatic bulk generation of entire theme packs  
+- Automatic bulk generation of entire theme packs
+## Flujo manual independiente (2026-07-23)
+
+`LibraryImageRequest` es la semántica pública de la creación manual. Se persiste en `library_requests` y contiene origen, tema, concepto, descripción, prompts, formato, dimensiones, estilo, estado y fechas. No recibe `mediaPath`, `projectKey`, EDL, transcripción ni un `needId` de video.
+
+La implementación conserva temporalmente un `VisualNeed` privado como adaptador de compatibilidad hacia la cola residente. Este detalle no cruza el contrato Tauri de Biblioteca:
+
+```text
+LibraryImageRequest(searched)
+  -> LibraryService.search
+  -> existing AssetMatch[] OR explicit continue
+  -> generation_jobs (resident supervisor)
+  -> GeneratedCandidate(pending_review)
+  -> human approval
+  -> LibraryService::ingest_asset
+  -> MediaAsset
+```
+
+B-roll usa el mismo catálogo, pero mantiene reglas automáticas más estrictas: una licencia desconocida puede mostrarse en una búsqueda manual supervisada y no puede seleccionarse automáticamente para un video.
+
+SQLite v6 y v7 añaden columnas sin eliminar ni reinterpretar filas previas. La generación usa las dimensiones derivadas del formato y guarda el prompt negativo más la estrategia aplicada por el proveedor. La licencia y el uso comercial de una generación son `unknown`/`NULL` hasta contar con evidencia.

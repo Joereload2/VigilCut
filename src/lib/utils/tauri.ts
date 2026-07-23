@@ -497,15 +497,22 @@ export async function visualLibraryConceptCoverage(limit = 100): Promise<unknown
 }
 
 export type CreateLibraryRequestInput = {
+  origin: "manual" | "daily_feed" | "broll_missing" | "visual_video_missing" | "import";
+  theme: string;
   title: string;
+  description: string;
+  prompt: string;
+  negativePrompt: string;
   targetCount: number;
   desiredFormat: "16:9" | "9:16" | "1:1" | "4:5";
+  width: number;
+  height: number;
+  style: "photorealistic" | "illustration" | "infographic" | "cinematic" | "other";
   positiveContexts: string[];
   negativeContexts: string[];
   hardExclusions: string[];
   priority: number;
 };
-
 export async function visualLibraryCreateRequest(
   input: CreateLibraryRequestInput,
 ): Promise<unknown> {
@@ -520,6 +527,16 @@ export async function visualLibraryConfirmRequest(requestId: string): Promise<un
   return invoke("visual_library_confirm_request", { requestId });
 }
 
+export async function visualLibraryUseExisting(requestId: string, assetId: string): Promise<unknown> {
+  return invoke("visual_library_use_existing", { requestId, assetId });
+}
+export async function visualLibraryRegenerateRequest(
+  requestId: string,
+  prompt: string,
+  negativePrompt: string,
+): Promise<unknown> {
+  return invoke("visual_library_regenerate_request", { requestId, prompt, negativePrompt });
+}
 export async function visualLibraryListRequests(limit = 30): Promise<unknown> {
   return invoke("visual_library_list_requests", { limit });
 }

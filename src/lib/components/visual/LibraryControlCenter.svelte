@@ -1,508 +1,179 @@
 <script lang="ts">
+  import { convertFileSrc } from "@tauri-apps/api/core";
   import { onMount } from "svelte";
   import * as api from "$lib/utils/tauri";
 
   type Dashboard = {
-    inventory: {
-      totalAssets: number;
-      activeAssets: number;
-      missingAssets: number;
-      pendingCandidates: number;
-      managedBytes: number;
-    };
-    coverage: {
-      totalConcepts: number;
-      coveredConcepts: number;
-      uncoveredConcepts: number;
-    };
+    inventory: { activeAssets: number; pendingCandidates: number; managedBytes: number };
     activity: { queued: number; running: number; cancelling: number; failedToday: number };
-    provider: {
-      name: string;
-      configured: boolean;
-      reachable: boolean;
-      supportsImage: boolean;
-      freeVerified: boolean;
-      costKind: string;
-      error?: string | null;
-    };
-    limits: {
-      localDailyLimit: number;
-      localUsedToday: number;
-      localRemainingToday: number;
-      providerRemaining?: number | null;
-    };
-    canWork: boolean;
-    blockedReason?: string | null;
+    provider: { name: string; configured: boolean; reachable: boolean; supportsImage: boolean; freeVerified: boolean; costKind: string };
+    limits: { localDailyLimit: number; localUsedToday: number; localRemainingToday: number };
+    canWork: boolean; blockedReason?: string | null;
   };
-
   type RequestRow = {
-    id: string;
-    title: string;
-    targetCount: number;
-    desiredFormat: string;
-    status: string;
-    usefulAssets: number;
-    queued: number;
-    running: number;
-    awaitingReview: number;
-    failed: number;
-    deficit: number;
-    updatedAt: string;
+    id: string; origin: string; theme: string; title: string; description: string;
+    prompt: string; negativePrompt: string; desiredFormat: string; width: number; height: number;
+    style: string; status: string; queued: number; running: number; awaitingReview: number;
+    failed: number; updatedAt: string;
   };
-
-  type Preview = {
-    request: RequestRow;
-    canConfirm: boolean;
-    maxEnqueueable: number;
-    blockedReason?: string | null;
-    provider: string;
-  };
-
-  type ConceptRow = {
-    conceptId: string;
-    title: string;
-    usefulAssets: number;
-    pendingCandidates: number;
-    activeRequests: number;
-    requestedTarget: number;
-    state: "covered" | "partial" | "in_review" | "uncovered";
-  };
-  let { onReview = () => {} }: { onReview?: () => void } = $props();
+  type Match = { assetId: string; title: string; thumbnailPath?: string | null; score: number; reasons: string[] };
+  type Preview = { request: RequestRow; matches: Match[]; canConfirm: boolean; maxEnqueueable: number; blockedReason?: string | null; provider: string };
+  let { onReview = () => {}, onUseExisting = (_id: string) => {} }: { onReview?: () => void; onUseExisting?: (id: string) => void } = $props();
 
   let dashboard = $state<Dashboard | null>(null);
   let requests = $state<RequestRow[]>([]);
-  let concepts = $state<ConceptRow[]>([]);
   let loading = $state(true);
   let busy = $state(false);
-  let probing = $state(false);
   let error = $state("");
   let notice = $state("");
+  let formOpen = $state(false);
   let advanced = $state(false);
   let preview = $state<Preview | null>(null);
+  let theme = $state("");
+  let concept = $state("");
+  let description = $state("");
+  let prompt = $state("");
+  let negativePrompt = $state("");
+  let format = $state<"16:9" | "9:16" | "1:1" | "4:5">("16:9");
+  let style = $state<"photorealistic" | "illustration" | "infographic" | "cinematic" | "other">("photorealistic");
 
-  let instruction = $state("");
-  let targetCount = $state(3);
-  let desiredFormat = $state<"16:9" | "9:16" | "1:1" | "4:5">("16:9");
-  let positive = $state("");
-  let negative = $state("");
-  let exclusions = $state("logos, marcas de agua, texto ilegible");
-  let priority = $state(50);
-
-  const activityCount = $derived(
-    (dashboard?.activity.queued ?? 0) +
-      (dashboard?.activity.running ?? 0) +
-      (dashboard?.activity.cancelling ?? 0),
-  );
+  const activityCount = $derived((dashboard?.activity.queued ?? 0) + (dashboard?.activity.running ?? 0) + (dashboard?.activity.cancelling ?? 0));
   const providerLabel = $derived.by(() => {
     const p = dashboard?.provider;
-    if (!p) return "Comprobando";
-    if (p.name === "mock") return "Simulador local";
-    if (!p.configured) return "OmniRoute sin configurar";
+    if (!p) return "Comprobando proveedor";
+    if (p.name === "mock") return "Simulación local (mock) — no es IA real";
+    if (!p.configured) return "OmniRoute no configurado";
     if (!p.reachable) return "OmniRoute no disponible";
-    if (!p.supportsImage) return "Imágenes no verificadas";
-    if (p.freeVerified) return "OmniRoute listo · gratuito verificado";
-    return "OmniRoute configurado · coste no verificado";
+    if (!p.supportsImage) return "Generación de imágenes no verificada";
+    return p.freeVerified ? "OmniRoute · gratuidad verificada" : "OmniRoute · coste no verificado";
   });
 
-  function splitValues(value: string): string[] {
-    return value
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean);
+  function imageUrl(path?: string | null) {
+    if (!path) return null;
+    try { return convertFileSrc(path); } catch { return null; }
   }
 
-  function formatBytes(bytes: number): string {
-    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  function resetForm() {
+    theme = ""; concept = ""; description = ""; prompt = ""; negativePrompt = "";
+    format = "16:9"; style = "photorealistic"; preview = null; advanced = false;
   }
 
   async function refresh() {
-    loading = true;
-    error = "";
+    loading = true; error = "";
     try {
-      const [nextDashboard, nextRequests, nextConcepts] = await Promise.all([
-        api.visualLibraryDashboard(),
-        api.visualLibraryListRequests(30),
-        api.visualLibraryConceptCoverage(100),
+      const [nextDashboard, nextRequests] = await Promise.all([
+        api.visualLibraryDashboard(), api.visualLibraryListRequests(30),
       ]);
       dashboard = nextDashboard as Dashboard;
-      requests = Array.isArray(nextRequests) ? (nextRequests as RequestRow[]) : [];
-      concepts = Array.isArray(nextConcepts) ? (nextConcepts as ConceptRow[]) : [];
-    } catch (e) {
-      error = String(e);
-    } finally {
-      loading = false;
-    }
+      requests = Array.isArray(nextRequests) ? nextRequests as RequestRow[] : [];
+    } catch (e) { error = String(e); } finally { loading = false; }
   }
 
-  async function prepare() {
-    if (instruction.trim().length < 3) {
-      error = "Describe el concepto que quieres cubrir.";
-      return;
+  async function searchFirst() {
+    if (concept.trim().length < 2 || description.trim().length < 3) {
+      error = "Escribe un concepto y una descripción clara."; return;
     }
-    busy = true;
-    error = "";
-    notice = "";
+    busy = true; error = ""; notice = "";
     try {
-      preview = (await api.visualLibraryCreateRequest({
-        title: instruction.trim(),
-        targetCount,
-        desiredFormat,
-        positiveContexts: splitValues(positive),
-        negativeContexts: splitValues(negative),
-        hardExclusions: splitValues(exclusions),
-        priority,
-      })) as Preview;
+      preview = await api.visualLibraryCreateRequest({
+        origin: "manual", theme: theme.trim(), title: concept.trim(), description: description.trim(),
+        prompt: prompt.trim(), negativePrompt: negativePrompt.trim(), targetCount: 1,
+        desiredFormat: format, width: 0, height: 0, style,
+        positiveContexts: [], negativeContexts: [], hardExclusions: [], priority: 70,
+      }) as Preview;
+      prompt = preview.request.prompt;
+      negativePrompt = preview.request.negativePrompt;
       await refresh();
-    } catch (e) {
-      error = String(e);
-    } finally {
-      busy = false;
-    }
+    } catch (e) { error = String(e); } finally { busy = false; }
   }
 
-  async function confirmRequest(requestId: string) {
-    busy = true;
-    error = "";
-    notice = "";
+  async function useExisting(assetId: string) {
+    if (!preview) return;
+    busy = true; error = "";
     try {
-      const result = (await api.visualLibraryConfirmRequest(requestId)) as Preview;
-      preview = null;
-      instruction = "";
-      notice =
-        result.request.deficit === 0
-          ? "El concepto ya estaba cubierto."
-          : `Solicitud iniciada con ${result.request.queued + result.request.running} trabajo(s).`;
-      await refresh();
-    } catch (e) {
-      error = String(e);
-    } finally {
-      busy = false;
-    }
+      await api.visualLibraryUseExisting(preview.request.id, assetId);
+      notice = "Imagen existente seleccionada. No se creó ninguna generación.";
+      onUseExisting(assetId); formOpen = false; resetForm(); await refresh();
+    } catch (e) { error = String(e); } finally { busy = false; }
+  }
+  async function generate() {
+    if (!preview) return;
+    busy = true; error = "";
+    try {
+      if (prompt.trim() !== preview.request.prompt || negativePrompt.trim() !== preview.request.negativePrompt) {
+        await api.visualLibraryRegenerateRequest(preview.request.id, prompt, negativePrompt);
+      } else {
+        await api.visualLibraryConfirmRequest(preview.request.id);
+      }
+      notice = dashboard?.provider.name === "mock"
+        ? "Simulación en cola. El resultado deberá aprobarse antes de entrar a la Biblioteca."
+        : "Generación en cola. El resultado aparecerá en Por revisar.";
+      formOpen = false; resetForm(); await refresh();
+    } catch (e) { error = String(e); } finally { busy = false; }
   }
 
   async function cancelRequest(requestId: string) {
-    busy = true;
-    error = "";
-    try {
-      await api.visualLibraryCancelRequest(requestId);
-      notice = "Cancelación solicitada.";
-      await refresh();
-    } catch (e) {
-      error = String(e);
-    } finally {
-      busy = false;
-    }
-  }
-
-  async function probeProvider() {
-    probing = true;
-    error = "";
-    try {
-      await api.visualProbeImageProvider();
-      await refresh();
-    } catch (e) {
-      error = String(e);
-    } finally {
-      probing = false;
-    }
+    busy = true; error = "";
+    try { await api.visualLibraryCancelRequest(requestId); notice = "Cancelación solicitada."; await refresh(); }
+    catch (e) { error = String(e); } finally { busy = false; }
   }
 
   onMount(() => {
     void refresh();
-    const timer = window.setInterval(() => {
-      if (activityCount > 0) void refresh();
-    }, 3000);
+    const timer = window.setInterval(() => { if (activityCount > 0) void refresh(); }, 2500);
     return () => window.clearInterval(timer);
   });
 </script>
 
 <section class="space-y-3" aria-labelledby="library-control-title">
-  <div class="flex flex-wrap items-start justify-between gap-2">
+  <div class="flex flex-wrap items-center justify-between gap-2">
     <div>
-      <h2 id="library-control-title" class="text-sm font-semibold text-white">
-        Centro de control
-      </h2>
-      <p class="text-[11px] text-surface-400">
-        Amplía la biblioteca por conceptos, sin abrir un video.
-      </p>
+      <h2 id="library-control-title" class="text-sm font-semibold text-white">Crear y revisar imágenes</h2>
+      <p class="text-[11px] text-surface-400">Busca primero en tu Biblioteca y genera solo si necesitas una variante nueva.</p>
     </div>
-    <button
-      type="button"
-      class="btn-ghost text-[10px]"
-      disabled={loading}
-      onclick={() => void refresh()}
-      aria-label="Actualizar estado de la biblioteca"
-    >
-      {loading ? "Actualizando…" : "Actualizar"}
+    <button type="button" class="btn-primary px-4 py-2 text-xs" onclick={() => { resetForm(); formOpen = true; }}>
+      + Nueva imagen
     </button>
   </div>
 
   {#if dashboard}
-    <div class="grid grid-cols-2 gap-2 lg:grid-cols-4">
-      <div class="rounded-xl border border-surface-800 bg-surface-950/50 p-2">
-        <p class="text-[10px] text-surface-500">Imágenes alojadas</p>
-        <p class="mt-0.5 text-lg font-semibold text-white">{dashboard.inventory.activeAssets}</p>
-        <p class="text-[9px] text-surface-500">
-          {formatBytes(dashboard.inventory.managedBytes)}
-          {#if dashboard.inventory.missingAssets > 0}
-            · {dashboard.inventory.missingAssets} ausentes
-          {/if}
-        </p>
-      </div>
-      <div class="rounded-xl border border-surface-800 bg-surface-950/50 p-2">
-        <p class="text-[10px] text-surface-500">Conceptos cubiertos</p>
-        <p class="mt-0.5 text-lg font-semibold text-white">
-          {dashboard.coverage.coveredConcepts}/{dashboard.coverage.totalConcepts}
-        </p>
-        <p class="text-[9px] text-surface-500">
-          {dashboard.coverage.uncoveredConcepts} pendientes
-        </p>
-      </div>
-      <div class="rounded-xl border border-surface-800 bg-surface-950/50 p-2">
-        <p class="text-[10px] text-surface-500">Actividad</p>
-        <p class="mt-0.5 text-lg font-semibold {activityCount ? 'text-sky-300' : 'text-white'}">
-          {activityCount ? `${activityCount} en curso` : "En reposo"}
-        </p>
-        <p class="text-[9px] text-surface-500">
-          {dashboard.inventory.pendingCandidates} por revisar ·
-          {dashboard.activity.failedToday} fallidas hoy
-        </p>
-      </div>
-      <div class="rounded-xl border border-surface-800 bg-surface-950/50 p-2">
-        <p class="text-[10px] text-surface-500">Límite local de hoy</p>
-        <p class="mt-0.5 text-lg font-semibold text-white">
-          {dashboard.limits.localRemainingToday} disponibles
-        </p>
-        <p class="text-[9px] text-surface-500">
-          {dashboard.limits.localUsedToday}/{dashboard.limits.localDailyLimit} usados
-        </p>
-      </div>
+    <div class="grid gap-2 sm:grid-cols-3">
+      <div class="rounded-xl border border-surface-800 bg-surface-950/50 p-2.5"><p class="text-[10px] text-surface-500">Biblioteca</p><p class="text-lg font-semibold text-white">{dashboard.inventory.activeAssets} imágenes</p></div>
+      <button type="button" class="rounded-xl border border-amber-900/60 bg-amber-950/20 p-2.5 text-left" onclick={onReview}><p class="text-[10px] text-amber-300">Por revisar</p><p class="text-lg font-semibold text-white">{dashboard.inventory.pendingCandidates}</p></button>
+      <div class="rounded-xl border border-surface-800 bg-surface-950/50 p-2.5"><p class="text-[10px] text-surface-500">Actividad</p><p class="text-sm font-semibold text-white">{activityCount ? `${activityCount} en curso` : "En reposo"}</p><p class="text-[9px] text-surface-500">{dashboard.limits.localRemainingToday} generaciones disponibles hoy</p></div>
     </div>
-
-    <div
-      class="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-2.5 py-2
-        {dashboard.canWork
-          ? 'border-emerald-800/60 bg-emerald-950/30'
-          : 'border-amber-800/60 bg-amber-950/30'}"
-    >
-      <div class="min-w-0">
-        <p class="text-[11px] font-medium text-surface-100">{providerLabel}</p>
-        <p class="text-[9px] text-surface-400">
-          {dashboard.blockedReason ??
-            (dashboard.provider.name === "mock"
-              ? "Las imágenes generadas serán fixtures de prueba, no generación IA real."
-              : "Proveedor autorizado para nuevas solicitudes.")}
-        </p>
-      </div>
-      <button
-        type="button"
-        class="btn-secondary shrink-0 text-[10px]"
-        disabled={probing}
-        onclick={() => void probeProvider()}
-      >
-        {probing ? "Comprobando…" : "Comprobar OmniRoute"}
-      </button>
+    <div class="rounded-lg border {dashboard.canWork ? 'border-emerald-900/60 bg-emerald-950/20' : 'border-amber-900/60 bg-amber-950/20'} px-3 py-2">
+      <p class="text-[11px] font-medium text-surface-100">{providerLabel}</p>
+      {#if dashboard.blockedReason}<p class="text-[10px] text-amber-300">{dashboard.blockedReason}</p>{/if}
     </div>
   {/if}
 
-  <form
-    class="rounded-xl border border-violet-800/50 bg-violet-950/20 p-3"
-    onsubmit={(event) => {
-      event.preventDefault();
-      void prepare();
-    }}
-  >
-    <label for="library-instruction" class="block text-[11px] font-semibold text-white">
-      ¿Qué imágenes debe buscar o crear?
-    </label>
-    <div class="mt-1.5 flex flex-col gap-2 sm:flex-row">
-      <input
-        id="library-instruction"
-        class="min-w-0 flex-1 rounded-lg border border-surface-700 bg-surface-950 px-3 py-2 text-xs text-white placeholder:text-surface-600"
-        bind:value={instruction}
-        placeholder="Ej.: personas comparando precios en un supermercado"
-        maxlength="180"
-      />
-      <label class="flex items-center gap-1 text-[10px] text-surface-400">
-        Cantidad
-        <input
-          type="number"
-          class="w-14 rounded border border-surface-700 bg-surface-950 px-1.5 py-2 text-center text-xs text-white"
-          min="1"
-          max="10"
-          bind:value={targetCount}
-        />
-      </label>
-      <button type="submit" class="btn-primary px-4 text-xs" disabled={busy}>
-        {busy ? "Preparando…" : "Revisar solicitud"}
-      </button>
-    </div>
-    <button
-      type="button"
-      class="mt-2 text-[10px] text-violet-300 underline"
-      aria-expanded={advanced}
-      onclick={() => (advanced = !advanced)}
-    >
-      {advanced ? "Ocultar detalles" : "Añadir contexto y exclusiones"}
-    </button>
-    {#if advanced}
-      <div class="mt-2 grid gap-2 md:grid-cols-2">
-        <label class="text-[10px] text-surface-400">
-          Contexto deseado
-          <input
-            class="mt-1 w-full rounded border border-surface-700 bg-surface-950 px-2 py-1.5 text-[11px] text-white"
-            bind:value={positive}
-            placeholder="ciudad, luz natural"
-          />
-        </label>
-        <label class="text-[10px] text-surface-400">
-          Evitar
-          <input
-            class="mt-1 w-full rounded border border-surface-700 bg-surface-950 px-2 py-1.5 text-[11px] text-white"
-            bind:value={negative}
-            placeholder="lujo, celebridades"
-          />
-        </label>
-        <label class="text-[10px] text-surface-400 md:col-span-2">
-          Exclusiones obligatorias
-          <input
-            class="mt-1 w-full rounded border border-surface-700 bg-surface-950 px-2 py-1.5 text-[11px] text-white"
-            bind:value={exclusions}
-          />
-        </label>
-        <label class="text-[10px] text-surface-400">
-          Formato
-          <select
-            class="mt-1 w-full rounded border border-surface-700 bg-surface-950 px-2 py-1.5 text-[11px] text-white"
-            bind:value={desiredFormat}
-          >
-            <option value="16:9">Horizontal 16:9</option>
-            <option value="9:16">Vertical 9:16</option>
-            <option value="1:1">Cuadrada 1:1</option>
-            <option value="4:5">Retrato 4:5</option>
-          </select>
-        </label>
-        <label class="text-[10px] text-surface-400">
-          Prioridad: {priority}
-          <input class="mt-2 w-full" type="range" min="0" max="100" bind:value={priority} />
-        </label>
-      </div>
-    {/if}
-  </form>
+  {#if formOpen}
+    <div class="rounded-2xl border border-violet-700/60 bg-surface-950/95 p-4 shadow-xl" role="dialog" aria-modal="true" aria-labelledby="new-image-title" tabindex="-1">
+      <div class="flex items-start justify-between gap-3"><div><h3 id="new-image-title" class="text-base font-semibold text-white">Nueva imagen</h3><p class="text-[11px] text-surface-400">Una imagen · revisión humana obligatoria</p></div><button type="button" class="btn-ghost" onclick={() => { formOpen = false; resetForm(); }}>Cerrar</button></div>
+      <form class="mt-3 grid gap-3 sm:grid-cols-2" onsubmit={(e) => { e.preventDefault(); void searchFirst(); }}>
+        <label class="text-[11px] text-surface-300">Tema <input class="mt-1 w-full rounded-lg border border-surface-700 bg-surface-900 px-3 py-2" bind:value={theme} placeholder="Economía" /></label>
+        <label class="text-[11px] text-surface-300">Concepto o título <input class="mt-1 w-full rounded-lg border border-surface-700 bg-surface-900 px-3 py-2" bind:value={concept} placeholder="Inflación" required /></label>
+        <label class="text-[11px] text-surface-300 sm:col-span-2">Descripción de la imagen <textarea class="mt-1 min-h-20 w-full rounded-lg border border-surface-700 bg-surface-900 px-3 py-2" bind:value={description} placeholder="Familia comparando precios en un supermercado" required></textarea></label>
+        <label class="text-[11px] text-surface-300 sm:col-span-2">No debe contener <textarea class="mt-1 min-h-14 w-full rounded-lg border border-surface-700 bg-surface-900 px-3 py-2" bind:value={negativePrompt} placeholder="texto, logos, marcas, manos deformes"></textarea></label>
+        <label class="text-[11px] text-surface-300">Formato <select class="mt-1 w-full rounded-lg border border-surface-700 bg-surface-900 px-3 py-2" bind:value={format}><option value="16:9">Horizontal 16:9</option><option value="9:16">Vertical 9:16</option><option value="1:1">Cuadrado 1:1</option><option value="4:5">Retrato 4:5</option></select></label>
+        <label class="text-[11px] text-surface-300">Estilo <select class="mt-1 w-full rounded-lg border border-surface-700 bg-surface-900 px-3 py-2" bind:value={style}><option value="photorealistic">Fotografía realista</option><option value="illustration">Ilustración</option><option value="infographic">Infografía sin texto</option><option value="cinematic">Cinematográfico</option><option value="other">Otro</option></select></label>
+        <button type="button" class="text-left text-[10px] text-violet-300 underline sm:col-span-2" onclick={() => (advanced = !advanced)}>{advanced ? "Ocultar opciones avanzadas" : "Opciones avanzadas"}</button>
+        {#if advanced}<label class="text-[11px] text-surface-300 sm:col-span-2">Prompt positivo editable <textarea class="mt-1 min-h-20 w-full rounded-lg border border-surface-700 bg-surface-900 px-3 py-2" bind:value={prompt} placeholder="Se construirá automáticamente si queda vacío"></textarea></label>{/if}
+        <div class="flex justify-end gap-2 sm:col-span-2"><button type="button" class="btn-ghost" onclick={() => { formOpen = false; resetForm(); }}>Cancelar</button><button type="submit" class="btn-primary" disabled={busy}>{busy ? "Buscando…" : "Buscar coincidencias"}</button></div>
+      </form>
 
-  {#if preview}
-    <div class="rounded-xl border border-sky-700/60 bg-sky-950/30 p-3" role="status">
-      <div class="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <p class="text-xs font-semibold text-white">{preview.request.title}</p>
-          <p class="mt-1 text-[10px] text-surface-300">
-            Ya hay {preview.request.usefulAssets} útil(es); faltan {preview.request.deficit}.
-            Se pueden iniciar {preview.maxEnqueueable} ahora mediante {preview.provider}.
-          </p>
-          {#if preview.blockedReason}
-            <p class="mt-1 text-[10px] text-amber-300">{preview.blockedReason}</p>
-          {/if}
+      {#if preview}
+        <div class="mt-4 border-t border-surface-800 pt-3">
+          <h4 class="text-sm font-semibold text-white">Coincidencias encontradas</h4>
+          {#if preview.matches.length === 0}<p class="mt-2 rounded-lg border border-dashed border-surface-700 p-3 text-[11px] text-surface-400">No encontramos una imagen adecuada. Puedes continuar con la generación.</p>{:else}<div class="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{#each preview.matches as match (match.assetId)}{@const src = imageUrl(match.thumbnailPath)}<article class="overflow-hidden rounded-xl border border-surface-800 bg-surface-900">{#if src}<img src={src} alt={match.title} class="aspect-video w-full object-cover" />{/if}<div class="p-2"><p class="truncate text-[11px] font-medium text-white">{match.title}</p><p class="text-[9px] text-surface-400">Coincidencia {Math.round(match.score * 100)}%</p><button type="button" class="btn-secondary mt-2 text-[10px]" onclick={() => void useExisting(match.assetId)}>Usar esta imagen</button></div></article>{/each}</div>{/if}
+          <div class="mt-3 rounded-lg border border-surface-800 bg-surface-900/70 p-3"><label class="text-[10px] text-surface-400">Prompt positivo<textarea class="mt-1 min-h-20 w-full rounded border border-surface-700 bg-surface-950 p-2 text-[11px]" bind:value={prompt}></textarea></label><label class="mt-2 block text-[10px] text-surface-400">Prompt negativo<textarea class="mt-1 min-h-14 w-full rounded border border-surface-700 bg-surface-950 p-2 text-[11px]" bind:value={negativePrompt}></textarea></label><div class="mt-2 flex justify-end"><button type="button" class="btn-primary" disabled={busy || !preview.canConfirm} onclick={() => void generate()}>{dashboard?.provider.name === "mock" ? "Continuar con simulación" : "Continuar y generar"}</button></div>{#if preview.blockedReason}<p class="mt-2 text-[10px] text-amber-300">{preview.blockedReason}</p>{/if}</div>
         </div>
-        <div class="flex gap-1">
-          <button type="button" class="btn-ghost text-[10px]" onclick={() => (preview = null)}>
-            Ahora no
-          </button>
-          <button
-            type="button"
-            class="btn-primary text-[10px]"
-            disabled={!preview.canConfirm || busy || preview.request.deficit === 0}
-            onclick={() => void confirmRequest(preview!.request.id)}
-          >
-            Confirmar e iniciar
-          </button>
-        </div>
-      </div>
+      {/if}
     </div>
   {/if}
 
-  {#if error}
-    <p class="rounded-lg border border-red-800/60 bg-red-950/30 px-2 py-1.5 text-[10px] text-red-200" role="alert">
-      {error}
-    </p>
-  {:else if notice}
-    <p class="rounded-lg border border-emerald-800/60 bg-emerald-950/30 px-2 py-1.5 text-[10px] text-emerald-200" role="status">
-      {notice}
-    </p>
-  {/if}
+  {#if error}<p class="rounded-lg border border-red-800 bg-red-950/30 p-2 text-[11px] text-red-200" role="alert">{error}</p>{:else if notice}<p class="rounded-lg border border-emerald-800 bg-emerald-950/30 p-2 text-[11px] text-emerald-200" role="status">{notice}</p>{/if}
 
-  {#if requests.length > 0}
-    <div>
-      <div class="mb-1.5 flex items-center justify-between">
-        <h3 class="text-[11px] font-semibold text-surface-200">Solicitudes recientes</h3>
-        {#if (dashboard?.inventory.pendingCandidates ?? 0) > 0}
-          <button type="button" class="text-[10px] text-amber-300 underline" onclick={onReview}>
-            Revisar candidatos
-          </button>
-        {/if}
-      </div>
-      <div class="space-y-1.5">
-        {#each requests as request (request.id)}
-          <article class="flex flex-wrap items-center gap-2 rounded-lg border border-surface-800 bg-surface-950/40 px-2.5 py-2">
-            <div class="min-w-[180px] flex-1">
-              <p class="truncate text-[11px] font-medium text-surface-100">{request.title}</p>
-              <p class="text-[9px] text-surface-500">
-                {request.usefulAssets}/{request.targetCount} cubiertas · {request.desiredFormat}
-              </p>
-            </div>
-            <div class="text-right text-[9px] text-surface-400">
-              {#if request.running > 0}
-                <span class="text-sky-300">{request.running} generando</span>
-              {:else if request.queued > 0}
-                <span class="text-sky-300">{request.queued} en cola</span>
-              {:else if request.awaitingReview > 0}
-                <span class="text-amber-300">{request.awaitingReview} por revisar</span>
-              {:else if request.deficit === 0}
-                <span class="text-emerald-300">Cubierto</span>
-              {:else if request.failed > 0}
-                <span class="text-red-300">{request.failed} fallida(s)</span>
-              {:else}
-                <span>{request.status}</span>
-              {/if}
-            </div>
-            {#if request.queued + request.running > 0}
-              <button
-                type="button"
-                class="btn-ghost text-[9px]"
-                disabled={busy}
-                onclick={() => void cancelRequest(request.id)}
-              >
-                Cancelar
-              </button>
-            {/if}
-          </article>
-        {/each}
-      </div>
-    </div>
-  {/if}
-  <div>
-    <h3 class="mb-1.5 text-[11px] font-semibold text-surface-200">Cobertura por concepto</h3>
-    {#if concepts.length === 0}
-      <p class="rounded-lg border border-dashed border-surface-700 p-2 text-[10px] text-surface-500">
-        Aún no hay conceptos. Crea la primera solicitud para comenzar.
-      </p>
-    {:else}
-      <div class="flex flex-wrap gap-1.5">
-        {#each concepts as concept (concept.conceptId)}
-          <span
-            class="rounded-full border px-2 py-1 text-[9px]
-              {concept.state === 'covered'
-                ? 'border-emerald-800 bg-emerald-950/40 text-emerald-200'
-                : concept.state === 'in_review'
-                  ? 'border-amber-800 bg-amber-950/40 text-amber-200'
-                  : concept.state === 'partial'
-                    ? 'border-sky-800 bg-sky-950/40 text-sky-200'
-                    : 'border-surface-700 bg-surface-900 text-surface-400'}"
-            title={`${concept.usefulAssets} imágenes útiles · ${concept.pendingCandidates} por revisar`}
-          >
-            {concept.title} · {concept.usefulAssets}/{Math.max(concept.requestedTarget, 1)}
-          </span>
-        {/each}
-      </div>
-    {/if}
-  </div></section>
+  {#if requests.length > 0}<div><div class="mb-1 flex items-center justify-between"><h3 class="text-[11px] font-semibold text-surface-200">Solicitudes recientes</h3>{#if (dashboard?.inventory.pendingCandidates ?? 0) > 0}<button type="button" class="text-[10px] text-amber-300 underline" onclick={onReview}>Abrir Por revisar</button>{/if}</div><div class="space-y-1.5">{#each requests as request (request.id)}<article class="flex flex-wrap items-center gap-2 rounded-lg border border-surface-800 bg-surface-950/40 p-2.5"><div class="min-w-44 flex-1"><p class="text-[11px] font-medium text-white">{request.title}</p><p class="text-[9px] text-surface-500">{request.theme || "Sin tema"} · {request.desiredFormat} · {request.width}×{request.height}</p></div><p class="text-[10px] text-surface-300">{request.running ? "Generando" : request.queued ? "En cola" : request.awaitingReview ? "Por revisar" : request.failed ? "Fallida" : request.status}</p>{#if request.queued + request.running > 0}<button type="button" class="btn-ghost text-[9px]" disabled={busy} onclick={() => void cancelRequest(request.id)}>Cancelar</button>{/if}</article>{/each}</div></div>{:else if !loading}<div class="rounded-xl border border-dashed border-surface-700 p-5 text-center"><p class="text-sm text-surface-300">Aún no hay solicitudes.</p><p class="mt-1 text-[11px] text-surface-500">Crea una imagen sin abrir ningún video.</p></div>{/if}
+</section>

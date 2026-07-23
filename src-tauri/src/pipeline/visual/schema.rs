@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use crate::error::{AppError, AppResult};
 
-pub const SCHEMA_VERSION: i32 = 5;
+pub const SCHEMA_VERSION: i32 = 7;
 
 pub fn migrate(conn: &Connection) -> AppResult<()> {
     conn.execute_batch(
@@ -117,6 +117,68 @@ pub fn migrate(conn: &Connection) -> AppResult<()> {
         .map_err(|e| AppError::Message(e.to_string()))?;
     }
 
+    let ver: i32 = conn
+        .query_row(
+            "SELECT value FROM schema_meta WHERE key = 'version'",
+            [],
+            |r| {
+                let s: String = r.get(0)?;
+                Ok(s.parse::<i32>().unwrap_or(0))
+            },
+        )
+        .unwrap_or(5);
+
+    if ver < 6 {
+        migrate_v6(conn)?;
+        conn.execute(
+            "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('version','6')",
+            [],
+        )
+        .map_err(|e| AppError::Message(e.to_string()))?;
+    }
+
+    let ver: i32 = conn
+        .query_row(
+            "SELECT value FROM schema_meta WHERE key = 'version'",
+            [],
+            |r| {
+                let s: String = r.get(0)?;
+                Ok(s.parse::<i32>().unwrap_or(0))
+            },
+        )
+        .unwrap_or(6);
+    if ver < 7 {
+        let _ = conn.execute(
+            "ALTER TABLE library_requests ADD COLUMN selected_asset_id TEXT",
+            [],
+        );
+        conn.execute(
+            "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('version','7')",
+            [],
+        )
+        .map_err(|e| AppError::Message(e.to_string()))?;
+    }
+
+    Ok(())
+}
+
+/// Additive fields for video-independent manual image requests.
+fn migrate_v6(conn: &Connection) -> AppResult<()> {
+    let alters = [
+        "ALTER TABLE library_requests ADD COLUMN origin TEXT NOT NULL DEFAULT 'manual'",
+        "ALTER TABLE library_requests ADD COLUMN theme TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE library_requests ADD COLUMN description TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE library_requests ADD COLUMN prompt TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE library_requests ADD COLUMN negative_prompt TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE library_requests ADD COLUMN width INTEGER NOT NULL DEFAULT 1280",
+        "ALTER TABLE library_requests ADD COLUMN height INTEGER NOT NULL DEFAULT 720",
+        "ALTER TABLE library_requests ADD COLUMN style TEXT NOT NULL DEFAULT 'photorealistic'",
+        "ALTER TABLE library_requests ADD COLUMN searched_at TEXT",
+        "ALTER TABLE library_requests ADD COLUMN parent_request_id TEXT",
+    ];
+    for sql in alters {
+        let _ = conn.execute(sql, []);
+    }
     Ok(())
 }
 
@@ -436,7 +498,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(v, "5");
+        assert_eq!(v, SCHEMA_VERSION.to_string());
         let n: i64 = conn
             .query_row("SELECT COUNT(*) FROM visual_concepts", [], |r| r.get(0))
             .unwrap();

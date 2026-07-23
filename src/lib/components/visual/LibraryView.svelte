@@ -49,10 +49,13 @@
   let sort = $state<"recent" | "used" | "quality" | "title">("recent");
   let more = $state(false);
   let statusFilter = $state("all");
+  let themeFilter = $state("all");
+  let aspectFilter = $state("all");
+  const themes = $derived([...new Set(assets.map((a) => a.category).filter((v): v is string => !!v))].sort());
 
   const filtered = $derived(
     sortAssets(
-      filterAssets(assets, { quick, status: statusFilter }),
+      filterAssets(assets, { quick, status: statusFilter, theme: themeFilter, aspect: aspectFilter }),
       sort,
     ),
   );
@@ -84,7 +87,7 @@
 
   {#if section === "control"}
     <div class="min-h-0 flex-1 overflow-y-auto pr-1">
-      <LibraryControlCenter {onReview} />
+      <LibraryControlCenter {onReview} onUseExisting={(id) => { onSelect(id); section = "assets"; }} />
     </div>
   {:else}
   <div class="flex shrink-0 flex-wrap items-center gap-1">
@@ -124,6 +127,18 @@
         </select>
       </label>
       <label class="flex items-center gap-1 text-[10px] text-surface-400">
+        Tema
+        <select class="rounded border border-surface-700 bg-surface-950 px-1" bind:value={themeFilter}>
+          <option value="all">Todos</option>
+          {#each themes as theme}<option value={theme}>{theme}</option>{/each}
+        </select>
+      </label>
+      <label class="flex items-center gap-1 text-[10px] text-surface-400">
+        Formato
+        <select class="rounded border border-surface-700 bg-surface-950 px-1" bind:value={aspectFilter}>
+          <option value="all">Todos</option><option value="16:9">16:9</option><option value="9:16">9:16</option><option value="1:1">1:1</option><option value="4:5">4:5</option>
+        </select>
+      </label><label class="flex items-center gap-1 text-[10px] text-surface-400">
         Orden
         <select class="rounded border border-surface-700 bg-surface-950 px-1" bind:value={sort}>
           <option value="recent">Más recientes</option>

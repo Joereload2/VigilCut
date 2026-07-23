@@ -95,6 +95,7 @@ impl LocalVisualLibrary {
             min_score: query.min_score.unwrap_or_default(),
             prefer_aspect: query.desired_aspect,
             used_in_project: query.used_asset_ids,
+            allow_unknown_license: query.allow_unknown_license,
         };
         Ok(match_need(need, &opts))
     }
@@ -117,6 +118,7 @@ impl VisualLibrary for LocalVisualLibrary {
             min_score: query.min_score.unwrap_or_default(),
             prefer_aspect: query.desired_aspect.clone(),
             used_in_project: query.used_asset_ids.clone(),
+            allow_unknown_license: query.allow_unknown_license,
         };
         Ok(match_need(&synthetic, &opts)
             .into_iter()

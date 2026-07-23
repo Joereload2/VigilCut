@@ -267,12 +267,17 @@ pub async fn process_next_job() -> AppResult<Option<String>> {
 
     let provider = select_provider(policy.paid_providers_enabled);
     let _ = super::supervision::set_job_stage(&id, "waiting_provider");
+    let (width, height) = need_id
+        .as_ref()
+        .and_then(|need_id| get_need(need_id).ok())
+        .map(|need| crate::pipeline::visual::library_requests::dimensions_for(&need.desired_aspect))
+        .unwrap_or((1280, 720));
     let req = GenerationRequest {
         prompt: prompt.clone(),
         negative_prompt: negative.clone(),
         model: None,
-        width: 1280,
-        height: 720,
+        width,
+        height,
         seed: None,
         job_id: id.clone(),
     };
@@ -591,6 +596,7 @@ fn promote_candidate(
     let source = match origin {
         "daily_feed" => IngestionSource::DailyGeneration,
         "story_builder" => IngestionSource::StoryBuilderGeneration,
+        "library_request" => IngestionSource::ManualGeneration,
         _ => IngestionSource::BrollGeneration,
     };
     let conn = open_db()?;
@@ -610,22 +616,46 @@ fn promote_candidate(
         seed: None,
         generated_at: Some(chrono::Utc::now().to_rfc3339()),
     };
-    Ok(LibraryService::new()
-        .ingest_asset(AssetIngestionRequest {
-            source_path: path.to_path_buf(),
-            source,
-            title: Some(title),
-            tags: concepts.clone(),
-            concept_ids,
-            concept_terms: concepts,
-            provenance,
-            license_status: LicenseStatus::Unknown,
-            commercial_use: Some(false),
-            qa_status: QaStatus::Approved,
-            technical_score,
-            semantic_score,
-        })?
-        .asset)
+    let result = LibraryService::new().ingest_asset(AssetIngestionRequest {
+        source_path: path.to_path_buf(),
+        source,
+        title: Some(title),
+        tags: concepts.clone(),
+        concept_ids,
+        concept_terms: concepts,
+        provenance,
+        license_status: LicenseStatus::Unknown,
+        commercial_use: None,
+        qa_status: QaStatus::Approved,
+        technical_score,
+        semantic_score,
+    })?;
+    if origin == "library_request" {
+        if let Some(request_id) = need
+            .as_ref()
+            .and_then(|n| n.project_key.strip_prefix("library_request:"))
+        {
+            let conn = open_db()?;
+            if let Ok((theme, description, style, request_title)) = conn.query_row(
+                "SELECT theme, description, style, title FROM library_requests WHERE id=?1",
+                params![request_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                },
+            ) {
+                conn.execute(
+                    "UPDATE media_assets SET description=?1, category=?2, tags=?3, concepts=?4, updated_at=?5 WHERE id=?6",
+                    params![description, theme, serde_json::to_string(&vec![style, request_title.clone()]).unwrap_or_else(|_| "[]".into()), serde_json::to_string(&vec![request_title]).unwrap_or_else(|_| "[]".into()), chrono::Utc::now().to_rfc3339(), result.asset_id],
+                ).map_err(|e| AppError::Message(e.to_string()))?;
+            }
+        }
+    }
+    crate::pipeline::visual::library::get_asset_by_id(&result.asset_id)
 }
 /// Process up to `max_jobs` queued items.
 pub async fn worker_tick(max_jobs: u32) -> AppResult<u32> {

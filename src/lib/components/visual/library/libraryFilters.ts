@@ -17,7 +17,9 @@ export function normalizeTags(raw: string): string[] {
 export function isAiOrigin(a: MediaAsset): boolean {
   const src = (a.source ?? "").toLowerCase();
   if (src.startsWith("ai:") || src.includes("ai_generated")) return true;
-  if ((a.provenance?.source ?? "").toLowerCase() === "ai_generated") return true;
+  const provenance = (a.provenance?.source ?? "").toLowerCase();
+  if (provenance === "ai_generated" || provenance.endsWith("_generation")) return true;
+  if (a.provenance?.provider) return true;
   return false;
 }
 
@@ -40,11 +42,15 @@ export function filterAssets(
     quick: QuickFilter;
     status?: string;
     license?: LicenseStatus | "all";
+    theme?: string;
+    aspect?: string;
   },
 ): MediaAsset[] {
   return assets.filter((a) => {
     if (f.status && f.status !== "all" && a.status !== f.status) return false;
     if (f.license && f.license !== "all" && a.licenseStatus !== f.license) return false;
+    if (f.theme && f.theme !== "all" && (a.category ?? "") !== f.theme) return false;
+    if (f.aspect && f.aspect !== "all" && (a.aspectRatio ?? "") !== f.aspect) return false;
     switch (f.quick) {
       case "landscape":
         return a.orientation === "landscape" || a.width >= a.height;

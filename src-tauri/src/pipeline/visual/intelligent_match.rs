@@ -10,6 +10,8 @@ pub struct MatchOptions {
     pub prefer_aspect: Option<String>,
     /// Asset ids already used in this project (penalty)
     pub used_in_project: Vec<String>,
+    /// Manual library search may show unknown-license assets with an explicit warning.
+    pub allow_unknown_license: bool,
 }
 
 impl Default for MatchOptions {
@@ -18,6 +20,7 @@ impl Default for MatchOptions {
             min_score: 0.28,
             prefer_aspect: Some("16:9".into()),
             used_in_project: Vec::new(),
+            allow_unknown_license: false,
         }
     }
 }
@@ -38,7 +41,7 @@ pub fn match_need_against(
         if !matches!(asset.status, AssetStatus::Active) {
             continue;
         }
-        if matches!(asset.license_status, LicenseStatus::Unknown) {
+        if !opts.allow_unknown_license && matches!(asset.license_status, LicenseStatus::Unknown) {
             continue;
         }
         if let Some(parts) = score_asset(need, asset, opts) {

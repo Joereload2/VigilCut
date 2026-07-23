@@ -9,6 +9,7 @@ use crate::models::visual_intel::{AssetProvenance, QaStatus, VisualNeed};
 #[serde(rename_all = "snake_case")]
 pub enum IngestionSource {
     ManualImport,
+    ManualGeneration,
     FolderImport,
     DailyGeneration,
     BrollGeneration,
@@ -20,6 +21,7 @@ impl IngestionSource {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::ManualImport => "manual_import",
+            Self::ManualGeneration => "manual_generation",
             Self::FolderImport => "folder_import",
             Self::DailyGeneration => "daily_generation",
             Self::BrollGeneration => "broll_generation",
@@ -70,6 +72,8 @@ pub struct AssetQuery {
     pub used_asset_ids: Vec<String>,
     #[serde(default)]
     pub min_score: Option<f64>,
+    #[serde(default)]
+    pub allow_unknown_license: bool,
 }
 
 impl From<&VisualNeed> for AssetQuery {
@@ -82,6 +86,7 @@ impl From<&VisualNeed> for AssetQuery {
             desired_aspect: Some(need.desired_aspect.clone()),
             used_asset_ids: Vec::new(),
             min_score: None,
+            allow_unknown_license: false,
         }
     }
 }

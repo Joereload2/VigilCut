@@ -93,6 +93,10 @@ export interface CandidateView {
   conceptTitle?: string | null;
   needLabel?: string | null;
   themeTitle?: string | null;
+  requestId?: string | null;
+  prompt?: string | null;
+  negativePrompt?: string | null;
+  promptStrategy?: string | null;
 }
 
 export interface NeedSupervision {

@@ -107,6 +107,7 @@
     void loadAssets(null);
     void loadDaily();
     void refreshSnap();
+    if (libraryOnly) startPoll();
     return () => {
       if (pollTimer) clearInterval(pollTimer);
       if (searchTimer) clearTimeout(searchTimer);
@@ -175,7 +176,7 @@
         const still = needs.some((n) =>
           ["queued", "processing", "cancelling"].includes(n.uiState),
         );
-        if (!still && pollTimer) {
+        if (!still && !libraryOnly && pollTimer) {
           clearInterval(pollTimer);
           pollTimer = null;
         }
@@ -524,6 +525,24 @@
     }
   }
 
+  async function regenerateCandidate(c: CandidateView, prompt: string, negativePrompt: string) {
+    if (!c.requestId) {
+      if (c.needId) await regenerate(c.needId);
+      return;
+    }
+    busyId = c.id;
+    try {
+      await api.visualLibraryRegenerateRequest(c.requestId, prompt, negativePrompt);
+      await api.visualRejectCandidate(c.id, "Reemplazado por una regeneración");
+      onMessage("Regeneración en cola. La versión anterior conserva su trazabilidad.");
+      startPoll();
+      await refreshSnap();
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      busyId = null;
+    }
+  }
   async function saveAsset(
     id: string,
     patch: { title: string; tags: string[]; concepts: string[]; license: LicenseStatus },
@@ -602,9 +621,9 @@
     {#if !hideChrome}
       {#if !compact}
         <div>
-          <h1 class="text-sm font-semibold text-surface-50">Visuales</h1>
+          <h1 class="text-sm font-semibold text-surface-50">{libraryOnly ? "Biblioteca Visual" : "Visuales"}</h1>
           <p class="text-[10px] text-surface-500">
-            Encuentra, revisa y usa imágenes sin salir de tu proyecto.
+            {libraryOnly ? "Busca, importa, crea y administra imágenes sin abrir un video." : "Encuentra, revisa y usa imágenes sin salir de tu proyecto."}
           </p>
         </div>
       {:else}
@@ -619,33 +638,20 @@
         value={searchQ}
         oninput={(e) => onSearchInput((e.currentTarget as HTMLInputElement).value)}
       />
-      <div class="relative">
-        <button
-          type="button"
-          class="btn-primary text-[10px]"
-          disabled={busy || !api.isTauri()}
-          title={!api.isTauri() ? "Disponible en la aplicación de escritorio" : "Importar"}
-          onclick={() => (importMenu = !importMenu)}
-        >
-          Importar
-        </button>
-        {#if importMenu}
-          <div
-            class="absolute right-0 z-20 mt-1 w-40 rounded-lg border border-surface-700 bg-surface-900 py-1 shadow-xl"
-          >
-            <button
-              type="button"
-              class="block w-full px-3 py-1.5 text-left text-[11px] hover:bg-surface-800"
-              onclick={() => void pickerImport()}>Importar imagen</button
-            >
-            <button
-              type="button"
-              class="block w-full px-3 py-1.5 text-left text-[11px] hover:bg-surface-800"
-              onclick={() => void importFolder()}>Importar carpeta</button
-            >
-          </div>
-        {/if}
-      </div>
+      <button
+        type="button"
+        class="btn-primary text-[10px]"
+        disabled={busy || !api.isTauri()}
+        title={!api.isTauri() ? "Disponible en la aplicación de escritorio" : "Importar imagen"}
+        onclick={() => void pickerImport()}
+      >Importar</button>
+      <button
+        type="button"
+        class="btn-secondary text-[10px]"
+        disabled={busy || !api.isTauri()}
+        title={!api.isTauri() ? "Disponible en la aplicación de escritorio" : "Importar carpeta"}
+        onclick={() => void importFolder()}
+      >Importar carpeta</button>
       <div class="relative">
         <button
           type="button"
@@ -809,7 +815,7 @@
         {busyId}
         onApprove={(c, place) => void approve(c, place)}
         onReject={(c, reason) => void reject(c, reason)}
-        onRegenerate={(nid) => void regenerate(nid)}
+        onRegenerate={(candidate, prompt, negativePrompt) => void regenerateCandidate(candidate, prompt, negativePrompt)}
       />
     {/if}
   </div>

@@ -3,248 +3,55 @@
   import type { CandidateView } from "./imageGenTypes";
   import { costLabel, isMockProvider } from "./imageGenTypes";
 
-  let {
-    candidates = [] as CandidateView[],
-    busyId = null as string | null,
-    onApprove,
-    onReject,
-    onRegenerate = undefined as ((needId: string) => void) | undefined,
-  }: {
-    candidates?: CandidateView[];
-    busyId?: string | null;
+  let { candidates = [] as CandidateView[], busyId = null as string | null, onApprove, onReject, onRegenerate }: {
+    candidates?: CandidateView[]; busyId?: string | null;
     onApprove: (c: CandidateView, place: boolean) => void;
     onReject: (c: CandidateView, reason: string) => void;
-    onRegenerate?: ((needId: string) => void) | undefined;
+    onRegenerate: (c: CandidateView, prompt: string, negativePrompt: string) => void;
   } = $props();
-
   let rejectId = $state<string | null>(null);
   let rejectReason = $state("");
-  let postApproveId = $state<string | null>(null);
-  /** PM-004: after confirmed reject, offer regenerate */
-  let postRejectId = $state<string | null>(null);
-  let postRejectNeedId = $state<string | null>(null);
+  let editingId = $state<string | null>(null);
+  let editPrompt = $state("");
+  let editNegative = $state("");
 
-  const forVideo = $derived(
-    candidates.filter((c) => c.origin !== "daily_feed" && c.origin !== "library_request"),
-  );
-  const forLibrary = $derived(
-    candidates.filter((c) => c.origin === "daily_feed" || c.origin === "library_request"),
-  );
-
-  function fileUrl(path?: string | null) {
-    if (!path) return null;
-    try {
-      return convertFileSrc(path);
-    } catch {
-      return null;
-    }
+  function fileUrl(path?: string | null) { if (!path) return null; try { return convertFileSrc(path); } catch { return null; } }
+  function titleOf(c: CandidateView) { return c.conceptTitle || c.needLabel || "Imagen generada"; }
+  function originLabel(c: CandidateView) {
+    if (c.origin === "library_request") return "Solicitud manual de Biblioteca";
+    if (c.origin === "daily_feed") return "Alimentación diaria";
+    return "Solicitud de B-roll";
   }
-
-  function titleOf(c: CandidateView) {
-    return c.conceptTitle || c.needLabel || "Imagen generada";
-  }
-
-  async function confirmReject(c: CandidateView) {
-    const reason = rejectReason || "Rechazo humano";
-    await Promise.resolve(onReject(c, reason));
-    postRejectId = c.id;
-    postRejectNeedId = c.needId ?? null;
-    rejectId = null;
-    rejectReason = "";
-  }
+  function beginEdit(c: CandidateView) { editingId = c.id; editPrompt = c.prompt ?? ""; editNegative = c.negativePrompt ?? ""; }
 </script>
 
 <div class="flex min-h-0 flex-col gap-3 overflow-y-auto text-[11px]">
-  {#if candidates.length === 0 && !postRejectId}
-    <p class="rounded-lg border border-dashed border-surface-700 p-3 text-surface-400">
-      No hay imágenes pendientes de revisión.
-    </p>
-  {/if}
+  <div><h2 class="text-sm font-semibold text-white">Por revisar</h2><p class="text-[11px] text-surface-400">Nada entra en la Biblioteca hasta que lo apruebes.</p></div>
+  {#if candidates.length === 0}<div class="rounded-xl border border-dashed border-surface-700 p-6 text-center"><p class="text-sm text-surface-300">No hay imágenes pendientes.</p><p class="mt-1 text-[10px] text-surface-500">Las nuevas generaciones aparecerán aquí.</p></div>{/if}
 
-  {#if forVideo.length > 0}
-    <section>
-      <h3 class="mb-1 text-[10px] font-semibold uppercase tracking-wide text-surface-500">
-        Para este video
-      </h3>
-      <div class="space-y-2">
-        {#each forVideo as c (c.id)}
-          {@render card(c, true)}
-        {/each}
-      </div>
-    </section>
-  {/if}
-
-  {#if forLibrary.length > 0}
-    <section>
-      <h3 class="mb-1 text-[10px] font-semibold uppercase tracking-wide text-surface-500">
-        Para la Biblioteca
-      </h3>
-      <div class="space-y-2">
-        {#each forLibrary as c (c.id)}
-          {@render card(c, false)}
-        {/each}
-      </div>
-    </section>
-  {/if}
-
-  {#if postRejectId && !candidates.some((c) => c.id === postRejectId)}
-    <div class="rounded-lg border border-surface-700 bg-surface-900/60 p-2">
-      <p class="text-surface-200">¿Quieres generar otra versión?</p>
-      <div class="mt-2 flex flex-wrap gap-1">
-        {#if onRegenerate && postRejectNeedId}
-          <button
-            type="button"
-            class="btn-primary text-[10px]"
-            onclick={() => {
-              onRegenerate(postRejectNeedId!);
-              postRejectId = null;
-              postRejectNeedId = null;
-            }}>Generar otra</button
-          >
-        {/if}
-        <button
-          type="button"
-          class="btn-ghost text-[10px]"
-          onclick={() => {
-            postRejectId = null;
-            postRejectNeedId = null;
-          }}>Ahora no</button
-        >
-      </div>
-    </div>
-  {/if}
-</div>
-
-{#snippet card(c: CandidateView, allowPlace: boolean)}
-  {@const u = c.fileExists ? fileUrl(c.localPath) : null}
-  <div class="rounded-lg border border-surface-800 bg-surface-950/50 p-2">
-    <div class="flex gap-2">
-      <div class="h-20 w-28 shrink-0 overflow-hidden rounded bg-black/40 sm:h-24 sm:w-36">
-        {#if u}
-          <img src={u} alt={titleOf(c)} class="h-full w-full object-cover" />
-        {:else}
-          <div class="flex h-full items-center justify-center text-[9px] text-surface-500">—</div>
-        {/if}
-      </div>
-      <div class="min-w-0 flex-1">
-        <p class="font-medium text-surface-100">{titleOf(c)}</p>
-        {#if c.themeTitle}
-          <p class="text-[9px] text-violet-300">Tema: {c.themeTitle}</p>
-        {/if}
-        <p class="text-[10px] text-surface-500">
-          {c.origin === "daily_feed" ? "Biblioteca automática" : "Este video"}
-          · {costLabel(c.costKind, c.freeVerified)}
-        </p>
-        {#if isMockProvider(c.provider)}
-          <p class="text-[9px] text-violet-300">Simulación (mock) — no es IA</p>
-        {/if}
-        {#if c.qaReason}
-          <p class="mt-0.5 line-clamp-2 text-[10px] text-surface-400">{c.qaReason}</p>
-        {/if}
-      </div>
-    </div>
-
-    {#if postApproveId === c.id && allowPlace}
-      <div class="mt-2 flex flex-wrap gap-1">
-        <button
-          type="button"
-          class="btn-primary text-[10px]"
-          disabled={busyId === c.id}
-          onclick={() => onApprove(c, true)}>Usar ahora en el video</button
-        >
-        <button
-          type="button"
-          class="btn-secondary text-[10px]"
-          disabled={busyId === c.id}
-          onclick={() => {
-            postApproveId = null;
-            onApprove(c, false);
-          }}>Solo guardar en Biblioteca</button
-        >
-      </div>
-    {:else if postRejectId === c.id}
-      <div class="mt-2 space-y-1">
-        <p class="text-surface-200">¿Quieres generar otra versión?</p>
-        <div class="flex flex-wrap gap-1">
-          {#if onRegenerate && c.needId}
-            <button
-              type="button"
-              class="btn-primary text-[10px]"
-              disabled={busyId === c.id}
-              onclick={() => {
-                onRegenerate(c.needId!);
-                postRejectId = null;
-                postRejectNeedId = null;
-              }}>Generar otra</button
-            >
+  <div class="grid gap-3 xl:grid-cols-2">
+    {#each candidates as c (c.id)}
+      {@const src = c.fileExists ? fileUrl(c.localPath) : null}
+      <article class="overflow-hidden rounded-xl border border-surface-800 bg-surface-950/60">
+        <div class="aspect-video w-full bg-black/40">{#if src}<img src={src} alt={titleOf(c)} class="h-full w-full object-contain" />{:else}<div class="flex h-full items-center justify-center text-surface-500">Vista previa no disponible</div>{/if}</div>
+        <div class="space-y-2 p-3">
+          <div class="flex flex-wrap items-start justify-between gap-2"><div><h3 class="text-sm font-semibold text-white">{titleOf(c)}</h3><p class="text-[10px] text-violet-300">{c.themeTitle ? `Tema: ${c.themeTitle} · ` : ""}{originLabel(c)}</p></div>{#if isMockProvider(c.provider)}<span class="rounded-full bg-violet-900/60 px-2 py-1 text-[9px] font-semibold text-violet-100">SIMULACIÓN · NO ES IA REAL</span>{/if}</div>
+          <dl class="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px]"><div><dt class="text-surface-500">Formato</dt><dd>{c.width ?? "?"}×{c.height ?? "?"} · {c.mimeType ?? "—"}</dd></div><div><dt class="text-surface-500">Proveedor / modelo</dt><dd>{c.provider ?? "—"} · {c.model ?? "—"}</dd></div><div><dt class="text-surface-500">Coste</dt><dd>{costLabel(c.costKind, c.freeVerified)}</dd></div><div><dt class="text-surface-500">Fecha</dt><dd>{c.createdAt?.slice(0, 16) ?? "—"}</dd></div></dl>
+          {#if c.qaReason}<p class="rounded bg-surface-900 p-2 text-[10px] text-surface-300"><span class="text-surface-500">QA:</span> {c.qaReason}</p>{/if}
+          {#if editingId === c.id}
+            <label class="block text-[10px] text-surface-400">Prompt positivo<textarea class="mt-1 min-h-24 w-full rounded border border-surface-700 bg-surface-900 p-2 text-[11px]" bind:value={editPrompt}></textarea></label>
+            <label class="block text-[10px] text-surface-400">Prompt negativo<textarea class="mt-1 min-h-16 w-full rounded border border-surface-700 bg-surface-900 p-2 text-[11px]" bind:value={editNegative}></textarea></label>
+            <p class="text-[9px] text-surface-500">Estrategia del proveedor: {c.promptStrategy ?? "separado cuando está soportado"}</p>
+            <div class="flex gap-2"><button type="button" class="btn-primary text-[10px]" disabled={busyId === c.id || !c.requestId} onclick={() => onRegenerate(c, editPrompt, editNegative)}>Regenerar con cambios</button><button type="button" class="btn-ghost text-[10px]" onclick={() => (editingId = null)}>Cerrar</button></div>
+          {:else if rejectId === c.id}
+            <input class="w-full rounded border border-surface-700 bg-surface-900 p-2" bind:value={rejectReason} placeholder="Motivo del rechazo" />
+            <div class="flex gap-2"><button type="button" class="btn-primary text-[10px]" disabled={busyId === c.id} onclick={() => { onReject(c, rejectReason || "Rechazo humano"); rejectId = null; rejectReason = ""; }}>Confirmar rechazo</button><button type="button" class="btn-ghost text-[10px]" onclick={() => (rejectId = null)}>Volver</button></div>
+          {:else}
+            <details class="rounded border border-surface-800 bg-surface-900/60 p-2"><summary class="cursor-pointer text-[10px] text-violet-300">Ver prompts</summary><p class="mt-2 whitespace-pre-wrap text-[10px] text-surface-300"><span class="text-surface-500">Positivo:</span> {c.prompt || "—"}</p><p class="mt-2 whitespace-pre-wrap text-[10px] text-surface-300"><span class="text-surface-500">Negativo:</span> {c.negativePrompt || "—"}</p></details>
+            <div class="flex flex-wrap gap-2"><button type="button" class="btn-primary text-[10px]" disabled={busyId === c.id} onclick={() => onApprove(c, false)}>Aprobar para Biblioteca</button><button type="button" class="btn-secondary text-[10px]" disabled={busyId === c.id || !c.requestId} onclick={() => beginEdit(c)}>Editar y regenerar</button><button type="button" class="btn-secondary text-[10px]" disabled={busyId === c.id || !c.requestId} onclick={() => onRegenerate(c, c.prompt ?? "", c.negativePrompt ?? "")}>Regenerar</button><button type="button" class="btn-ghost text-[10px] text-red-300" disabled={busyId === c.id} onclick={() => { rejectId = c.id; rejectReason = ""; }}>Rechazar</button></div>
           {/if}
-          <button
-            type="button"
-            class="btn-ghost text-[10px]"
-            onclick={() => {
-              postRejectId = null;
-              postRejectNeedId = null;
-            }}>Ahora no</button
-          >
         </div>
-      </div>
-    {:else if rejectId === c.id}
-      <div class="mt-2 space-y-1">
-        <div class="flex flex-wrap gap-1">
-          {#each ["No representa el concepto", "Mala calidad", "Contexto incorrecto"] as chip}
-            <button
-              type="button"
-              class="rounded bg-surface-800 px-1.5 py-0.5 text-[9px]"
-              onclick={() => (rejectReason = chip)}>{chip}</button
-            >
-          {/each}
-        </div>
-        <input
-          class="w-full rounded border border-surface-700 bg-surface-950 px-2 py-1 text-[10px]"
-          placeholder="Motivo…"
-          bind:value={rejectReason}
-        />
-        <div class="flex gap-1">
-          <button
-            type="button"
-            class="btn-primary text-[10px]"
-            disabled={busyId === c.id}
-            onclick={() => void confirmReject(c)}>Confirmar rechazo</button
-          >
-          <button type="button" class="btn-ghost text-[10px]" onclick={() => (rejectId = null)}
-            >Cerrar</button
-          >
-        </div>
-      </div>
-    {:else}
-      <!-- PM-004: solo Aprobar y Rechazar (sin Generar otra aquí) -->
-      <div class="mt-2 flex flex-wrap gap-1">
-        <button
-          type="button"
-          class="btn-primary text-[10px]"
-          disabled={busyId === c.id}
-          onclick={() => {
-            if (allowPlace) {
-              postApproveId = c.id;
-            } else {
-              onApprove(c, false);
-            }
-          }}
-        >
-          Aprobar
-        </button>
-        <button
-          type="button"
-          class="btn-ghost text-[10px]"
-          disabled={busyId === c.id}
-          onclick={() => {
-            rejectId = c.id;
-            rejectReason = "";
-          }}
-        >
-          Rechazar
-        </button>
-      </div>
-    {/if}
+      </article>
+    {/each}
   </div>
-{/snippet}
+</div>

@@ -86,6 +86,15 @@ Carpetas de app: `%APPDATA%\VigilCut\inbox`, `outbox` y `library` (metadatos SQL
 
 ---
 
+## Biblioteca Visual independiente
+
+La pestaña **Biblioteca** funciona sin abrir un video. Permite buscar, importar una imagen o carpeta y crear una imagen mediante `+ Nueva imagen`. La creación siempre busca primero en SQLite, muestra alternativas reutilizables y, si el usuario continúa, encola una sola generación para revisión humana.
+
+Con el proveedor mock la interfaz muestra **SIMULACIÓN · NO ES IA REAL**. Ningún candidato generado entra en la Biblioteca antes de aprobarse. OmniRoute es opcional, los proveedores pagados están desactivados por defecto y Supabase no es necesario para el flujo local.
+
+Recorrido: `Biblioteca → Nueva imagen → Buscar coincidencias → Generar → Por revisar → Aprobar para Biblioteca`.
+
+---
 ## Arquitectura (resumen)
 
 ```

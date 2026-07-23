@@ -67,6 +67,10 @@ pub struct CandidateView {
     pub need_label: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub theme_title: Option<String>,
+    pub request_id: Option<String>,
+    pub prompt: Option<String>,
+    pub negative_prompt: Option<String>,
+    pub prompt_strategy: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -255,13 +259,50 @@ fn row_candidate(r: &rusqlite::Row<'_>) -> rusqlite::Result<CandidateView> {
         concept_title: None,
         need_label: None,
         theme_title: None,
+        request_id: None,
+        prompt: None,
+        negative_prompt: None,
+        prompt_strategy: None,
     })
 }
 
 fn enrich_candidate_labels(c: &mut CandidateView) {
+    if let Ok(conn) = open_db() {
+        if let Ok((prompt, negative, strategy)) = conn.query_row(
+            "SELECT prompt, negative_prompt, prompt_strategy FROM generation_jobs WHERE id=?1",
+            params![c.job_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        ) {
+            c.prompt = Some(prompt);
+            c.negative_prompt = Some(negative);
+            c.prompt_strategy = strategy;
+        }
+    }
     if let Some(nid) = &c.need_id {
         if let Ok(n) = get_need(nid) {
             c.need_label = Some(n.label.clone());
+            c.request_id = n
+                .project_key
+                .strip_prefix("library_request:")
+                .map(str::to_string);
+            if let Some(request_id) = &c.request_id {
+                if let Ok(conn) = open_db() {
+                    c.theme_title = conn
+                        .query_row(
+                            "SELECT NULLIF(theme, '') FROM library_requests WHERE id=?1",
+                            params![request_id],
+                            |row| row.get::<_, Option<String>>(0),
+                        )
+                        .ok()
+                        .flatten();
+                }
+            }
             if let Some(concept_id) = n.concept_id {
                 if let Ok(conn) = open_db() {
                     if let Ok((concept, theme)) = conn.query_row(

@@ -150,6 +150,8 @@ pub fn run() {
             commands::visual_intel::visual_library_preview_request,
             commands::visual_intel::visual_library_confirm_request,
             commands::visual_intel::visual_library_list_requests,
+            commands::visual_intel::visual_library_regenerate_request,
+            commands::visual_intel::visual_library_use_existing,
             commands::visual_intel::visual_library_cancel_request,
             commands::visual_intel::visual_match_need,
             commands::visual_intel::visual_supervision,
