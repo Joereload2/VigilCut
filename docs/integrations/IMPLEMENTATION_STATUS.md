@@ -10,7 +10,7 @@ This file records verified evidence after each isolated implementation gate.
 | Dependabot | verified | this integration commit | YAML assertions and full gate pass | Real configuration; GitHub run not observed | Must reach default branch; security settings and labels require GitHub verification |
 | Codecov | experimental | this integration commit | 100 instrumented tests; 182547-byte report; full gate passes | Real local report; remote upload unobserved | Codecov onboarding/OIDC workflow must be observed |
 | CodeRabbit | blocked | this integration commit | Official schema keys and full gate pass | Real configuration; no review observed | GitHub App authorization required |
-| Pollinations | pending | - | - | - | Terms, license, free route, and network probe required |
+| Pollinations | experimental | this integration commit | Safe catalogue probe 421 ms; 2 provider tests; full gate passes | Real catalogue; no image generation | API key, Pollen authorization, and per-model license verification required |
 | Supabase runtime | pending | - | - | - | Development credentials required for real verification |
 | Sentry ADR | pending | - | - | - | No SDK or telemetry authorized |
 
@@ -97,3 +97,23 @@ This file records verified evidence after each isolated implementation gate.
 - Rollback: remove `.coderabbit.yaml` and revoke the App separately if installed.
 - Final gate: check, build, fmt, clippy, 44 visual tests, and 7 smoke tests
   passed on 2026-07-23.
+## Stage record: Pollinations
+
+- Implemented: library-owned experimental adapter over the existing hardened
+  OpenAI-compatible transport, fixed official host, explicit provider identity,
+  configuration, metrics probe, and two independent cost gates.
+- Tested: public catalogue probe found `flux` in 421 ms; disabled-route and
+  paid-before-network tests pass; complete local gate passed.
+- Real: public catalogue call only.
+- Not run: image generation, because no credential or Pollen spend was
+  authorized and commercial rights vary by model.
+- Truth: `free_verified=false`, `cost_kind=paid`, license unknown,
+  commercial_use unverified, daily feed ineligible.
+- Dependencies added: none.
+- Cost observed: 0 images and 0 observed monetary spend.
+- Authorization required: Pollinations key, explicit permission for up to three
+  metered requests, and model-license approval.
+- Rollback: remove provider variant/module and environment entries; retain all
+  independent assets.
+- Final gate: check, build, fmt, clippy, 44 visual tests, 2 Pollinations tests,
+  and 7 smoke tests passed on 2026-07-23.

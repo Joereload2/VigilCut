@@ -501,6 +501,8 @@ pub async fn visual_probe_image_provider() -> AppResult<serde_json::Value> {
                 last_error, latency_ms, notes
             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)
             ON CONFLICT(provider, model) DO UPDATE SET
+                supports_image=excluded.supports_image,
+                free_tier=excluded.free_tier,
                 last_probe_ok=excluded.last_probe_ok,
                 last_probe_at=excluded.last_probe_at,
                 last_error=excluded.last_error,

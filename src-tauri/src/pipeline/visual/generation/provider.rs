@@ -11,6 +11,7 @@ pub enum ProviderKind {
     Mock,
     OmniRoute,
     Local,
+    Pollinations,
 }
 
 #[derive(Debug, Clone)]
@@ -126,6 +127,9 @@ pub struct ProviderProbe {
 pub enum ImageProvider {
     Mock(super::mock::MockImageProvider),
     OmniRoute(super::omniroute::OmniRouteImageProvider),
+    Pollinations(
+        crate::visual_library::infrastructure::providers::pollinations::PollinationsImageProvider,
+    ),
 }
 
 impl ImageProvider {
@@ -133,6 +137,7 @@ impl ImageProvider {
         match self {
             Self::Mock(_) => ProviderKind::Mock,
             Self::OmniRoute(_) => ProviderKind::OmniRoute,
+            Self::Pollinations(_) => ProviderKind::Pollinations,
         }
     }
 
@@ -140,6 +145,7 @@ impl ImageProvider {
         match self {
             Self::Mock(p) => p.name(),
             Self::OmniRoute(p) => p.name(),
+            Self::Pollinations(p) => p.name(),
         }
     }
 
@@ -147,6 +153,7 @@ impl ImageProvider {
         match self {
             Self::Mock(p) => p.is_free_tier(),
             Self::OmniRoute(p) => p.is_free_tier(),
+            Self::Pollinations(p) => p.is_free_tier(),
         }
     }
 
@@ -157,6 +164,7 @@ impl ImageProvider {
         match self {
             Self::Mock(p) => p.generate(req).await,
             Self::OmniRoute(p) => p.generate(req).await,
+            Self::Pollinations(p) => p.generate(req).await,
         }
     }
 
@@ -164,15 +172,20 @@ impl ImageProvider {
         match self {
             Self::Mock(p) => p.probe().await,
             Self::OmniRoute(p) => p.probe().await,
+            Self::Pollinations(p) => p.probe().await,
         }
     }
 }
 
 /// Select provider: mock if forced or OmniRoute not configured.
 pub fn select_provider(_allow_paid: bool) -> ImageProvider {
-    let force_mock = std::env::var("VIGILCUT_IMAGE_PROVIDER")
-        .map(|s| s.eq_ignore_ascii_case("mock"))
-        .unwrap_or(false);
+    let selected = std::env::var("VIGILCUT_IMAGE_PROVIDER").unwrap_or_default();
+    if selected.eq_ignore_ascii_case("pollinations") {
+        return ImageProvider::Pollinations(
+            crate::visual_library::infrastructure::providers::pollinations::PollinationsImageProvider::from_env(),
+        );
+    }
+    let force_mock = selected.eq_ignore_ascii_case("mock");
     let base = std::env::var("OMNIROUTE_BASE_URL").ok();
     let has_omni = base.as_ref().map(|b| !b.is_empty()).unwrap_or(false);
     if force_mock || !has_omni {
