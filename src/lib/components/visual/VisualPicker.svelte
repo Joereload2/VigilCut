@@ -13,8 +13,9 @@
     pendingImportId = null as string | null,
     onClose,
     onUseAsset,
-    onImport,
-    onGenerate,
+
+    onOpenLibrary,
+
     onSkip,
   }: {
     open?: boolean;
@@ -25,8 +26,9 @@
     pendingImportId?: string | null;
     onClose: () => void;
     onUseAsset: (assetId: string) => void;
-    onImport: () => void;
-    onGenerate: () => void;
+
+    onOpenLibrary: () => void;
+
     onSkip: () => void;
   } = $props();
 
@@ -132,11 +134,8 @@
         {/if}
 
         <div class="flex flex-col gap-1.5 border-t border-surface-800 pt-2">
-          <button type="button" class="btn-secondary w-full text-[11px]" disabled={busy} onclick={onImport}>
-            Importar imagen
-          </button>
-          <button type="button" class="btn-primary w-full text-[11px]" disabled={busy} onclick={onGenerate}>
-            Generar una nueva
+          <button type="button" class="btn-primary w-full text-[11px]" disabled={busy} onclick={onOpenLibrary}>
+            Abrir Biblioteca
           </button>
         </div>
 

@@ -370,7 +370,7 @@
     }
   }
 
-  async function pickerImport() {
+  async function importImage() {
     if (!api.isTauri()) {
       onError("Disponible en la aplicación de escritorio");
       return;
@@ -432,22 +432,6 @@
     } finally {
       busy = false;
       importMenu = false;
-    }
-  }
-
-  async function pickerGenerate() {
-    if (!pickerNeed) return;
-    busy = true;
-    try {
-      await api.visualGenerateNeed(pickerNeed.need.id);
-      onMessage("En cola — se generará en segundo plano");
-      pickerOpen = false;
-      startPoll();
-      await refreshSnap();
-    } catch (e) {
-      onError(String(e));
-    } finally {
-      busy = false;
     }
   }
 
@@ -643,7 +627,7 @@
         class="btn-primary text-[10px]"
         disabled={busy || !api.isTauri()}
         title={!api.isTauri() ? "Disponible en la aplicación de escritorio" : "Importar imagen"}
-        onclick={() => void pickerImport()}
+        onclick={() => void importImage()}
       >Importar</button>
       <button
         type="button"
@@ -835,7 +819,6 @@
     // PM-005: cerrar sin Usar deja plan intacto; asset ya en biblioteca
   }}
   onUseAsset={(id) => void useAssetOnNeed(id)}
-  onImport={() => void pickerImport()}
-  onGenerate={() => void pickerGenerate()}
+  onOpenLibrary={() => { pickerOpen = false; setView("library"); }}
   onSkip={() => void pickerSkip()}
 />
