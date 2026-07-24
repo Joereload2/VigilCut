@@ -46,7 +46,7 @@
       : 'text-surface-400 hover:bg-surface-800 hover:text-surface-200'}"
     onclick={() => onMode("visual")}
   >
-    Visual/B-roll
+    B-roll
   </button>
   <button
     type="button"

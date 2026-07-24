@@ -120,8 +120,11 @@
       }
     };
     window.addEventListener("keydown", onKey);
+    const openLibrary = () => (workspaceTab = "library");
+    window.addEventListener("vigilcut:open-library", openLibrary);
     return () => {
       window.removeEventListener("keydown", onKey);
+      window.removeEventListener("vigilcut:open-library", openLibrary);
       unlistenProgress?.();
       if (toastTimer) clearTimeout(toastTimer);
     };

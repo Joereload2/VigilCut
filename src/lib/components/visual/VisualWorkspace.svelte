@@ -27,6 +27,7 @@
     compact = false,
     hideChrome = false,
     libraryOnly = false,
+    brollOnly = false,
     onMessage = (_m: string) => {},
     onError = (_e: string) => {},
     onPlanUpdated = (_p: unknown) => {},
@@ -40,6 +41,8 @@
     hideChrome?: boolean;
     /** Biblioteca independiente: oculta y bloquea funciones de B-roll. */
     libraryOnly?: boolean;
+    /** true = B-roll consumes approved assets; no catalog/admin tabs */
+    brollOnly?: boolean;
     onMessage?: (m: string) => void;
     onError?: (e: string) => void;
     onPlanUpdated?: (p: unknown) => void;
@@ -89,9 +92,9 @@
   $effect(() => {
     if (!didInitView) {
       didInitView = true;
-      view = libraryOnly ? "library" : hasVideo ? "video" : "library";
+      view = libraryOnly ? "library" : brollOnly ? "video" : hasVideo ? "video" : "library";
       onViewChange(view);
-    } else if ((libraryOnly || !hasVideo) && view === "video") {
+    } else if ((libraryOnly || brollOnly || !hasVideo) && view === "video") {
       view = "library";
       onViewChange(view);
     }
@@ -99,6 +102,7 @@
 
   function setView(v: VisualsViewId) {
     if (v === "video" && (libraryOnly || !hasVideo)) return;
+    if (brollOnly && v !== "video") return;
     view = v;
     onViewChange(v);
   }
@@ -605,9 +609,9 @@
     {#if !hideChrome}
       {#if !compact}
         <div>
-          <h1 class="text-sm font-semibold text-surface-50">{libraryOnly ? "Biblioteca Visual" : "Visuales"}</h1>
+          <h1 class="text-sm font-semibold text-surface-50">{libraryOnly ? "Biblioteca Visual" : brollOnly ? "B-roll" : "Visuales"}</h1>
           <p class="text-[10px] text-surface-500">
-            {libraryOnly ? "Busca, importa, crea y administra imágenes sin abrir un video." : "Encuentra, revisa y usa imágenes sin salir de tu proyecto."}
+            {libraryOnly ? "Busca, importa, crea y administra imágenes sin abrir un video." : brollOnly ? "Busca y coloca assets aprobados en este video." : "Encuentra, revisa y usa imágenes sin salir de tu proyecto."}
           </p>
         </div>
       {:else}
@@ -695,6 +699,7 @@
           Este video
         </button>
         {/if}
+        {#if !brollOnly}
         <button
           type="button"
           role="tab"
@@ -718,6 +723,7 @@
             <span class="ml-0.5 rounded-full bg-black/30 px-1 text-[9px]">{pending.length}</span>
           {/if}
         </button>
+        {/if}
       </div>
     {/if}
   </header>
@@ -819,6 +825,6 @@
     // PM-005: cerrar sin Usar deja plan intacto; asset ya en biblioteca
   }}
   onUseAsset={(id) => void useAssetOnNeed(id)}
-  onOpenLibrary={() => { pickerOpen = false; setView("library"); }}
+  onOpenLibrary={() => { pickerOpen = false; window.dispatchEvent(new CustomEvent("vigilcut:open-library")); }}
   onSkip={() => void pickerSkip()}
 />

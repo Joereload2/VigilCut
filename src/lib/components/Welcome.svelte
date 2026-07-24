@@ -144,7 +144,7 @@
             onclick={() => (onGoVisual ? onGoVisual() : onOpen())}
           >
             <div class="text-xl">🖼</div>
-            <div class="mt-1.5 text-sm font-bold text-white">Visual / B-roll</div>
+            <div class="mt-1.5 text-sm font-bold text-white">B-roll</div>
             <div class="mt-1 text-[10px] leading-snug text-surface-400">
               Encuentra y coloca imágenes sobre la línea de tiempo de un video.
             </div>
