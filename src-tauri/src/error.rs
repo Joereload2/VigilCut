@@ -19,6 +19,9 @@ pub enum AppError {
 
     #[error("Invalid argument: {0}")]
     Invalid(String),
+
+    #[error("Cancelado por el usuario")]
+    Cancelled,
 }
 
 impl Serialize for AppError {

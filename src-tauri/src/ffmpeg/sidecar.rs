@@ -187,6 +187,21 @@ impl Ffmpeg {
         args: &[String],
         expected_output: Option<&Path>,
     ) -> AppResult<std::process::Output> {
+        self.run_expecting_tracked(args, expected_output, None)
+            .await
+    }
+
+    /// Same as [`run_expecting`], optionally registering the PID for cooperative cancel.
+    pub async fn run_expecting_tracked(
+        &self,
+        args: &[String],
+        expected_output: Option<&Path>,
+        job: Option<&crate::job_control::JobControl>,
+    ) -> AppResult<std::process::Output> {
+        if let Some(j) = job {
+            j.check()?;
+        }
+
         let mut full_args: Vec<String> = Vec::with_capacity(args.len() + 4);
         // Keep banner/stats off — UI already shows its own progress.
         full_args.extend([
@@ -207,6 +222,10 @@ impl Ffmpeg {
             .kill_on_drop(false)
             .spawn()
             .map_err(|e| AppError::Ffmpeg(e.to_string()))?;
+
+        if let Some(j) = job {
+            j.set_ffmpeg_pid(child.id());
+        }
 
         let stdout_pipe = child.stdout.take();
         let stderr_pipe = child.stderr.take();
@@ -232,6 +251,14 @@ impl Ffmpeg {
             .wait()
             .await
             .map_err(|e| AppError::Ffmpeg(e.to_string()))?;
+
+        if let Some(j) = job {
+            j.set_ffmpeg_pid(None);
+            if j.is_cancelled() {
+                return Err(AppError::Cancelled);
+            }
+        }
+
         let stdout = stdout_task.await.unwrap_or_default();
         let stderr = stderr_task.await.unwrap_or_default();
         let output = std::process::Output {
@@ -389,8 +416,12 @@ fn parse_probe_json(path: &Path, json: &serde_json::Value) -> AppResult<MediaInf
         .cloned()
         .unwrap_or_default();
 
-    let video = streams.iter().find(|s| s.get("codec_type").and_then(|v| v.as_str()) == Some("video"));
-    let audio = streams.iter().find(|s| s.get("codec_type").and_then(|v| v.as_str()) == Some("audio"));
+    let video = streams
+        .iter()
+        .find(|s| s.get("codec_type").and_then(|v| v.as_str()) == Some("video"));
+    let audio = streams
+        .iter()
+        .find(|s| s.get("codec_type").and_then(|v| v.as_str()) == Some("audio"));
 
     let duration = format
         .get("duration")

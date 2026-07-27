@@ -5,9 +5,10 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::error::{AppError, AppResult};
 use crate::models::batch::{BatchJob, BatchStatus};
 use crate::models::edl::PolicyConfig;
+use crate::models::exception_mode::ExceptionHandlingMode;
+use crate::models::segment::SilenceDetectionOptions;
 use crate::pipeline::batch_worker::{list_videos_in_dir, run_batch_job};
 use crate::pipeline::engine::policy_from_silence_options;
-use crate::models::segment::SilenceDetectionOptions;
 use crate::state::AppState;
 
 fn update_job(app: &AppHandle, job: &BatchJob) {
@@ -19,12 +20,32 @@ fn update_job(app: &AppHandle, job: &BatchJob) {
     let _ = app.emit("batch://progress", job.clone());
 }
 
+fn resolve_mode(
+    exception_mode: Option<String>,
+    auto_accept_exceptions: Option<bool>,
+) -> ExceptionHandlingMode {
+    if let Some(s) = exception_mode.as_deref() {
+        return match s {
+            "aggressive" => ExceptionHandlingMode::Aggressive,
+            "supervised" => ExceptionHandlingMode::Supervised,
+            _ => ExceptionHandlingMode::Safe,
+        };
+    }
+    // Default SAFE — never aggressive unless explicit.
+    // Legacy: only if client sends auto_accept true, map to aggressive.
+    match auto_accept_exceptions {
+        Some(true) => ExceptionHandlingMode::Aggressive,
+        _ => ExceptionHandlingMode::Safe,
+    }
+}
+
 #[tauri::command]
 pub fn queue_batch_job(
     media_paths: Vec<String>,
     output_dir: String,
     preset_id: Option<String>,
     auto_accept_exceptions: Option<bool>,
+    exception_mode: Option<String>,
     options: Option<SilenceDetectionOptions>,
     app: AppHandle,
     state: State<'_, AppState>,
@@ -34,11 +55,12 @@ pub fn queue_batch_job(
     }
     std::fs::create_dir_all(&output_dir)?;
 
+    let mode = resolve_mode(exception_mode, auto_accept_exceptions);
     let job = BatchJob::new(
         media_paths,
         preset_id.unwrap_or_else(|| "default".into()),
         output_dir,
-        auto_accept_exceptions.unwrap_or(true),
+        mode,
     );
 
     state
@@ -63,8 +85,7 @@ pub fn queue_batch_job(
     let app_handle = app.clone();
 
     tauri::async_runtime::spawn(async move {
-        tracing::info!("Batch worker started for {job_id}");
-        // Reload job from state
+        tracing::info!("Batch worker started for {job_id} mode={}", mode.as_str());
         let initial = {
             let state = app_handle.state::<AppState>();
             state
@@ -77,7 +98,6 @@ pub fn queue_batch_job(
             return;
         };
 
-        // Process with intermediate updates
         let mut working = job;
         working.status = BatchStatus::Running;
         working.touch();
@@ -86,9 +106,10 @@ pub fn queue_batch_job(
         let total = working.media_paths.len().max(1);
         let export_policy = policy.clone();
         let out_dir = PathBuf::from(&working.output_dir);
-        let auto_accept = working.auto_accept_exceptions;
+        let mode = working.effective_mode();
         let export_opts = crate::models::preset::ExportOptions::default();
         let color = crate::models::preset::ColorOptions::default();
+        let mut needs_review = 0usize;
 
         for (i, path_str) in working.media_paths.clone().iter().enumerate() {
             working.current_file = Some(path_str.clone());
@@ -100,13 +121,19 @@ pub fn queue_batch_job(
                 PathBuf::from(path_str).as_path(),
                 &out_dir,
                 &export_policy,
-                auto_accept,
+                mode,
                 &export_opts,
                 &color,
             )
             .await;
 
-            if result.ok {
+            if result.needs_review {
+                needs_review += 1;
+                working.failed += 1;
+                if let Some(err) = &result.error {
+                    working.errors.push(format!("{path_str}: {err}"));
+                }
+            } else if result.ok {
                 working.completed += 1;
             } else {
                 working.failed += 1;
@@ -121,7 +148,9 @@ pub fn queue_batch_job(
         }
 
         working.current_file = None;
-        working.status = if working.completed == 0 {
+        working.status = if needs_review > 0 {
+            BatchStatus::NeedsReview
+        } else if working.completed == 0 {
             BatchStatus::Failed
         } else {
             BatchStatus::Completed
@@ -129,9 +158,10 @@ pub fn queue_batch_job(
         working.touch();
         update_job(&app_handle, &working);
         tracing::info!(
-            "Batch {job_id} done: {} ok, {} failed",
+            "Batch {job_id} done: {} ok, {} failed, mode={}",
             working.completed,
-            working.failed
+            working.failed,
+            mode.as_str()
         );
         let _ = app_handle.emit("batch://done", &working);
     });
@@ -157,25 +187,25 @@ pub fn list_batch_jobs(state: State<'_, AppState>) -> AppResult<Vec<BatchJob>> {
         .lock()
         .map_err(|e| AppError::Message(e.to_string()))?;
     let mut jobs: Vec<_> = map.values().cloned().collect();
-    jobs.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    jobs.sort_by_key(|a| std::cmp::Reverse(a.created_at));
     Ok(jobs)
 }
 
 /// Scan a folder for videos and queue a factory batch → output_dir.
+/// Default mode: **Safe** (does not force-cut exceptions).
 #[tauri::command]
 pub fn queue_inbox_batch(
     inbox_dir: String,
     output_dir: Option<String>,
     auto_accept_exceptions: Option<bool>,
+    exception_mode: Option<String>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<BatchJob> {
     let inbox = PathBuf::from(&inbox_dir);
     let videos = list_videos_in_dir(&inbox)?;
     if videos.is_empty() {
-        return Err(AppError::Invalid(format!(
-            "No videos found in {inbox_dir}"
-        )));
+        return Err(AppError::Invalid(format!("No videos found in {inbox_dir}")));
     }
     let out = output_dir.unwrap_or_else(|| {
         inbox
@@ -197,13 +227,13 @@ pub fn queue_inbox_batch(
         out,
         Some("factory".into()),
         auto_accept_exceptions,
+        exception_mode,
         None,
         app,
         state,
     )
 }
 
-/// Synchronous batch for tests / internal use.
 #[allow(dead_code)]
 pub async fn run_batch_sync(job: BatchJob, policy: PolicyConfig) -> BatchJob {
     run_batch_job(job, policy).await

@@ -10,13 +10,20 @@
 |---|---|
 | Stack | Tauri 2 · Rust · Svelte 5 · TypeScript · Tailwind · FFmpeg |
 | Licencia | MIT |
-| Estado | **v1 fábrica** — silence engine + excepciones + batch + multi-artefacto + CLI |
+| Estado | **v1.1+ visual** — engine + excepciones + batch + clipping 9:16 + biblioteca visual local + CLI |
 
 Documentación:
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — mapa técnico  
 - [docs/ARCHITECTURAL_REVIEW.md](docs/ARCHITECTURAL_REVIEW.md) — mandato CTO / visión 5 años  
+- [docs/HARDENING_1_1.md](docs/HARDENING_1_1.md) — endurecimiento 1.1 (seguridad, modos, tests)  
+- [docs/VISUAL_LIBRARY_DESIGN.md](docs/VISUAL_LIBRARY_DESIGN.md) — diseño enriquecimiento visual  
+- [docs/VISUAL_LIBRARY_IMPLEMENTATION_REPORT.md](docs/VISUAL_LIBRARY_IMPLEMENTATION_REPORT.md) — reporte implementación  
+- [docs/visual-library/architecture.md](docs/visual-library/architecture.md) — biblioteca inteligente (conceptos, generación, QA)  
+- [docs/visual-library/omniroute.md](docs/visual-library/omniroute.md) — OmniRoute opcional  
+- [`.env.example`](.env.example) — variables OmniRoute / costes / Supabase  
 - [docs/ROADMAP.md](docs/ROADMAP.md) — roadmap  
+- [docs/BACKLOG_NEXT.md](docs/BACKLOG_NEXT.md) — backlog post-MVP  
 
 ---
 
@@ -34,7 +41,8 @@ Documentación:
    - `*.shorts.json` + carpeta `*-shorts/short-01.mp4` … (clips reales)
 6. **Batch** + **watch inbox** (auto-procesa crudos)  
 7. **CLI** sin UI para automatización  
-8. Cache de audio 16 kHz + detectores breath / chapters / shorts
+8. Cache de audio 16 kHz + detectores breath / chapters / shorts  
+9. **Modo Visual** — transcripción canónica, biblioteca local de imágenes, sugerencias supervisadas, VisualPlan ≠ EDL, overlay FFmpeg
 
 ---
 
@@ -57,18 +65,24 @@ npm run dev:win
 3. **Oír video cortado**  
 4. **Exportar** → carpeta con pack de artefactos  
 
-### Lote fábrica (cero clics por tramo)
+### Lote fábrica
 
-- UI: panel **Fábrica · Lote** → archivos o carpeta inbox  
+- UI: pestaña **Lote** → archivos o inbox  
+- **Modo Seguro (default):** cortes claros automáticos; dudas **conservadas** en el export  
+- **Supervisado:** no exporta si hay dudas  
+- **Agresivo:** corta dudas (pide confirmación en UI; CLI `--aggressive`)  
 - CLI:
 
 ```powershell
 npm run cli -- analyze .\clip.mp4
 npm run cli -- export .\clip.mp4
 npm run cli -- batch .\inbox .\outbox
+# opc. --aggressive en export/batch para forzar cortes dudosos
+npm run cli -- visual import .\imagenes --concepts inflacion,economia
+npm run cli -- visual transcript .\clip.mp4 .\out
 ```
 
-Carpetas de app: `%APPDATA%\VigilCut\inbox` y `outbox`.
+Carpetas de app: `%APPDATA%\VigilCut\inbox`, `outbox` y `library` (metadatos SQLite + copias administradas).
 
 ---
 

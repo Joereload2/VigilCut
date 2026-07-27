@@ -1,7 +1,9 @@
 use uuid::Uuid;
 
 use crate::models::artifacts::{ChapterMarker, ShortCandidate};
-use crate::models::event::{Event, Span, TYPE_AUDIO_SILENCE, TYPE_AUDIO_SPEECH, TYPE_STRUCTURE_SHORT};
+use crate::models::event::{
+    Event, Span, TYPE_AUDIO_SILENCE, TYPE_AUDIO_SPEECH, TYPE_STRUCTURE_SHORT,
+};
 
 pub use crate::models::event::TYPE_STRUCTURE_CHAPTER;
 /// Canonical short-candidate event type (alias of model constant).
@@ -62,7 +64,7 @@ pub fn detect_short_candidates(run_id: &str, _duration: f64, events: &mut Vec<Ev
         .collect();
     for ev in speech {
         let d = ev.span.duration();
-        if d < 12.0 || d > 75.0 {
+        if !(12.0..=75.0).contains(&d) {
             continue;
         }
         // Prefer denser mid-length talking segments
@@ -91,12 +93,12 @@ pub fn detect_short_candidates(run_id: &str, _duration: f64, events: &mut Vec<Ev
 }
 
 /// Map chapter events → markers on *output* timeline given keep ranges.
-pub fn chapters_from_events(
-    events: &[Event],
-    keep: &[(f64, f64)],
-) -> Vec<ChapterMarker> {
+pub fn chapters_from_events(events: &[Event], keep: &[(f64, f64)]) -> Vec<ChapterMarker> {
     let mut markers = Vec::new();
-    for ev in events.iter().filter(|e| e.event_type == TYPE_STRUCTURE_CHAPTER) {
+    for ev in events
+        .iter()
+        .filter(|e| e.event_type == TYPE_STRUCTURE_CHAPTER)
+    {
         let at_source = ev.span.start;
         let Some(at_output) = source_to_output(at_source, keep) else {
             continue;

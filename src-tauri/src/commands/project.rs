@@ -110,6 +110,6 @@ pub fn list_recent_projects() -> AppResult<Vec<ProjectSummary>> {
         }
     }
 
-    list.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    list.sort_by_key(|a| std::cmp::Reverse(a.updated_at));
     Ok(list)
 }

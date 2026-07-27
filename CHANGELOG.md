@@ -1,5 +1,66 @@
 # Changelog
 
+## Unreleased — visual library MVP
+
+### Visual enrichment (local)
+- Canonical transcript + TXT/SRT/JSON projections
+- Source↔output TimeMap from EDL (unit tests)
+- Deterministic semantic events (keywords / concepts)
+- SQLite image library (import, hash dedupe, thumbs, usage)
+- Folder bulk import + usage history + missing-file scan
+- Explainable suggestions + accept/reject → VisualPlan (persisted JSON)
+- **Manual placement** without transcript: Completa / Parcial / Flotante + layout
+- **Protected ranges** (no B-roll zones) on output timeline
+- FFmpeg overlay respects mode/position (full / PIP / lower-third)
+- Simplified Visual panel: Colocar · Plan · Texto · Más + track
+- CLI: `visual import|list|transcript|enrich|render|scan-missing`
+- Smoke FFmpeg overlay (`smoke_visual`) + unknown license excluded from auto-rank
+- Design: `docs/VISUAL_LIBRARY_DESIGN.md` · Report: `docs/VISUAL_LIBRARY_IMPLEMENTATION_REPORT.md`
+
+## 1.1.0 — 2026-07-20 (hardening)
+
+### Safety
+- Export never writes the original: temp file → validate size → atomic rename
+- No silent overwrite of destination (unique `stem-N.ext` if exists)
+- Reject input path == output path
+- Cleanup temp files on failed/cancelled export
+
+### Exception modes (factory batch / watch / CLI)
+- **Safe** (default): auto-cuts high confidence; pending exceptions kept in output
+- **Supervised**: skip export while exceptions pending
+- **Aggressive**: force-accept pending (explicit UI confirm / CLI `--aggressive`)
+- Watch inbox and factory default are **Safe** (no longer force-cut)
+
+### Security
+- Tauri `fs:scope` and asset protocol no longer use bare `**`
+- Scopes limited to APPDATA, TEMP, HOME, Documents, Downloads, Desktop, Video, etc.
+
+### Models
+- `setup:models` verifies HTTP, size, SHA-256, atomic install of Silero ONNX
+
+### UX
+- Batch panel mode selector + aggressive warning
+- Summary states: “Listo” vs “Requiere revisión”
+- Export success: “Tu video original no fue modificado”
+- Heuristic score language (not “scientific confidence”)
+
+### Tooling
+- Version 1.1.0 across package.json / Cargo.toml / tauri.conf
+- `npm run lint` → svelte-check (no phantom ESLint)
+- GitHub Actions CI skeleton (Windows)
+- Docs: `docs/HARDENING_1_1.md`
+
+## Unreleased — feat/intelligent-clipping (merged into 1.1 workstream)
+
+### Intelligent clipping
+- Domain: `ClipCandidate`, scores, framing 9:16, duration/selection profiles
+- Pipeline: SRT/VTT / sidecar / optional Whisper / speech fallback → candidates → score → dedupe → preselect
+- UI: Clips workspace, classify/review, live 9:16 player, RightDock layout
+- Export: individual + batch vertical MP4 + metadata/report
+- CLI: `vigilcut-cli clips <video> [outdir]`
+- Tests: unit + smoke (SRT/sidecar) + e2e vertical export
+- Docs: `docs/CLIPPING.md`, `docs/BACKLOG_NEXT.md`
+
 ## 1.0.0 — 2026-07-18
 
 ### Factory engine

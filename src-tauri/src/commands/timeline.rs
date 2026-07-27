@@ -51,9 +51,7 @@ pub fn merge_adjacent_segments(
     let mut out: Vec<Segment> = Vec::new();
     for seg in sorted {
         if let Some(last) = out.last_mut() {
-            if last.kind == seg.kind
-                && last.decision == seg.decision
-                && seg.start <= last.end + gap
+            if last.kind == seg.kind && last.decision == seg.decision && seg.start <= last.end + gap
             {
                 last.end = last.end.max(seg.end);
                 last.confidence = last.confidence.min(seg.confidence);
@@ -66,7 +64,11 @@ pub fn merge_adjacent_segments(
 }
 
 #[tauri::command]
-pub fn split_segment_at(segments: Vec<Segment>, segment_id: String, time: f64) -> AppResult<Vec<Segment>> {
+pub fn split_segment_at(
+    segments: Vec<Segment>,
+    segment_id: String,
+    time: f64,
+) -> AppResult<Vec<Segment>> {
     let mut out = Vec::new();
     let mut found = false;
 

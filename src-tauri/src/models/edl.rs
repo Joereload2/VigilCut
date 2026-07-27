@@ -120,10 +120,23 @@ impl Edl {
         source_duration: f64,
         remove: &[(f64, f64)],
     ) -> Self {
+        let source_duration = if !source_duration.is_finite() || source_duration < 0.0 {
+            0.0
+        } else {
+            source_duration
+        };
         let mut cuts: Vec<(f64, f64)> = remove
             .iter()
-            .map(|(s, e)| (*s, *e))
-            .filter(|(s, e)| e > s)
+            .map(|(s, e)| {
+                let s = if s.is_finite() { (*s).max(0.0) } else { 0.0 };
+                let e = if e.is_finite() {
+                    (*e).min(source_duration).max(s)
+                } else {
+                    s
+                };
+                (s, e)
+            })
+            .filter(|(s, e)| e > s && *s < source_duration)
             .collect();
         cuts.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
@@ -172,6 +185,40 @@ impl Edl {
     }
 }
 
+#[cfg(test)]
+mod edl_edge_tests {
+    use super::*;
+
+    #[test]
+    fn rejects_nan_remove_spans_gracefully() {
+        let edl = Edl::from_remove_spans("x.mp4", 10.0, &[(f64::NAN, 2.0), (3.0, f64::INFINITY)]);
+        assert!(edl.output_duration > 0.0);
+        assert!(edl.output_duration <= 10.0);
+    }
+
+    #[test]
+    fn clamps_out_of_range() {
+        let edl = Edl::from_remove_spans("x.mp4", 10.0, &[(-5.0, 2.0), (8.0, 50.0)]);
+        for s in &edl.video_track {
+            assert!(s.start >= 0.0);
+            assert!(s.end <= 10.0 + 0.001);
+        }
+    }
+
+    #[test]
+    fn zero_duration_source() {
+        let edl = Edl::from_remove_spans("x.mp4", 0.0, &[(0.0, 1.0)]);
+        assert_eq!(edl.source_duration, 0.0);
+    }
+
+    #[test]
+    fn full_silence_keep_fallback() {
+        // Removing everything falls back to keep full (avoid empty export)
+        let edl = Edl::from_remove_spans("x.mp4", 5.0, &[(0.0, 5.0)]);
+        assert!((edl.output_duration - 5.0).abs() < 0.01);
+    }
+}
+
 /// Policy knobs for silence auto-approve (factory defaults).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -185,6 +232,9 @@ pub struct PolicyConfig {
     /// Detection threshold (passed to detector)
     pub threshold: f64,
     pub prefer_silero: bool,
+    /// Run Whisper CLI during silence analysis (slow; off by default — use for fillers / captions).
+    #[serde(default)]
+    pub prefer_whisper: bool,
 }
 
 impl Default for PolicyConfig {
@@ -196,6 +246,7 @@ impl Default for PolicyConfig {
             padding: 0.12,
             threshold: 0.5,
             prefer_silero: true,
+            prefer_whisper: false,
         }
     }
 }

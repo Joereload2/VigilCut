@@ -79,6 +79,15 @@ export interface PolicyConfig {
   padding: number;
   threshold: number;
   preferSilero: boolean;
+  /** Whisper during silence analysis — slow; default off */
+  preferWhisper?: boolean;
+}
+
+export interface JobProgress {
+  job: string;
+  stage: string;
+  message: string;
+  percent: number;
 }
 
 export interface AnalysisRun {
@@ -103,6 +112,8 @@ export interface SilenceDetectionOptions {
   autoCutSilence: boolean;
   /** Min confidence for auto-cut without human review */
   autoApproveMinScore: number;
+  /** Whisper on open/reanalyze — off by default (use clipping or enable here) */
+  preferWhisper: boolean;
 }
 
 export interface SilenceDetectionResult {
@@ -236,7 +247,124 @@ export const DEFAULT_SILENCE_OPTIONS: SilenceDetectionOptions = {
   preferSilero: true,
   autoCutSilence: true,
   autoApproveMinScore: 0.8,
+  preferWhisper: false,
 };
+
+// ── Intelligent clipping ───────────────────────────────────────────────────
+
+export type DurationProfile = "micro" | "short" | "standard" | "extended" | "custom";
+export type SelectionProfile = "conservative" | "balanced" | "broad" | "exploratory";
+export type ClipReviewStatus =
+  | "suggested"
+  | "preselected"
+  | "approved"
+  | "rejected"
+  | "modified"
+  | "exporting"
+  | "exported"
+  | "error"
+  | "discarded";
+export type FramingMode = "auto_center" | "manual" | "blurred_background" | "fit_with_bars";
+
+export interface ClipFraming {
+  mode: FramingMode;
+  centerX: number;
+  centerY: number;
+  zoom: number;
+  outputWidth: number;
+  outputHeight: number;
+  trackingReady: boolean;
+}
+
+export interface ClipScoreBreakdown {
+  hookQuality: number;
+  semanticCoherence: number;
+  standalone: number;
+  clarity: number;
+  energy: number;
+  informationDensity: number;
+  hasConclusion: number;
+  durationFit: number;
+  silencePenalty: number;
+  incompletePenalty: number;
+}
+
+export interface ClipCandidate {
+  id: string;
+  analysisRunId: string;
+  sourceMediaPath: string;
+  start: number;
+  end: number;
+  duration: number;
+  transcript: string;
+  title: string;
+  summary: string;
+  score: number;
+  confidence: number;
+  breakdown: ClipScoreBreakdown;
+  reasons: { code: string; label: string; weight: number }[];
+  warnings: string[];
+  strengths: string[];
+  risks: string[];
+  status: ClipReviewStatus;
+  variantGroupId: string;
+  isPrimaryVariant: boolean;
+  framing: ClipFraming;
+  originalStart: number;
+  originalEnd: number;
+  exportPath?: string | null;
+  error?: string | null;
+}
+
+export interface ClippingSummary {
+  sourceDuration: number;
+  analysisSeconds: number;
+  candidatesFound: number;
+  preselected: number;
+  highConfidence: number;
+  needsReview: number;
+  discarded: number;
+  bestScore: number;
+  selectedTotalDuration: number;
+  transcriptSource: string;
+  warnings: string[];
+}
+
+export interface ClippingOptions {
+  durationProfile: DurationProfile;
+  selectionProfile: SelectionProfile;
+  minDuration?: number | null;
+  idealDuration?: number | null;
+  maxDuration?: number | null;
+  padBefore: number;
+  padAfter: number;
+  transcriptPath?: string | null;
+  preferWhisper: boolean;
+  maxCandidates: number;
+}
+
+export interface ClippingRun {
+  id: string;
+  mediaPath: string;
+  sourceDuration: number;
+  options: ClippingOptions;
+  candidates: ClipCandidate[];
+  summary: ClippingSummary;
+  createdAt: string;
+}
+
+export const DEFAULT_CLIPPING_OPTIONS: ClippingOptions = {
+  durationProfile: "short",
+  selectionProfile: "balanced",
+  padBefore: 0.25,
+  padAfter: 0.35,
+  transcriptPath: null,
+  preferWhisper: false,
+  maxCandidates: 40,
+};
+
+/** Matches backend MIN_CLIP_SCORE — clips below this never surface. */
+export const MIN_CLIP_SCORE = 50;
 
 export function segmentDuration(s: Segment): number {
   return Math.max(0, s.end - s.start);

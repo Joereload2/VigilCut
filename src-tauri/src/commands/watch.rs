@@ -9,8 +9,8 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::error::{AppError, AppResult};
 use crate::models::batch::BatchJob;
 use crate::models::edl::PolicyConfig;
-use crate::pipeline::batch_worker::{list_videos_in_dir, process_one_file};
 use crate::models::preset::{ColorOptions, ExportOptions};
+use crate::pipeline::batch_worker::{list_videos_in_dir, process_one_file};
 use crate::state::AppState;
 
 #[derive(Default)]
@@ -53,7 +53,10 @@ pub fn stop_inbox_watch(state: State<'_, InboxWatchState>) -> AppResult<()> {
 
 /// Poll inbox every few seconds; process new videos into outbox (factory auto).
 #[tauri::command]
-pub fn start_inbox_watch(app: AppHandle, state: State<'_, InboxWatchState>) -> AppResult<WatchStatus> {
+pub fn start_inbox_watch(
+    app: AppHandle,
+    state: State<'_, InboxWatchState>,
+) -> AppResult<WatchStatus> {
     if state.running.swap(true, Ordering::SeqCst) {
         return get_inbox_watch_status(state);
     }
@@ -100,16 +103,14 @@ pub fn start_inbox_watch(app: AppHandle, state: State<'_, InboxWatchState>) -> A
                 }
 
                 tracing::info!("Inbox watch processing {key}");
-                let _ = app_handle.emit(
-                    "watch://processing",
-                    serde_json::json!({ "path": key }),
-                );
+                let _ = app_handle.emit("watch://processing", serde_json::json!({ "path": key }));
 
+                // Inbox watch defaults to Safe — never force-cut exceptions silently.
                 let result = process_one_file(
                     &path,
                     &outbox,
                     &policy,
-                    true,
+                    crate::models::exception_mode::ExceptionHandlingMode::Safe,
                     &export_opts,
                     &color,
                 )
@@ -167,7 +168,7 @@ pub async fn process_factory_inbox_now(app: AppHandle) -> AppResult<BatchJob> {
         paths,
         "factory-inbox".into(),
         outbox.to_string_lossy().into_owned(),
-        true,
+        crate::models::exception_mode::ExceptionHandlingMode::Safe,
     );
     let job_id = job.id.clone();
     {
@@ -193,12 +194,10 @@ pub async fn process_factory_inbox_now(app: AppHandle) -> AppResult<BatchJob> {
         tracing::info!("process_factory_inbox_now finished {job_id_log}");
     });
 
-    app.state::<AppState>()
+    let state = app.state::<AppState>();
+    let jobs = state
         .batch_jobs
         .lock()
-        .map_err(|e| AppError::Message(e.to_string()))?
-        .get(&job_id)
-        .cloned()
-        .ok_or_else(|| AppError::NotFound(job_id))
+        .map_err(|e| AppError::Message(e.to_string()))?;
+    jobs.get(&job_id).cloned().ok_or(AppError::NotFound(job_id))
 }
-

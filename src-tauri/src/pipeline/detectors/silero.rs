@@ -71,7 +71,7 @@ fn run_silero_probs(model_path: &Path, samples: &[f32]) -> AppResult<Vec<f32>> {
         .commit_from_file(model_path)
         .map_err(|e| AppError::Message(format!("ort load model: {e}")))?;
 
-    let mut state = vec![0.0f32; 2 * 1 * 128];
+    let mut state = vec![0.0f32; 2 * 128];
     let mut context = vec![0.0f32; 64];
     let mut probs = Vec::new();
 
@@ -154,7 +154,7 @@ fn run_window_v5(
 
     if let Some(out_state) = outputs.get("state").or_else(|| outputs.get("hn")) {
         if let Ok((_, data)) = out_state.try_extract_tensor::<f32>() {
-            let flat: Vec<f32> = data.iter().copied().collect();
+            let flat: Vec<f32> = data.to_vec();
             if flat.len() == state.len() {
                 state.copy_from_slice(&flat);
             }
