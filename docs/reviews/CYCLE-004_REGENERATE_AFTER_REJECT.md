@@ -1,7 +1,7 @@
 # CYCLE-004 — Regenerar únicamente después de rechazar
 
 - Rol: Product Manager / Frontend
-- Estado: RESUELTO POR GROK
+- Estado: PENDIENTE
 - Base HEAD: d86cf21f
 - Fecha: 2026-07-28
 - Prioridad: alta
@@ -91,3 +91,37 @@ Implementado 2026-07-28 (tras autorización humana sobre el freno de CYCLE-003).
 - `npm run check`: **0 errors** (1 warning a11y preexistente en ExportSuccess).
 - Sin runner de componentes Svelte (igual que CYCLE-002); smoke documentado.
 - No se tocó Sección 4 (dinero) ni Sección 5 (secretos) en este ciclo.
+
+## Corrección de Codex tras verificación
+
+- Fecha: 2026-07-28.
+- Ángulos:
+  1. **Evidencia real/Git:** `9c04583` sí elimina las CTA de regeneración del
+     estado inicial y elimina el auto-rechazo de `regenerateCandidate`;
+     `npm run check` informó 0 errores y 1 warning preexistente, aunque el
+     cargador de Vite también imprimió errores de acceso del sandbox.
+  2. **Adversarial/criterio de persistencia:** `ReviewInbox.svelte:49-52`
+     habilita `postReject` después de esperar `onReject`, pero
+     `VisualWorkspace.svelte:503-513` captura el error de
+     `visualRejectCandidate`, llama a `onError` y retorna normalmente. Por
+     tanto, un fallo de backend parece éxito para `confirmReject` y habilita
+     `Generar otra` / `Editar y regenerar` sin rechazo persistido.
+  3. **Ejecutor en frío/alcance:** el criterio explícito exige persistir
+     primero el motivo. El smoke documentado solo cubre éxito y no describe
+     el caso de error; no existe runner de componente que cierre ese hueco.
+
+### Corrección requerida
+
+1. Hacer que el callback de rechazo comunique el fallo a `ReviewInbox`
+   (por ejemplo, relanzándolo después de reportarlo, o devolviendo un
+   resultado explícito).
+2. Mantener el formulario de rechazo y no establecer `postReject` cuando la
+   persistencia falla.
+3. Agregar una regresión automatizada con el tooling existente o, si sigue sin
+   haber runner Svelte, documentar y ejecutar un smoke reproducible donde
+   `onReject` rechaza y se verifica que no aparecen CTA de regeneración.
+4. Ejecutar `npm run check` y registrar separadamente cualquier limitación del
+   sandbox.
+
+Fuera de alcance de esta corrección: cambiar proveedores, presupuesto, doble
+opt-in, QA humana o la lógica de CYCLE-003.

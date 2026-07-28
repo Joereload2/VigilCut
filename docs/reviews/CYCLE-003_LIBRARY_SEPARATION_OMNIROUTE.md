@@ -1,7 +1,7 @@
 # CYCLE-003 — Biblioteca: separar carga de consulta + OmniRoute primero
 
 - Rol: Product Manager / Arquitectura
-- Estado: PENDIENTE — REQUIERE REVISIÓN HUMANA
+- Estado: RESUELTO POR GROK
 - Base HEAD: ab1e51932d5cd50c6d637b1d01086ab9d898e2af (ejecutado después de
   CYCLE-002 commit `410725b`; sin conflicto de archivos con CYCLE-002)
 - Fecha: 2026-07-27
@@ -311,6 +311,27 @@ Fix (autorizado por persona responsable):
   `daily_feed_paid_forbidden`.
 - Test: `daily_feed_never_attempts_paid_pollinations_fallback` — 4/4 tests
   de cadena OK (incl. los 3 de fallback video previos).
+
+## Revisión Codex
+
+- Fecha: 2026-07-28.
+- Ángulos:
+  1. **Dinero/seguridad y adversarial:** `worker.rs:599-612` calcula
+     `ban_paid` por origen `daily_feed` o modo oportunista y descarta el
+     proveedor pago antes de `provider.generate`; el doble gate experimental
+     de Pollinations continúa en `pollinations.rs:64-80`.
+  2. **Evidencia real/Git:** el cambio está en `9c04583`; la prueba
+     `daily_feed_never_attempts_paid_pollinations_fallback` pasó con pagos,
+     presupuesto y gate experimental habilitados, y verificó cero llamadas al
+     proveedor pago. Las cinco pruebas filtradas por `fallback` pasaron.
+  3. **Alcance, arquitectura y deriva documental:** `git show` confirma que el
+     producto Rust solo cambió en `worker.rs`; la búsqueda real mantiene a
+     `legacy_adapter.rs` como único import de producto del legacy, con la
+     excepción de test documentada en `pollinations.rs`. Se corrigió en esta
+     revisión el estado obsoleto de este documento, que aún mostraba el
+     escalamiento anterior.
+- Pruebas adicionales: `npm run test:fmt` y `npm run test:clippy` pasaron.
+- Resultado: verificado; el flujo daily/oportunista no alcanza Pollinations.
 
 ## Corrección de Codex tras verificación
 

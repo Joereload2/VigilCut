@@ -385,12 +385,25 @@ Autorizada por la persona responsable (“avanza”). Fix del hallazgo:
 - Schedulers reactivados por la persona responsable tras el fix.
 - Detalle: `CYCLE-003_LIBRARY_SEPARATION_OMNIROUTE.md` § Resultado Grok.
 
+### Revisión Codex
+
+- Fecha: 2026-07-28.
+- Ángulos: dinero/seguridad adversarial, evidencia real/Git y
+  alcance/arquitectura/deriva.
+- Evidencia: `worker.rs:599-612` bloquea cualquier proveedor pago antes de
+  invocarlo para `daily_feed` u oportunista. El test específico pasó con gates
+  pagos abiertos y cero llamadas a Pollinations; las cinco pruebas filtradas
+  por `fallback`, `fmt` y `clippy -D warnings` pasaron. La búsqueda de imports
+  mantiene el límite de `legacy_adapter`.
+- Resultado: verificado. El detalle de CYCLE-003 fue alineado desde el estado
+  de escalamiento obsoleto a `RESUELTO POR GROK`.
+
 ---
 
 ## CYCLE-004
 
 - Rol: Product Manager / Frontend
-- Estado: RESUELTO POR GROK
+- Estado: PENDIENTE
 - Base HEAD: d86cf21f
 - Fecha: 2026-07-28
 - Prioridad: alta
@@ -411,6 +424,21 @@ Implementado 2026-07-28. Ver `CYCLE-004_REGENERATE_AFTER_REJECT.md`.
   ofrece Generar otra / Editar y regenerar / Ahora no.
 - `regenerateCandidate` ya no auto-rechaza (el rechazo ya ocurrió).
 - `npm run check`: 0 errors.
+
+### Corrección de Codex tras verificación
+
+- Fecha: 2026-07-28.
+- Ángulos: evidencia real/Git, adversarial sobre persistencia y ejecutor en
+  frío/alcance.
+- Hallazgo: `ReviewInbox.svelte:49-52` habilita el estado post-rechazo al
+  resolverse `onReject`, pero `VisualWorkspace.svelte:503-513` captura el
+  error del backend y retorna normalmente. Si persistir el rechazo falla, la
+  UI igualmente ofrece regenerar, contra el criterio “persistir primero”.
+- Corrección acotada: propagar un resultado/fallo al componente, conservar el
+  formulario y no habilitar regeneración en error; cubrir el caso negativo con
+  prueba o smoke reproducible. Detalle completo en
+  `CYCLE-004_REGENERATE_AFTER_REJECT.md`.
+- Resultado: vuelve a `PENDIENTE`. No se modificó código de producto.
 
 ---
 
@@ -435,3 +463,19 @@ Implementado 2026-07-28. Ver `CYCLE-004_REGENERATE_AFTER_REJECT.md`.
   `RESUELTO POR GROK` de nuevo.
 - CYCLE-004: PM-004 restaurado en ReviewInbox; `RESUELTO POR GROK`.
 - Schedulers: ACTIVO (persona responsable).
+
+### Corrida Codex 2026-07-28 (verificación post-humano)
+
+- Revisados: CYCLE-003 y CYCLE-004, con tres ángulos distintos por ciclo.
+- Verificado: CYCLE-003; bloqueo pago daily/oportunista confirmado antes de
+  invocar proveedor y con prueba real de cero llamadas.
+- Reabierto: CYCLE-004 por no propagar el fallo de persistencia desde
+  `VisualWorkspace.reject` hacia `ReviewInbox.confirmReject`.
+- Pruebas: filtro `fallback` 5 passed/0 failed; test daily específico
+  1 passed/0 failed; `fmt` y `clippy -D warnings` pasaron. `npm run check`
+  informó 0 errores/1 warning preexistente, junto con errores del cargador de
+  Vite por acceso denegado del sandbox; el proceso terminó con código 0.
+- Git: inspeccionado `9c04583` contra su padre y el estado actual. Sin push,
+  force, cambios de producto ni escritura de credenciales.
+- Schedulers: permanecen `ACTIVO` porque CYCLE-004 queda como mejora
+  verificable `PENDIENTE` para Grok; no corresponde detener el circuito.
