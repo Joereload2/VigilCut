@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use crate::error::{AppError, AppResult};
 use crate::models::visual::MediaAsset;
-use crate::pipeline::visual::library::{get_asset_by_id, open_db};
+use crate::visual_library::infrastructure::legacy_adapter::{get_asset_by_id, open_db};
 use crate::visual_library::infrastructure::storage::supabase_storage::{
     SupabaseConfig, SupabaseStorage,
 };
@@ -209,8 +209,12 @@ fn finish(
 mod tests {
     use super::*;
     use crate::models::visual::LicenseStatus;
-    use crate::pipeline::visual::library::{lock_library_for_test, set_library_root_override};
-    use crate::visual_library::{AssetIngestionRequest, IngestionSource, LibraryService};
+    use crate::visual_library::infrastructure::legacy_adapter::{
+        lock_library_for_test, set_library_root_override,
+    };
+    use crate::visual_library::{
+        AssetIngestionRequest, IngestionSource, LibraryIngestion, LibraryService,
+    };
 
     #[tokio::test]
     #[allow(clippy::await_holding_lock)]

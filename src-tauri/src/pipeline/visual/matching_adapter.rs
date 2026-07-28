@@ -2,7 +2,7 @@
 
 use crate::error::AppResult;
 use crate::models::visual_intel::{MatchCandidate, VisualNeed};
-use crate::visual_library::{LibraryService, VisualLibrary};
+use crate::visual_library::{LibraryQuery, LibraryService};
 
 pub fn search_for_need(need: &VisualNeed) -> AppResult<Vec<MatchCandidate>> {
     let service = LibraryService::new();
@@ -10,5 +10,5 @@ pub fn search_for_need(need: &VisualNeed) -> AppResult<Vec<MatchCandidate>> {
 }
 
 pub fn get_asset(asset_id: &str) -> AppResult<crate::models::visual::MediaAsset> {
-    LibraryService::new().get_asset(asset_id)
+    LibraryQuery::get_asset(&LibraryService::new(), asset_id)
 }

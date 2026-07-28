@@ -89,7 +89,7 @@ mod tests {
             .matched_asset_id
             .clone()
             .expect("approved candidate must be ingested before assignment");
-        let generated_asset = crate::visual_library::VisualLibrary::get_asset(
+        let generated_asset = crate::visual_library::LibraryQuery::get_asset(
             &crate::visual_library::LibraryService::new(),
             &generated_asset_id,
         )

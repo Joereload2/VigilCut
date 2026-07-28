@@ -5,21 +5,31 @@ use crate::models::visual::MediaAsset;
 use crate::models::visual_intel::{MatchCandidate, VisualNeed};
 use crate::pipeline::visual::generation::worker::queue_generation_with_key;
 use crate::pipeline::visual::intelligent_match::{match_need, MatchOptions};
-use crate::pipeline::visual::library::{
-    get_asset_by_id, import_image_detailed, open_db, record_usage, ImportOutcome,
-};
 use crate::pipeline::visual::needs::save_needs;
 use crate::visual_library::domain::contracts::{
     AssetIngestionRequest, AssetIngestionResult, AssetMatch, AssetQuery, AssetUsage,
     LibraryGenerationRequest,
 };
+use crate::visual_library::infrastructure::legacy_adapter::{
+    get_asset_by_id, import_image_detailed, open_db, record_usage, ImportOutcome,
+};
 
-pub trait VisualLibrary {
+/// Write path: import / generation requests that mutate the library catalog.
+pub trait LibraryIngestion {
+    fn ingest_asset(&self, request: AssetIngestionRequest) -> AppResult<AssetIngestionResult>;
+    fn request_generation(&self, request: LibraryGenerationRequest) -> AppResult<Option<String>>;
+}
+
+/// Read path: search, fetch, and usage telemetry for existing assets.
+pub trait LibraryQuery {
     fn search(&self, query: &AssetQuery) -> AppResult<Vec<AssetMatch>>;
     fn get_asset(&self, asset_id: &str) -> AppResult<MediaAsset>;
-    fn request_generation(&self, request: LibraryGenerationRequest) -> AppResult<Option<String>>;
     fn record_usage(&self, usage: AssetUsage) -> AppResult<()>;
 }
+
+/// Backward-compatible composite used by older call sites that need both sides.
+/// Prefer `LibraryIngestion` or `LibraryQuery` at new boundaries.
+pub trait VisualLibrary: LibraryIngestion + LibraryQuery {}
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct LocalVisualLibrary;
@@ -31,7 +41,20 @@ impl LocalVisualLibrary {
         Self
     }
 
-    pub fn ingest_asset(&self, request: AssetIngestionRequest) -> AppResult<AssetIngestionResult> {
+    pub fn search_for_need(&self, need: &VisualNeed) -> AppResult<Vec<MatchCandidate>> {
+        let query = AssetQuery::from(need);
+        let opts = MatchOptions {
+            min_score: query.min_score.unwrap_or_default(),
+            prefer_aspect: query.desired_aspect,
+            used_in_project: query.used_asset_ids,
+            allow_unknown_license: query.allow_unknown_license,
+        };
+        Ok(match_need(need, &opts))
+    }
+}
+
+impl LibraryIngestion for LocalVisualLibrary {
+    fn ingest_asset(&self, request: AssetIngestionRequest) -> AppResult<AssetIngestionResult> {
         let outcome = import_image_detailed(
             &request.source_path,
             request.title,
@@ -89,19 +112,21 @@ impl LocalVisualLibrary {
         })
     }
 
-    pub fn search_for_need(&self, need: &VisualNeed) -> AppResult<Vec<MatchCandidate>> {
-        let query = AssetQuery::from(need);
-        let opts = MatchOptions {
-            min_score: query.min_score.unwrap_or_default(),
-            prefer_aspect: query.desired_aspect,
-            used_in_project: query.used_asset_ids,
-            allow_unknown_license: query.allow_unknown_license,
-        };
-        Ok(match_need(need, &opts))
+    fn request_generation(
+        &self,
+        mut request: LibraryGenerationRequest,
+    ) -> AppResult<Option<String>> {
+        save_needs(std::slice::from_ref(&request.need))?;
+        queue_generation_with_key(
+            &mut request.need,
+            request.opportunistic,
+            &request.idempotency_key,
+            &request.origin,
+        )
     }
 }
 
-impl VisualLibrary for LocalVisualLibrary {
+impl LibraryQuery for LocalVisualLibrary {
     fn search(&self, query: &AssetQuery) -> AppResult<Vec<AssetMatch>> {
         let synthetic = VisualNeed {
             terms: query.terms.clone(),
@@ -135,19 +160,6 @@ impl VisualLibrary for LocalVisualLibrary {
         get_asset_by_id(asset_id)
     }
 
-    fn request_generation(
-        &self,
-        mut request: LibraryGenerationRequest,
-    ) -> AppResult<Option<String>> {
-        save_needs(std::slice::from_ref(&request.need))?;
-        queue_generation_with_key(
-            &mut request.need,
-            request.opportunistic,
-            &request.idempotency_key,
-            &request.origin,
-        )
-    }
-
     fn record_usage(&self, usage: AssetUsage) -> AppResult<()> {
         record_usage(
             &usage.asset_id,
@@ -159,12 +171,16 @@ impl VisualLibrary for LocalVisualLibrary {
     }
 }
 
+impl VisualLibrary for LocalVisualLibrary {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::models::visual::LicenseStatus;
     use crate::models::visual_intel::{AssetProvenance, QaStatus};
-    use crate::pipeline::visual::library::{lock_library_for_test, set_library_root_override};
+    use crate::visual_library::infrastructure::legacy_adapter::{
+        lock_library_for_test, set_library_root_override,
+    };
 
     #[test]
     fn ingestion_is_idempotent_by_sha_and_story_contract_can_query() {
@@ -194,17 +210,19 @@ mod tests {
             technical_score: Some(1.0),
             semantic_score: None,
         };
-        let first = service.ingest_asset(request()).unwrap();
-        let second = service.ingest_asset(request()).unwrap();
+        let first = LibraryIngestion::ingest_asset(&service, request()).unwrap();
+        let second = LibraryIngestion::ingest_asset(&service, request()).unwrap();
         assert_eq!(first.asset_id, second.asset_id);
         assert!(!first.duplicate);
         assert!(second.duplicate);
-        let matches = service
-            .search(&AssetQuery {
+        let matches = LibraryQuery::search(
+            &service,
+            &AssetQuery {
                 terms: vec!["ciudad".into()],
                 ..Default::default()
-            })
-            .unwrap();
+            },
+        )
+        .unwrap();
         assert_eq!(matches.first().map(|m| &m.asset_id), Some(&first.asset_id));
         set_library_root_override(None);
         let _ = std::fs::remove_dir_all(dir);

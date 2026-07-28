@@ -130,6 +130,8 @@ pub enum ImageProvider {
     Pollinations(
         crate::visual_library::infrastructure::providers::pollinations::PollinationsImageProvider,
     ),
+    /// Deterministic test double for fallback / budget chain tests.
+    Scripted(ScriptedImageProvider),
 }
 
 impl ImageProvider {
@@ -138,6 +140,7 @@ impl ImageProvider {
             Self::Mock(_) => ProviderKind::Mock,
             Self::OmniRoute(_) => ProviderKind::OmniRoute,
             Self::Pollinations(_) => ProviderKind::Pollinations,
+            Self::Scripted(_) => ProviderKind::Local,
         }
     }
 
@@ -146,6 +149,7 @@ impl ImageProvider {
             Self::Mock(p) => p.name(),
             Self::OmniRoute(p) => p.name(),
             Self::Pollinations(p) => p.name(),
+            Self::Scripted(p) => p.name(),
         }
     }
 
@@ -154,6 +158,7 @@ impl ImageProvider {
             Self::Mock(p) => p.is_free_tier(),
             Self::OmniRoute(p) => p.is_free_tier(),
             Self::Pollinations(p) => p.is_free_tier(),
+            Self::Scripted(p) => p.is_free_tier(),
         }
     }
 
@@ -165,6 +170,7 @@ impl ImageProvider {
             Self::Mock(p) => p.generate(req).await,
             Self::OmniRoute(p) => p.generate(req).await,
             Self::Pollinations(p) => p.generate(req).await,
+            Self::Scripted(p) => p.generate(req).await,
         }
     }
 
@@ -173,23 +179,136 @@ impl ImageProvider {
             Self::Mock(p) => p.probe().await,
             Self::OmniRoute(p) => p.probe().await,
             Self::Pollinations(p) => p.probe().await,
+            Self::Scripted(p) => p.probe().await,
         }
     }
 }
 
-/// Select provider: mock if forced or OmniRoute not configured.
-pub fn select_provider(_allow_paid: bool) -> ImageProvider {
+/// Ordered generation candidates (CYCLE-003).
+///
+/// Explicit overrides:
+/// - `VIGILCUT_IMAGE_PROVIDER=mock` → only mock
+/// - `VIGILCUT_IMAGE_PROVIDER=pollinations` → only Pollinations
+/// - `VIGILCUT_IMAGE_PROVIDER=omniroute` → only OmniRoute (if configured)
+///
+/// Default chain: OmniRoute (when `OMNIROUTE_BASE_URL` is set) → Pollinations.
+/// Mock is never chosen implicitly.
+pub fn select_provider_chain(_allow_paid: bool) -> Vec<ImageProvider> {
     let selected = std::env::var("VIGILCUT_IMAGE_PROVIDER").unwrap_or_default();
+    if selected.eq_ignore_ascii_case("mock") {
+        return vec![ImageProvider::Mock(super::mock::MockImageProvider)];
+    }
     if selected.eq_ignore_ascii_case("pollinations") {
-        return ImageProvider::Pollinations(
+        return vec![ImageProvider::Pollinations(
             crate::visual_library::infrastructure::providers::pollinations::PollinationsImageProvider::from_env(),
-        );
+        )];
     }
-    let force_mock = selected.eq_ignore_ascii_case("mock");
-    let base = std::env::var("OMNIROUTE_BASE_URL").ok();
-    let has_omni = base.as_ref().map(|b| !b.is_empty()).unwrap_or(false);
-    if force_mock || !has_omni {
-        return ImageProvider::Mock(super::mock::MockImageProvider);
+    let has_omni = std::env::var("OMNIROUTE_BASE_URL")
+        .map(|b| !b.trim().is_empty())
+        .unwrap_or(false);
+    if selected.eq_ignore_ascii_case("omniroute") {
+        if has_omni {
+            return vec![ImageProvider::OmniRoute(
+                super::omniroute::OmniRouteImageProvider::from_env(),
+            )];
+        }
+        return Vec::new();
     }
-    ImageProvider::OmniRoute(super::omniroute::OmniRouteImageProvider::from_env())
+
+    let mut chain = Vec::new();
+    if has_omni {
+        chain.push(ImageProvider::OmniRoute(
+            super::omniroute::OmniRouteImageProvider::from_env(),
+        ));
+    }
+    chain.push(ImageProvider::Pollinations(
+        crate::visual_library::infrastructure::providers::pollinations::PollinationsImageProvider::from_env(),
+    ));
+    chain
+}
+
+/// First candidate of the chain (compat for probe/dashboard/CLI).
+/// Falls back to mock only when the chain is empty (misconfiguration).
+pub fn select_provider(allow_paid: bool) -> ImageProvider {
+    select_provider_chain(allow_paid)
+        .into_iter()
+        .next()
+        .unwrap_or(ImageProvider::Mock(super::mock::MockImageProvider))
+}
+
+/// Scripted provider for unit tests of the fallback / cost-gate chain.
+#[derive(Debug, Clone)]
+pub struct ScriptedImageProvider {
+    pub name: String,
+    pub free_tier: bool,
+    pub fail: bool,
+    pub calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl ScriptedImageProvider {
+    pub fn new(name: impl Into<String>, free_tier: bool, fail: bool) -> Self {
+        Self {
+            name: name.into(),
+            free_tier,
+            fail,
+            calls: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        }
+    }
+
+    pub fn call_count(&self) -> usize {
+        self.calls.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn is_free_tier(&self) -> bool {
+        self.free_tier
+    }
+
+    pub async fn generate(
+        &self,
+        req: &GenerationRequest,
+    ) -> Result<GenerationResult, ProviderError> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if self.fail {
+            return Err(ProviderError::Unavailable(format!(
+                "{} scripted failure",
+                self.name
+            )));
+        }
+        // Reuse mock PNG writer for a real file path.
+        let mock = super::mock::MockImageProvider;
+        let mut result = mock.generate(req).await?;
+        result.provider = self.name.clone();
+        result.is_paid = !self.free_tier;
+        result.cost_kind = if self.free_tier {
+            CostKind::FreeConfigured
+        } else {
+            CostKind::Paid
+        };
+        result.free_verified = self.free_tier;
+        result.model = format!("scripted-{}", self.name);
+        Ok(result)
+    }
+
+    pub async fn probe(&self) -> Result<ProviderProbe, ProviderError> {
+        Ok(ProviderProbe {
+            provider: self.name.clone(),
+            model: format!("scripted-{}", self.name),
+            supports_image: true,
+            free_tier: self.free_tier,
+            free_verified: self.free_tier,
+            cost_kind: if self.free_tier {
+                CostKind::FreeConfigured
+            } else {
+                CostKind::Paid
+            },
+            ok: !self.fail,
+            latency_ms: 1,
+            error: self.fail.then(|| "scripted failure".into()),
+            notes: Some("scripted test provider".into()),
+        })
+    }
 }

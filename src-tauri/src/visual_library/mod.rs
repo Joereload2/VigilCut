@@ -9,5 +9,7 @@ pub mod commands;
 pub mod domain;
 pub mod infrastructure;
 
-pub use application::library_service::{LibraryService, LocalVisualLibrary, VisualLibrary};
+pub use application::library_service::{
+    LibraryIngestion, LibraryQuery, LibraryService, LocalVisualLibrary, VisualLibrary,
+};
 pub use domain::contracts::*;

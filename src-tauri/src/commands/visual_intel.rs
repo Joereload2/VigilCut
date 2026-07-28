@@ -268,7 +268,7 @@ pub async fn visual_generate_need(need_id: String) -> AppResult<serde_json::Valu
             "message": "Se reutilizó una imagen de la biblioteca",
         }));
     }
-    let job_id = crate::visual_library::VisualLibrary::request_generation(
+    let job_id = crate::visual_library::LibraryIngestion::request_generation(
         &crate::visual_library::LibraryService::new(),
         crate::visual_library::LibraryGenerationRequest {
             idempotency_key: format!("need:{}:v1", need.id),

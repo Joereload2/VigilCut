@@ -10,7 +10,7 @@ use crate::pipeline::visual::generation::worker::queue_generation_with_key;
 use crate::pipeline::visual::library::open_db;
 use crate::pipeline::visual::library_dashboard::dashboard;
 use crate::pipeline::visual::needs::save_needs;
-use crate::visual_library::{AssetQuery, LibraryService, VisualLibrary};
+use crate::visual_library::{AssetQuery, LibraryQuery, LibraryService};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -1,12 +1,12 @@
 # AGENTS.md — VigilCut
 
-Última verificación: 2026-07-27 (contra el estado real del repo, rama
-`feat/independent-visual-library`, commit `3417833` en `main`). **Si el
-código cambió desde esta fecha de forma que contradice algo de acá, la
-tarea que provocó ese cambio debe actualizar este archivo en el mismo
-commit** — este documento no se mantiene solo, y este repo ya tiene un
-historial de docs (`ROADMAP.md` vs `QA_REPORT.md`) que quedaron
-desactualizados por no hacer esto. No repetir ese error acá.
+Última verificación: 2026-07-27 (rama `feat/independent-visual-library`,
+post CYCLE-002 + CYCLE-003). **Si el código cambió desde esta fecha de
+forma que contradice algo de acá, la tarea que provocó ese cambio debe
+actualizar este archivo en el mismo commit** — este documento no se
+mantiene solo, y este repo ya tiene un historial de docs (`ROADMAP.md` vs
+`QA_REPORT.md`) que quedaron desactualizados por no hacer esto. No
+repetir ese error acá.
 
 Este archivo es la fuente de verdad para cualquier agente de IA (Codex,
 Grok, Claude Code, u otro) que trabaje autónomamente en este repositorio.
@@ -147,14 +147,12 @@ Dos dominios con límites documentados en
   assignments, placements, plans, time mapping — y hoy todavía es dueño
   físico de la base SQLite (`open_db()` vive ahí).
 
-Estado actual (no un objetivo a "corregir" de oficio): dentro de
-`visual_library/`, solo estos archivos importan `pipeline::visual::library`
-directo: `application/library_service.rs`, `application/sync_service.rs`,
-`domain/usage.rs`, `infrastructure/sqlite/mod.rs`,
-`infrastructure/storage/mod.rs`. Esto cambia cuando se resuelva el ciclo
-de separación documentado en `docs/reviews/CYCLE-003_*.md` **si ese
-archivo ya existe en el repo** — si no existe todavía, señalarlo en vez de
-asumir que la regla no aplica o inventar el contenido del ciclo.
+Estado actual (post CYCLE-003): dentro de `visual_library/`, el **único**
+archivo de producto autorizado a importar `pipeline::visual::library`
+directo es `infrastructure/legacy_adapter.rs`. El resto del dominio importa
+vía ese adaptador. Excepción documentada: harness de tests en
+`infrastructure/providers/pollinations.rs` (lock/root override). Un test de
+arquitectura en `legacy_adapter` falla si se reintroduce un import directo.
 
 El resto de `pipeline::visual` (`needs.rs`, `render.rs`, `concepts.rs`,
 `qa.rs`, `worker.rs`, `library_dashboard.rs`, `library_requests.rs`,
@@ -173,8 +171,8 @@ No moverla salvo pedido explícito.
 usado mientras se edita un video (contexto B-roll) solo puede buscar y
 usar assets existentes — nunca importar, ni disparar generación. Por
 defecto, cualquier control nuevo en ese contexto se asume de solo lectura
-salvo que la tarea diga explícitamente lo contrario. (Estado de esta regla
-en el código: ver `docs/reviews/CYCLE-002_*.md` si ya existe en el repo.)
+salvo que la tarea diga explícitamente lo contrario. (Implementado:
+`VisualPanel` pasa `brollOnly={true}`; ver `docs/reviews/CYCLE-002_*.md`.)
 
 ## 8. Estilo de código
 

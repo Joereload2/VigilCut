@@ -213,5 +213,4 @@ Implementado 2026-07-27 sobre base `ab1e519`.
 
 ### Commits
 
-Ver `git log` tras el commit de este ciclo (mensaje prefijo
-`fix(ui): broll consultive only — CYCLE-002`).
+- `410725b` — `fix(ui): make B-roll consultive only (CYCLE-002)`

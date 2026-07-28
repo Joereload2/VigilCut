@@ -280,13 +280,9 @@ Resumen:
 ## CYCLE-003
 
 - Rol: Product Manager / Arquitectura
-- Estado: PENDIENTE
-- Base HEAD: ab1e51932d5cd50c6d637b1d01086ab9d898e2af (sin conflicto de
-  archivos con CYCLE-002 — uno es 100% frontend Svelte, el otro 100% Rust
-  en `visual_library/` y `pipeline/visual/generation/` — pero se
-  recomienda ejecutar CYCLE-002 primero y confirmarlo resuelto antes de
-  iniciar este, para acotar el radio de cualquier fallo en una corrida
-  autónoma sin supervisión paso a paso)
+- Estado: RESUELTO POR GROK
+- Base HEAD: ab1e51932d5cd50c6d637b1d01086ab9d898e2af (ejecutado después
+  de CYCLE-002 `410725b`)
 - Fecha: 2026-07-27
 - Prioridad: alta
 - cycle_id: CYCLE-003
@@ -315,4 +311,15 @@ presupuesto, tests, verificación manual).
 
 ### Resultado Grok
 
-_(pendiente)_
+Implementado 2026-07-27. Detalle en
+`CYCLE-003_LIBRARY_SEPARATION_OMNIROUTE.md` § Resultado Grok.
+
+Resumen:
+- `legacy_adapter` único import de `pipeline::visual::library` en producto
+  `visual_library/` (+ test de arquitectura).
+- Traits `LibraryIngestion` / `LibraryQuery`; search command bound a Query.
+- Cadena OmniRoute → Pollinations con re-chequeo de presupuesto en fallback
+  (`omniroute_failed_budget_exceeded`); job guarda provider real.
+- Tests: 3 de fallback/budget + chain default + architecture.
+- `cargo test --lib`: 110 passed; clippy -D warnings ok; fmt ok.
+- AGENTS.md §7 actualizado.

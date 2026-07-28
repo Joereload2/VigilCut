@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use super::visual::VisualPlan;
 use crate::error::AppResult;
-use crate::visual_library::{AssetMatch, AssetQuery, VisualLibrary};
+use crate::visual_library::{AssetMatch, AssetQuery, LibraryQuery};
 
 /// Lightweight project shell for future text→video.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,7 +52,7 @@ pub struct SceneRequirement {
 }
 
 impl SceneRequirement {
-    pub fn search<L: VisualLibrary>(&self, library: &L) -> AppResult<Vec<AssetMatch>> {
+    pub fn search<L: LibraryQuery>(&self, library: &L) -> AppResult<Vec<AssetMatch>> {
         library.search(&self.query)
     }
 }

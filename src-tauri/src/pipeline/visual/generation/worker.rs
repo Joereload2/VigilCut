@@ -11,7 +11,10 @@ use crate::models::visual_intel::{
 use crate::pipeline::visual::generation::cost::{
     can_enqueue_generation, increment_generation_counter, CostGate,
 };
-use crate::pipeline::visual::generation::provider::{select_provider, GenerationRequest};
+use crate::pipeline::visual::generation::provider::{
+    select_provider, select_provider_chain, GenerationRequest, GenerationResult, ImageProvider,
+    ProviderError,
+};
 use crate::pipeline::visual::library::open_db;
 use crate::pipeline::visual::needs::{get_need, update_need};
 use crate::pipeline::visual::qa::{persist_qa_check, review_image, QaThresholds, SemanticHints};
@@ -58,7 +61,13 @@ pub fn queue_generation_with_key(
 ) -> AppResult<Option<String>> {
     let _g = ENQUEUE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let policy = CostPolicy::from_env();
-    let provider = select_provider(policy.paid_providers_enabled);
+    // Optimistic first-candidate for enqueue gates only. Real provider is
+    // chosen at generate time (may fall back to paid → re-check budget there).
+    let chain = select_provider_chain(policy.paid_providers_enabled);
+    let provider = chain
+        .first()
+        .cloned()
+        .unwrap_or_else(|| select_provider(policy.paid_providers_enabled));
     let is_paid = !provider.is_free_tier();
     let cost_kind = if provider.name() == "mock" {
         "local"
@@ -265,8 +274,23 @@ pub async fn process_next_job() -> AppResult<Option<String>> {
         return Ok(Some(id));
     }
 
-    let provider = select_provider(policy.paid_providers_enabled);
+    let chain = select_provider_chain(policy.paid_providers_enabled);
     let _ = super::supervision::set_job_stage(&id, "waiting_provider");
+    let project_key = need_id
+        .as_ref()
+        .and_then(|nid| get_need(nid).ok())
+        .map(|n| n.project_key)
+        .unwrap_or_else(|| "unknown".into());
+    let opportunistic = {
+        let conn = open_db()?;
+        conn.query_row(
+            "SELECT opportunistic FROM generation_jobs WHERE id=?1",
+            params![id],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|v| v != 0)
+        .unwrap_or(false)
+    };
     let (width, height) = need_id
         .as_ref()
         .and_then(|need_id| get_need(need_id).ok())
@@ -291,8 +315,8 @@ pub async fn process_next_job() -> AppResult<Option<String>> {
         return Ok(Some(id));
     }
 
-    // Cooperative cancel: race generate vs cancel flag polling
-    let gen_fut = provider.generate(&req);
+    // Cooperative cancel: race chain generate vs cancel flag polling
+    let gen_fut = generate_along_chain(&chain, &req, &policy, &project_key, opportunistic);
     let cancel_fut = async {
         loop {
             if super::supervision::is_cancel_requested(&id)
@@ -351,14 +375,16 @@ pub async fn process_next_job() -> AppResult<Option<String>> {
                         result.mime_type,
                         result.cost_kind.as_str(),
                         result.free_verified as i64,
-                        result.provider,
-                        result.model,
+                        result.provider.clone(),
+                        result.model.clone(),
                     ],
                 )
                 .map_err(|e| AppError::Message(e.to_string()))?;
                 let _ = conn.execute(
-                    "UPDATE generation_jobs SET cost_kind=?1, free_verified=?2, prompt_strategy=?3, model=?4, updated_at=?5 WHERE id=?6",
+                    "UPDATE generation_jobs SET provider=?1, is_paid=?2, cost_kind=?3, free_verified=?4, prompt_strategy=?5, model=?6, updated_at=?7 WHERE id=?8",
                     params![
+                        result.provider,
+                        result.is_paid as i64,
                         result.cost_kind.as_str(),
                         result.free_verified as i64,
                         result.prompt_strategy,
@@ -543,6 +569,59 @@ pub async fn process_next_job() -> AppResult<Option<String>> {
     }
 }
 
+/// Attempt providers in order. Before any paid candidate, re-run the full
+/// cost/budget gate (CYCLE-003) so OmniRoute→Pollinations never spends money
+/// without a live budget check.
+pub async fn generate_along_chain(
+    chain: &[ImageProvider],
+    req: &GenerationRequest,
+    policy: &CostPolicy,
+    project_key: &str,
+    opportunistic: bool,
+) -> Result<GenerationResult, ProviderError> {
+    if chain.is_empty() {
+        return Err(ProviderError::Unavailable(
+            "no image providers configured".into(),
+        ));
+    }
+    let mut last_err: Option<ProviderError> = None;
+    let mut free_route_failed = false;
+
+    for provider in chain {
+        let is_paid = !provider.is_free_tier();
+        if is_paid {
+            match can_enqueue_generation(policy, project_key, true, opportunistic) {
+                Ok(CostGate::Allow { .. }) => {}
+                Ok(CostGate::Deny { reason }) => {
+                    let msg = if free_route_failed {
+                        format!("omniroute_failed_budget_exceeded: {reason}")
+                    } else {
+                        reason
+                    };
+                    last_err = Some(ProviderError::Other(msg));
+                    continue;
+                }
+                Err(e) => {
+                    last_err = Some(ProviderError::Other(e.to_string()));
+                    continue;
+                }
+            }
+        }
+
+        match provider.generate(req).await {
+            Ok(result) => return Ok(result),
+            Err(e) => {
+                if provider.is_free_tier() {
+                    free_route_failed = true;
+                }
+                last_err = Some(e);
+            }
+        }
+    }
+
+    Err(last_err.unwrap_or_else(|| ProviderError::Unavailable("all image providers failed".into())))
+}
+
 fn mark_job(id: &str, status: JobStatus, err: Option<&str>) -> AppResult<()> {
     let conn = open_db()?;
     let stage = match status {
@@ -577,7 +656,9 @@ fn promote_candidate(
     need_id: Option<&str>,
     origin: &str,
 ) -> AppResult<MediaAsset> {
-    use crate::visual_library::{AssetIngestionRequest, IngestionSource, LibraryService};
+    use crate::visual_library::{
+        AssetIngestionRequest, IngestionSource, LibraryIngestion, LibraryService,
+    };
 
     let need = need_id.and_then(|id| get_need(id).ok());
     let title = need
@@ -944,9 +1025,164 @@ pub async fn cover_project_needs(
 mod resident_worker_tests {
     use super::*;
     use crate::models::visual_intel::VisualNeed;
+    use crate::pipeline::visual::generation::provider::{
+        select_provider_chain, ScriptedImageProvider,
+    };
     use crate::pipeline::visual::generation::supervision::{cancel_job, get_job};
     use crate::pipeline::visual::library::{lock_library_for_test, set_library_root_override};
     use crate::pipeline::visual::needs::save_needs;
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn fallback_uses_pollinations_when_omniroute_fails() {
+        let _lock = lock_library_for_test();
+        let dir = std::env::temp_dir().join(format!("vc-fb-ok-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        set_library_root_override(Some(dir.clone()));
+        std::env::set_var("VIGILCUT_PAID_PROVIDERS", "1");
+        std::env::set_var("VIGILCUT_DAILY_PAID_BUDGET", "10");
+        std::env::set_var("VIGILCUT_POLLINATIONS_EXPERIMENTAL", "1");
+
+        let omni = ScriptedImageProvider::new("omniroute", true, true);
+        let poli = ScriptedImageProvider::new("pollinations", false, false);
+        let omni_calls = omni.calls.clone();
+        let poli_calls = poli.calls.clone();
+        let chain = vec![ImageProvider::Scripted(omni), ImageProvider::Scripted(poli)];
+        let policy = CostPolicy {
+            paid_providers_enabled: true,
+            daily_paid_budget: 10.0,
+            ..CostPolicy::default()
+        };
+        let req = GenerationRequest {
+            prompt: "fallback fixture".into(),
+            negative_prompt: String::new(),
+            model: None,
+            width: 128,
+            height: 72,
+            seed: None,
+            job_id: format!("job-fb-{}", uuid::Uuid::new_v4()),
+        };
+        let result = generate_along_chain(&chain, &req, &policy, "proj-fb", false)
+            .await
+            .expect("paid fallback must succeed");
+        assert_eq!(result.provider, "pollinations");
+        assert_eq!(omni_calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(poli_calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        set_library_root_override(None);
+        std::env::remove_var("VIGILCUT_PAID_PROVIDERS");
+        std::env::remove_var("VIGILCUT_DAILY_PAID_BUDGET");
+        std::env::remove_var("VIGILCUT_POLLINATIONS_EXPERIMENTAL");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn fallback_skips_paid_when_paid_providers_disabled() {
+        let _lock = lock_library_for_test();
+        let dir = std::env::temp_dir().join(format!("vc-fb-deny-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        set_library_root_override(Some(dir.clone()));
+        std::env::remove_var("VIGILCUT_PAID_PROVIDERS");
+
+        let omni = ScriptedImageProvider::new("omniroute", true, true);
+        let poli = ScriptedImageProvider::new("pollinations", false, false);
+        let poli_calls = poli.calls.clone();
+        let chain = vec![ImageProvider::Scripted(omni), ImageProvider::Scripted(poli)];
+        let policy = CostPolicy::default(); // paid_providers_enabled = false
+        let req = GenerationRequest {
+            prompt: "fallback denied".into(),
+            negative_prompt: String::new(),
+            model: None,
+            width: 128,
+            height: 72,
+            seed: None,
+            job_id: format!("job-deny-{}", uuid::Uuid::new_v4()),
+        };
+        let err = generate_along_chain(&chain, &req, &policy, "proj-deny", false)
+            .await
+            .expect_err("must not generate paid when disabled");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("omniroute_failed_budget_exceeded") || msg.contains("pago"),
+            "unexpected error: {msg}"
+        );
+        assert_eq!(
+            poli_calls.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "Pollinations must never be called when paid is disabled"
+        );
+
+        set_library_root_override(None);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn fallback_blocks_paid_when_daily_budget_is_zero() {
+        let _lock = lock_library_for_test();
+        let dir = std::env::temp_dir().join(format!("vc-fb-budget-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        set_library_root_override(Some(dir.clone()));
+        // Enqueue path would see free OmniRoute (is_paid=false). Live fallback
+        // must still refuse Pollinations when budget is 0.
+        std::env::set_var("VIGILCUT_PAID_PROVIDERS", "1");
+        std::env::set_var("VIGILCUT_DAILY_PAID_BUDGET", "0");
+
+        let omni = ScriptedImageProvider::new("omniroute", true, true);
+        let poli = ScriptedImageProvider::new("pollinations", false, false);
+        let poli_calls = poli.calls.clone();
+        let chain = vec![ImageProvider::Scripted(omni), ImageProvider::Scripted(poli)];
+        let policy = CostPolicy {
+            paid_providers_enabled: true,
+            daily_paid_budget: 0.0,
+            ..CostPolicy::default()
+        };
+        let req = GenerationRequest {
+            prompt: "budget fixture".into(),
+            negative_prompt: String::new(),
+            model: None,
+            width: 128,
+            height: 72,
+            seed: None,
+            job_id: format!("job-budget-{}", uuid::Uuid::new_v4()),
+        };
+        let err = generate_along_chain(&chain, &req, &policy, "proj-budget", false)
+            .await
+            .expect_err("budget 0 must block paid fallback");
+        assert!(
+            err.to_string().contains("omniroute_failed_budget_exceeded"),
+            "unexpected: {err}"
+        );
+        assert_eq!(poli_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+        set_library_root_override(None);
+        std::env::remove_var("VIGILCUT_PAID_PROVIDERS");
+        std::env::remove_var("VIGILCUT_DAILY_PAID_BUDGET");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn default_chain_is_omniroute_then_pollinations_when_configured() {
+        let prev_provider = std::env::var("VIGILCUT_IMAGE_PROVIDER").ok();
+        let prev_omni = std::env::var("OMNIROUTE_BASE_URL").ok();
+        std::env::remove_var("VIGILCUT_IMAGE_PROVIDER");
+        std::env::set_var("OMNIROUTE_BASE_URL", "https://example.invalid/v1");
+        let chain = select_provider_chain(true);
+        let names: Vec<_> = chain.iter().map(|p| p.name().to_string()).collect();
+        assert_eq!(
+            names,
+            vec!["omniroute".to_string(), "pollinations".to_string()]
+        );
+        match prev_provider {
+            Some(v) => std::env::set_var("VIGILCUT_IMAGE_PROVIDER", v),
+            None => std::env::remove_var("VIGILCUT_IMAGE_PROVIDER"),
+        }
+        match prev_omni {
+            Some(v) => std::env::set_var("OMNIROUTE_BASE_URL", v),
+            None => std::env::remove_var("OMNIROUTE_BASE_URL"),
+        }
+    }
 
     #[test]
     fn enqueue_is_immediate_and_video_has_priority_over_daily() {

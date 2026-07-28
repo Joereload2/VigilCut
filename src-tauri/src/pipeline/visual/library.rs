@@ -619,7 +619,8 @@ fn ingest_folder_asset(
     license_status: LicenseStatus,
 ) -> AppResult<ImportOutcome> {
     let source = crate::visual_library::IngestionSource::FolderImport;
-    let outcome = crate::visual_library::LibraryService::new().ingest_asset(
+    let outcome = crate::visual_library::LibraryIngestion::ingest_asset(
+        &crate::visual_library::LibraryService::new(),
         crate::visual_library::AssetIngestionRequest {
             source_path: path.to_path_buf(),
             source,

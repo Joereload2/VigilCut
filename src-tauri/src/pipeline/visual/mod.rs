@@ -875,10 +875,13 @@ pub fn import_library_image(
     concepts: Vec<String>,
 ) -> AppResult<crate::models::visual::MediaAsset> {
     use crate::models::visual_intel::{AssetProvenance, QaStatus};
-    use crate::visual_library::{AssetIngestionRequest, IngestionSource, LibraryService};
+    use crate::visual_library::{
+        AssetIngestionRequest, IngestionSource, LibraryIngestion, LibraryService,
+    };
 
-    Ok(LibraryService::new()
-        .ingest_asset(AssetIngestionRequest {
+    Ok(LibraryIngestion::ingest_asset(
+        &LibraryService::new(),
+        AssetIngestionRequest {
             source_path: path.to_path_buf(),
             source: IngestionSource::ManualImport,
             title,
@@ -894,8 +897,9 @@ pub fn import_library_image(
             qa_status: QaStatus::Approved,
             technical_score: None,
             semantic_score: None,
-        })?
-        .asset)
+        },
+    )?
+    .asset)
 }
 
 /// Export session transcript projections to a user-chosen directory.

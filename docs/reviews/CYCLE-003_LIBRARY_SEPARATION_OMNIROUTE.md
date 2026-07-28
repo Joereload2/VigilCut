@@ -1,15 +1,9 @@
 # CYCLE-003 — Biblioteca: separar carga de consulta + OmniRoute primero
 
 - Rol: Product Manager / Arquitectura
-- Estado: PENDIENTE
-- Base HEAD: ab1e51932d5cd50c6d637b1d01086ab9d898e2af (puede correr en
-  paralelo con CYCLE-002 — verificado: CYCLE-002 solo toca
-  `VisualPanel.svelte`/`VisualWorkspace.svelte`, este ciclo solo toca Rust
-  en `visual_library/` y `pipeline/visual/generation/`; no hay archivos en
-  común. La única dependencia es lógica: el Paso 5 de este ciclo valida
-  que `brollOnly` siga funcionando, así que conviene revisar el resultado
-  de CYCLE-002 antes de dar por cerrado el Paso 5, aunque el código en sí
-  no se pise.)
+- Estado: RESUELTO POR GROK
+- Base HEAD: ab1e51932d5cd50c6d637b1d01086ab9d898e2af (ejecutado después de
+  CYCLE-002 commit `410725b`; sin conflicto de archivos con CYCLE-002)
 - Fecha: 2026-07-27
 - Prioridad: alta
 - cycle_id: CYCLE-003
@@ -240,5 +234,66 @@ guardado dice `pollinations`, no `omniroute`.
 
 ## Resultado Grok
 
-_(completar al terminar: commits, resultado de tests, cualquier desviación
-del plan y por qué)_
+Implementado 2026-07-27, tras CYCLE-002 (`410725b`).
+
+### Cambios
+
+1. **Paso 1 — `legacy_adapter.rs`:** único punto de producto en
+   `visual_library/` que importa `pipeline::visual::library`. Migrados:
+   `library_service`, `sync_service`, `domain/usage`, `sqlite/mod`,
+   `storage/mod`. Excepción documentada: tests de `pollinations.rs`.
+   Adicional: test de `supabase_storage` redirigido al adaptador (no
+   estaba en la lista original de 6, pero el grep de arquitectura lo
+   hubiera fallado).
+2. **Paso 2 — traits:** `LibraryIngestion` (ingest + request_generation) y
+   `LibraryQuery` (search + get_asset + record_usage). `VisualLibrary` queda
+   como supertrait de ambos (compat). `library_commands::search` usa
+   `&dyn LibraryQuery`. Comandos/call sites de generación usan
+   `LibraryIngestion`.
+3. **Paso 3 — cadena OmniRoute → Pollinations:**
+   - `select_provider_chain()` devuelve lista ordenada.
+   - Overrides: `mock` / `pollinations` / `omniroute` explícitos.
+   - Default: OmniRoute si `OMNIROUTE_BASE_URL` → Pollinations. **Mock ya
+     no es el fallback implícito** (cambio de comportamiento vs código
+     anterior; alineado al plan).
+   - `generate_along_chain()` en `worker.rs`: ante fallo, siguiente
+     candidato; **antes de cualquier proveedor pago re-corre
+     `can_enqueue_generation`** (paid flag + `daily_paid_budget` + límites
+     diarios/proyecto). Mensaje `omniroute_failed_budget_exceeded:…` cuando
+     el free falló y el presupuesto no alcanza.
+   - Job actualiza `provider`, `is_paid`, `cost_kind` con el proveedor real.
+   - Pollinations sigue auto-gateado por `VIGILCUT_POLLINATIONS_EXPERIMENTAL`
+     + API key dentro de su provider (doble gate AGENTS.md §4).
+4. **Paso 4 — tests:**
+   - `fallback_uses_pollinations_when_omniroute_fails`
+   - `fallback_skips_paid_when_paid_providers_disabled` (Pollinations
+     call count = 0)
+   - `fallback_blocks_paid_when_daily_budget_is_zero` (hallazgo Loop 2)
+   - `default_chain_is_omniroute_then_pollinations_when_configured`
+   - `visual_library_imports_pipeline_library_only_via_adapter`
+5. **Paso 5 — verificación:**
+   - `brollOnly` no tocado por este ciclo (sigue en VisualPanel).
+   - Smoke manual OmniRoute/Pollinations live no ejecutado en este entorno
+     (sin credenciales/red de proveedores); cubierto con scripted providers.
+
+### Verificación comandos
+
+- `cargo test --lib`: **110 passed; 0 failed** (antes 105; +5 CYCLE-003).
+- `cargo fmt -- --check`: ok (tras `cargo fmt`).
+- `cargo clippy --all-targets -- -D warnings`: **ok (CLIPPY:0)**.
+- `npm run check`: no requerido (sin cambios frontend en este ciclo).
+
+### Desviaciones / notas
+
+- `ScriptedImageProvider` añadido a `ImageProvider` para tests de cadena
+  sin red; no se usa en producción (`select_provider_chain` no lo emite).
+- `select_provider()` sigue existiendo (dashboard/CLI/daily_feed) y toma el
+  **primer** candidato; daily feed sigue exigiendo free_verified y por
+  tanto no usará Pollinations solo.
+- Sección 4 (dinero): re-chequeo de presupuesto en fallback implementado y
+  testeado. Sección 5 (secretos): no tocada.
+- `AGENTS.md` §7 actualizado al nuevo estado del adaptador.
+
+### Commits
+
+Ver commit `fix(library): separate ingestion/query + OmniRoute fallback (CYCLE-003)`.

@@ -413,7 +413,7 @@ mod tests {
         .unwrap();
         assert_eq!(placement["placement"]["assetId"], asset.id);
         assert_eq!(
-            crate::visual_library::VisualLibrary::get_asset(
+            crate::visual_library::LibraryQuery::get_asset(
                 &crate::visual_library::LibraryService::new(),
                 &asset.id,
             )

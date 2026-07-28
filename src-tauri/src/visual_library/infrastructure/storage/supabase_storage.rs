@@ -188,7 +188,7 @@ mod tests {
 
     #[test]
     fn disabled_by_default_and_secret_keys_are_rejected() {
-        let _lock = crate::pipeline::visual::library::lock_library_for_test();
+        let _lock = crate::visual_library::infrastructure::legacy_adapter::lock_library_for_test();
         std::env::remove_var("VIGILCUT_SUPABASE_SYNC");
         assert!(SupabaseConfig::from_env().unwrap().is_none());
 
