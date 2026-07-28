@@ -561,6 +561,7 @@
         compact={visualsView === "video"}
         bind:projectKey
         bind:view={visualsView}
+        brollOnly={true}
         onMessage={(m) => {
           lastMessage = m;
           projectStore.statusMessage = m;

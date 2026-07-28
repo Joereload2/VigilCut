@@ -94,7 +94,18 @@
       didInitView = true;
       view = libraryOnly ? "library" : brollOnly ? "video" : hasVideo ? "video" : "library";
       onViewChange(view);
-    } else if ((libraryOnly || brollOnly || !hasVideo) && view === "video") {
+      return;
+    }
+    // libraryOnly never stays on "video". brollOnly always stays on "video".
+    // Without media, "video" is invalid unless we are in brollOnly (VisualPanel
+    // only mounts with media; keep the lock for consistency).
+    if (libraryOnly && view === "video") {
+      view = "library";
+      onViewChange(view);
+    } else if (brollOnly && view !== "video") {
+      view = "video";
+      onViewChange(view);
+    } else if (!hasVideo && !brollOnly && view === "video") {
       view = "library";
       onViewChange(view);
     }
@@ -626,60 +637,68 @@
         value={searchQ}
         oninput={(e) => onSearchInput((e.currentTarget as HTMLInputElement).value)}
       />
-      <button
-        type="button"
-        class="btn-primary text-[10px]"
-        disabled={busy || !api.isTauri()}
-        title={!api.isTauri() ? "Disponible en la aplicación de escritorio" : "Importar imagen"}
-        onclick={() => void importImage()}
-      >Importar</button>
-      <button
-        type="button"
-        class="btn-secondary text-[10px]"
-        disabled={busy || !api.isTauri()}
-        title={!api.isTauri() ? "Disponible en la aplicación de escritorio" : "Importar carpeta"}
-        onclick={() => void importFolder()}
-      >Importar carpeta</button>
-      <div class="relative">
+      {#if !brollOnly}
         <button
           type="button"
-          class="btn-ghost px-2 text-[12px]"
-          aria-label="Más opciones"
-          onclick={() => (menuOpen = !menuOpen)}>⋯</button
-        >
-        {#if menuOpen}
-          <div
-            class="absolute right-0 z-20 mt-1 w-52 rounded-lg border border-surface-700 bg-surface-900 py-1 shadow-xl"
+          class="btn-primary text-[10px]"
+          disabled={busy || !api.isTauri()}
+          title={!api.isTauri() ? "Disponible en la aplicación de escritorio" : "Importar imagen"}
+          onclick={() => void importImage()}
+        >Importar</button>
+        <button
+          type="button"
+          class="btn-secondary text-[10px]"
+          disabled={busy || !api.isTauri()}
+          title={!api.isTauri() ? "Disponible en la aplicación de escritorio" : "Importar carpeta"}
+          onclick={() => void importFolder()}
+        >Importar carpeta</button>
+      {/if}
+      {#if !brollOnly || hasVideo}
+        <div class="relative">
+          <button
+            type="button"
+            class="btn-ghost px-2 text-[12px]"
+            aria-label="Más opciones"
+            onclick={() => (menuOpen = !menuOpen)}>⋯</button
           >
-            <button
-              type="button"
-              class="block w-full px-3 py-1.5 text-left text-[11px] hover:bg-surface-800"
-              onclick={() => {
-                menuOpen = false;
-                dailyOpen = true;
-              }}>Biblioteca automática…</button
+          {#if menuOpen}
+            <div
+              class="absolute right-0 z-20 mt-1 w-52 rounded-lg border border-surface-700 bg-surface-900 py-1 shadow-xl"
             >
-            {#if hasVideo}
-              <button
-                type="button"
-                class="block w-full px-3 py-1.5 text-left text-[11px] hover:bg-surface-800"
-                onclick={() => {
-                  menuOpen = false;
-                  void detect();
-                }}>Detectar momentos</button
-              >
-            {/if}
-            <button
-              type="button"
-              class="block w-full px-3 py-1.5 text-left text-[11px] hover:bg-surface-800"
-              onclick={() => {
-                menuOpen = false;
-                void scanMissing();
-              }}>Buscar archivos ausentes</button
-            >
-          </div>
-        {/if}
-      </div>
+              {#if !brollOnly}
+                <button
+                  type="button"
+                  class="block w-full px-3 py-1.5 text-left text-[11px] hover:bg-surface-800"
+                  onclick={() => {
+                    menuOpen = false;
+                    dailyOpen = true;
+                  }}>Biblioteca automática…</button
+                >
+              {/if}
+              {#if hasVideo}
+                <button
+                  type="button"
+                  class="block w-full px-3 py-1.5 text-left text-[11px] hover:bg-surface-800"
+                  onclick={() => {
+                    menuOpen = false;
+                    void detect();
+                  }}>Detectar momentos</button
+                >
+              {/if}
+              {#if !brollOnly}
+                <button
+                  type="button"
+                  class="block w-full px-3 py-1.5 text-left text-[11px] hover:bg-surface-800"
+                  onclick={() => {
+                    menuOpen = false;
+                    void scanMissing();
+                  }}>Buscar archivos ausentes</button
+                >
+              {/if}
+            </div>
+          {/if}
+        </div>
+      {/if}
     </div>
 
     {#if !hideChrome}
@@ -742,7 +761,7 @@
         >
       </div>
     {/if}
-    {#if dailyOpen}
+    {#if dailyOpen && !brollOnly}
       <div class="mb-2 rounded-lg border border-surface-800 p-2">
         <DailySettings
           enabled={dailyEnabled}
