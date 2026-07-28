@@ -316,7 +316,14 @@ pub async fn process_next_job() -> AppResult<Option<String>> {
     }
 
     // Cooperative cancel: race chain generate vs cancel flag polling
-    let gen_fut = generate_along_chain(&chain, &req, &policy, &project_key, opportunistic);
+    let gen_fut = generate_along_chain(
+        &chain,
+        &req,
+        &policy,
+        &project_key,
+        opportunistic,
+        &job_origin,
+    );
     let cancel_fut = async {
         loop {
             if super::supervision::is_cancel_requested(&id)
@@ -572,24 +579,37 @@ pub async fn process_next_job() -> AppResult<Option<String>> {
 /// Attempt providers in order. Before any paid candidate, re-run the full
 /// cost/budget gate (CYCLE-003) so OmniRoute→Pollinations never spends money
 /// without a live budget check.
+///
+/// **Hard ban (AGENTS.md §4 / Codex human review):** `daily_feed` origin and
+/// opportunistic jobs never attempt paid providers (Pollinations), even when
+/// `VIGILCUT_PAID_PROVIDERS=1` and budget remains.
 pub async fn generate_along_chain(
     chain: &[ImageProvider],
     req: &GenerationRequest,
     policy: &CostPolicy,
     project_key: &str,
     opportunistic: bool,
+    job_origin: &str,
 ) -> Result<GenerationResult, ProviderError> {
     if chain.is_empty() {
         return Err(ProviderError::Unavailable(
             "no image providers configured".into(),
         ));
     }
+    let ban_paid = job_origin == "daily_feed" || opportunistic;
     let mut last_err: Option<ProviderError> = None;
     let mut free_route_failed = false;
 
     for provider in chain {
         let is_paid = !provider.is_free_tier();
         if is_paid {
+            if ban_paid {
+                last_err = Some(ProviderError::Other(
+                    "daily_feed_paid_forbidden: paid providers (including Pollinations) are never eligible for daily feed or opportunistic generation"
+                        .into(),
+                ));
+                continue;
+            }
             match can_enqueue_generation(policy, project_key, true, opportunistic) {
                 Ok(CostGate::Allow { .. }) => {}
                 Ok(CostGate::Deny { reason }) => {
@@ -1062,7 +1082,7 @@ mod resident_worker_tests {
             seed: None,
             job_id: format!("job-fb-{}", uuid::Uuid::new_v4()),
         };
-        let result = generate_along_chain(&chain, &req, &policy, "proj-fb", false)
+        let result = generate_along_chain(&chain, &req, &policy, "proj-fb", false, "video_need")
             .await
             .expect("paid fallback must succeed");
         assert_eq!(result.provider, "pollinations");
@@ -1099,7 +1119,7 @@ mod resident_worker_tests {
             seed: None,
             job_id: format!("job-deny-{}", uuid::Uuid::new_v4()),
         };
-        let err = generate_along_chain(&chain, &req, &policy, "proj-deny", false)
+        let err = generate_along_chain(&chain, &req, &policy, "proj-deny", false, "video_need")
             .await
             .expect_err("must not generate paid when disabled");
         let msg = err.to_string();
@@ -1147,7 +1167,7 @@ mod resident_worker_tests {
             seed: None,
             job_id: format!("job-budget-{}", uuid::Uuid::new_v4()),
         };
-        let err = generate_along_chain(&chain, &req, &policy, "proj-budget", false)
+        let err = generate_along_chain(&chain, &req, &policy, "proj-budget", false, "video_need")
             .await
             .expect_err("budget 0 must block paid fallback");
         assert!(
@@ -1159,6 +1179,65 @@ mod resident_worker_tests {
         set_library_root_override(None);
         std::env::remove_var("VIGILCUT_PAID_PROVIDERS");
         std::env::remove_var("VIGILCUT_DAILY_PAID_BUDGET");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn daily_feed_never_attempts_paid_pollinations_fallback() {
+        // Codex human-review finding on CYCLE-003: opportunistic/daily must not
+        // fall through to Pollinations even when paid gates are wide open.
+        let _lock = lock_library_for_test();
+        let dir = std::env::temp_dir().join(format!("vc-fb-daily-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        set_library_root_override(Some(dir.clone()));
+        std::env::set_var("VIGILCUT_PAID_PROVIDERS", "1");
+        std::env::set_var("VIGILCUT_DAILY_PAID_BUDGET", "100");
+        std::env::set_var("VIGILCUT_POLLINATIONS_EXPERIMENTAL", "1");
+
+        let omni = ScriptedImageProvider::new("omniroute", true, true);
+        let poli = ScriptedImageProvider::new("pollinations", false, false);
+        let poli_calls = poli.calls.clone();
+        let chain = vec![ImageProvider::Scripted(omni), ImageProvider::Scripted(poli)];
+        let policy = CostPolicy {
+            paid_providers_enabled: true,
+            daily_paid_budget: 100.0,
+            opportunistic_enabled: true,
+            ..CostPolicy::default()
+        };
+        let req = GenerationRequest {
+            prompt: "daily paid ban".into(),
+            negative_prompt: String::new(),
+            model: None,
+            width: 128,
+            height: 72,
+            seed: None,
+            job_id: format!("job-daily-{}", uuid::Uuid::new_v4()),
+        };
+        let err = generate_along_chain(
+            &chain,
+            &req,
+            &policy,
+            "daily_feed",
+            true, // opportunistic, as queue_generation_with_key does for daily
+            "daily_feed",
+        )
+        .await
+        .expect_err("daily feed must not succeed via paid fallback");
+        assert!(
+            err.to_string().contains("daily_feed_paid_forbidden"),
+            "unexpected: {err}"
+        );
+        assert_eq!(
+            poli_calls.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "Pollinations must never be called for daily_feed"
+        );
+
+        set_library_root_override(None);
+        std::env::remove_var("VIGILCUT_PAID_PROVIDERS");
+        std::env::remove_var("VIGILCUT_DAILY_PAID_BUDGET");
+        std::env::remove_var("VIGILCUT_POLLINATIONS_EXPERIMENTAL");
         let _ = std::fs::remove_dir_all(dir);
     }
 

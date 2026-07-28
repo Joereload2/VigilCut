@@ -189,3 +189,12 @@ Por revisar → Generar otra inicialmente ausente → rechazar con motivo → Ah
 - Smoke manual A/B/C en app Tauri no ejecutado en este poll (sin UI headless).
 - `visual_assign_need_asset` sigue registrado (compat); el path de producto usa `visual_use_asset_for_need`.
 - Preview compacta en strip full-width puede compartir el mismo player instance; si hay glitches de doble-video en runtime, unificar a un solo `VideoPreview` con CSS (follow-up).
+
+## Revisión Codex
+
+- Fecha: 2026-07-28.
+- Ángulos: evidencia real, alcance y deriva/adversarial.
+- `f3ab841` satisface PM-001..005; `npm run check` pasó con 0 errores y la
+  suite visual serial pasó 49/49 fuera del sandbox.
+- La regeneración prematura actual llegó después en `d45ede9`; se separó como
+  CYCLE-004 para no reescribir este resultado histórico.

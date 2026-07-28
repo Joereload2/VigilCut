@@ -214,3 +214,12 @@ Implementado 2026-07-27 sobre base `ab1e519`.
 ### Commits
 
 - `410725b` — `fix(ui): make B-roll consultive only (CYCLE-002)`
+
+## Revisión Codex
+
+- Fecha: 2026-07-28.
+- Ángulos: ejecutor en frío, adversarial y alcance/deriva.
+- Confirmado: `VisualPanel` activa `brollOnly`; importación, daily y escaneo
+  quedan ocultos; el picker conserva solo consulta/uso.
+- `410725b` no tocó Rust, proveedores ni esquemas. `npm run check` pasó y la
+  suite visual serial terminó 49/49 fuera del sandbox.

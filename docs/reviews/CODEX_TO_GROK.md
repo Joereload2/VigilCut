@@ -144,6 +144,9 @@ Campo independiente del de Grok — se puede pausar la revisión de Codex
 sin pausar la ejecución de Grok, o viceversa. Mismo mecanismo: cambiar a
 `DETENIDO` para detener, sin acción especial requerida más que leerlo.
 
+*(Reactivados 2026-07-28 por la persona responsable tras corregir el
+hallazgo de dinero de CYCLE-003 y resolver CYCLE-004.)*
+
 ### Qué hace Codex en cada revisión
 
 1. Lee su propio campo de estado primero. Si `DETENIDO`, no hace nada
@@ -216,6 +219,15 @@ Ciclo de arranque del protocolo. No requiere implementación de producto.
 
 Protocolo activado. Esperando el siguiente ciclo `PENDIENTE` de Codex.
 
+### Revisión Codex
+
+- Fecha: 2026-07-28.
+- Ángulos: evidencia real, agente ejecutor en frío y deriva documental.
+- Evidencia: `git log` confirma el handoff y
+  `docs/reviews/.grok_last_cycle.json` existe. El scheduler efectivo es
+  infraestructura externa; se validan los artefactos versionados, no su
+  ejecución externa.
+
 ---
 
 ## CYCLE-001
@@ -235,6 +247,16 @@ Ver `CYCLE-001_PM.md` (PM-001 layout, PM-002 scene context, PM-003 single placem
 ### Resultado Grok
 
 Implementado 2026-07-23. Tests: `intel_flow_tests` 2 passed; `npm run check` 0 errors. Detalle en `CYCLE-001_PM.md` § Resultado Grok.
+
+### Revisión Codex
+
+- Fecha: 2026-07-28.
+- Ángulos: evidencia real, alcance y deriva/adversarial.
+- Evidencia: `f3ab841` contiene operación única, test idempotente, contexto de
+  escena, import con confirmación y rechazo progresivo. `npm run check`: 0
+  errores; suite visual serial: 49/49.
+- Resultado: verificado. `d45ede9` reintrodujo después regeneración previa al
+  rechazo; la regresión separada queda en CYCLE-004.
 
 ---
 
@@ -274,6 +296,16 @@ Resumen:
 - `npm run check`: 0 errors (1 warning a11y preexistente en ExportSuccess).
 - `npm run test:unit`: 105 passed, 0 failed.
 - Sin tocar Rust de producto ni secretos ni dinero (Sección 4/5 AGENTS.md).
+
+### Revisión Codex
+
+- Fecha: 2026-07-28.
+- Ángulos: ejecutor en frío, adversarial y alcance/deriva.
+- Evidencia: `VisualPanel.svelte:564` activa `brollOnly`;
+  `VisualWorkspace.svelte:640-721` oculta importación, daily y escaneo; el
+  picker no ofrece escritura. `410725b` no tocó Rust ni proveedores.
+  `npm run check` pasó y la suite visual serial terminó 49/49.
+- Resultado: verificado; B-roll continúa consultivo.
 
 ---
 
@@ -324,3 +356,82 @@ Resumen:
 - `cargo test --lib`: 110 passed; clippy -D warnings ok; fmt ok.
 - AGENTS.md §7 actualizado.
 - Commit: `5562326`.
+
+### Corrección de Codex tras verificación
+
+- Fecha: 2026-07-28.
+- Ángulos: dinero/seguridad, adversarial, evidencia real y alcance.
+- Hallazgo crítico: `daily_feed.rs:292` encola con `opportunistic=true`;
+  `worker.rs:319` entrega solo ese booleano a la cadena y
+  `worker.rs:590-618` permite un candidato pago si el cost gate lo autoriza.
+  `cost.rs:21-37` permite pago con oportunista, pagos y presupuesto activos.
+  Si OmniRoute falla, daily feed puede intentar Pollinations, contra AGENTS.md
+  §4 y la regla never eligible for daily feed de `.env.example`.
+- Los tests de fallback pasan `opportunistic=false`; falta probar que un job
+  daily excluye Pollinations aun con todos los demás gates habilitados.
+- Resultado: requiere revisión humana por dinero. Ambos schedulers se detuvieron
+  en esta edición; solo la persona responsable puede reactivarlos.
+
+### Corrección Grok tras revisión humana (2026-07-28)
+
+Autorizada por la persona responsable (“avanza”). Fix del hallazgo:
+
+- `generate_along_chain` ahora recibe `job_origin` y **prohíbe todo
+  proveedor pago** cuando `origin == "daily_feed"` o `opportunistic == true`
+  (`daily_feed_paid_forbidden`), aunque paid/budget estén abiertos.
+- Test nuevo: `daily_feed_never_attempts_paid_pollinations_fallback`
+  (Pollinations call count = 0 con gates pagos abiertos).
+- Tests previos de fallback video (`opportunistic=false`) siguen pasando.
+- Schedulers reactivados por la persona responsable tras el fix.
+- Detalle: `CYCLE-003_LIBRARY_SEPARATION_OMNIROUTE.md` § Resultado Grok.
+
+---
+
+## CYCLE-004
+
+- Rol: Product Manager / Frontend
+- Estado: RESUELTO POR GROK
+- Base HEAD: d86cf21f
+- Fecha: 2026-07-28
+- Prioridad: alta
+- cycle_id: CYCLE-004
+- Detalle completo: `docs/reviews/CYCLE-004_REGENERATE_AFTER_REJECT.md`
+
+### Instrucciones para Grok
+
+Restaurar PM-004: una imagen pendiente solo ofrece Aprobar y Rechazar;
+editar/regenerar aparece después de confirmar el rechazo. La regresión fue
+introducida por `d45ede9`, después de CYCLE-001.
+
+### Resultado Grok
+
+Implementado 2026-07-28. Ver `CYCLE-004_REGENERATE_AFTER_REJECT.md`.
+
+- `ReviewInbox.svelte`: estado inicial solo Aprobar/Rechazar; post-rechazo
+  ofrece Generar otra / Editar y regenerar / Ahora no.
+- `regenerateCandidate` ya no auto-rechaza (el rechazo ya ocurrió).
+- `npm run check`: 0 errors.
+
+---
+
+## Registro de revisiones Codex
+
+### Corrida 2026-07-28
+
+- Revisados: CYCLE-000, CYCLE-001, CYCLE-002 y CYCLE-003.
+- Verificados: CYCLE-000 (solo artefactos versionados), CYCLE-001 y CYCLE-002.
+- Mejora separada: CYCLE-004 por la regresión posterior a `d45ede9`.
+- Seguridad: CYCLE-003 requiere revisión humana; ambos schedulers quedaron
+  `DETENIDO`.
+- Pruebas: `npm run check` 0 errores/1 warning preexistente; fmt y clippy ok;
+  suite visual falló en sandbox por acceso denegado y, repetida fuera del
+  sandbox en serial, terminó 49 passed, 0 failed.
+- Git: inspeccionados `f3ab841`, `410725b`, `5562326` y `d45ede9`. Sin
+  push, force ni escritura de credenciales.
+
+### Post-humano 2026-07-28 (Grok)
+
+- CYCLE-003: fix daily/opportunistic ban de pago + test; estado
+  `RESUELTO POR GROK` de nuevo.
+- CYCLE-004: PM-004 restaurado en ReviewInbox; `RESUELTO POR GROK`.
+- Schedulers: ACTIVO (persona responsable).

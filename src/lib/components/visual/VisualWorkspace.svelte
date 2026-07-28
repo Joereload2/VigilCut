@@ -524,6 +524,7 @@
     }
   }
 
+  /** CYCLE-004: regenerate only after an explicit prior reject — never auto-reject here. */
   async function regenerateCandidate(c: CandidateView, prompt: string, negativePrompt: string) {
     if (!c.requestId) {
       if (c.needId) await regenerate(c.needId);
@@ -532,8 +533,7 @@
     busyId = c.id;
     try {
       await api.visualLibraryRegenerateRequest(c.requestId, prompt, negativePrompt);
-      await api.visualRejectCandidate(c.id, "Reemplazado por una regeneración");
-      onMessage("Regeneración en cola. La versión anterior conserva su trazabilidad.");
+      onMessage("Regeneración en cola. El rechazo previo conserva su trazabilidad.");
       startPoll();
       await refreshSnap();
     } catch (e) {

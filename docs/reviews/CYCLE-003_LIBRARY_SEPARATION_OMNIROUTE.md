@@ -1,7 +1,7 @@
 # CYCLE-003 — Biblioteca: separar carga de consulta + OmniRoute primero
 
 - Rol: Product Manager / Arquitectura
-- Estado: RESUELTO POR GROK
+- Estado: PENDIENTE — REQUIERE REVISIÓN HUMANA
 - Base HEAD: ab1e51932d5cd50c6d637b1d01086ab9d898e2af (ejecutado después de
   CYCLE-002 commit `410725b`; sin conflicto de archivos con CYCLE-002)
 - Fecha: 2026-07-27
@@ -297,3 +297,30 @@ Implementado 2026-07-27, tras CYCLE-002 (`410725b`).
 ### Commits
 
 - `5562326` — `fix(library): separate ingestion/query + OmniRoute fallback (CYCLE-003)`
+
+### Corrección post-Codex (revisión humana, 2026-07-28)
+
+Codex reabrió con `PENDIENTE — REQUIERE REVISIÓN HUMANA`: daily feed
+(`opportunistic=true`) podía caer a Pollinations si OmniRoute fallaba y el
+cost gate de pago pasaba.
+
+Fix (autorizado por persona responsable):
+
+- `generate_along_chain(..., job_origin)`: si `job_origin == "daily_feed"`
+  **o** `opportunistic`, no se intenta ningún proveedor pago; error
+  `daily_feed_paid_forbidden`.
+- Test: `daily_feed_never_attempts_paid_pollinations_fallback` — 4/4 tests
+  de cadena OK (incl. los 3 de fallback video previos).
+
+## Corrección de Codex tras verificación
+
+- Fecha: 2026-07-28.
+- Ángulos: dinero/seguridad, adversarial, evidencia real, alcance y deriva.
+- Daily encola con `opportunistic=true` (`daily_feed.rs:292`); el worker
+  entrega ese booleano a la cadena (`worker.rs:319`); el fallback permite pago
+  si el gate lo autoriza (`worker.rs:590-618`, `cost.rs:21-37`). Con pagos,
+  experimental y presupuesto activos, un fallo de OmniRoute puede intentar
+  Pollinations para daily, prohibido por AGENTS.md §4.
+- Falta un test de origen daily con todos los demás gates habilitados; los tests
+  actuales pasan `opportunistic=false`.
+- Escalado a revisión humana y ambos schedulers detenidos. No se corrigió código.
