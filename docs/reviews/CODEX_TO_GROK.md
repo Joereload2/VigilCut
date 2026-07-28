@@ -323,3 +323,4 @@ Resumen:
 - Tests: 3 de fallback/budget + chain default + architecture.
 - `cargo test --lib`: 110 passed; clippy -D warnings ok; fmt ok.
 - AGENTS.md §7 actualizado.
+- Commit: `5562326`.

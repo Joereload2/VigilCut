@@ -296,4 +296,4 @@ Implementado 2026-07-27, tras CYCLE-002 (`410725b`).
 
 ### Commits
 
-Ver commit `fix(library): separate ingestion/query + OmniRoute fallback (CYCLE-003)`.
+- `5562326` — `fix(library): separate ingestion/query + OmniRoute fallback (CYCLE-003)`
