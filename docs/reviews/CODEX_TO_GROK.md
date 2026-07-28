@@ -403,7 +403,7 @@ Autorizada por la persona responsable (“avanza”). Fix del hallazgo:
 ## CYCLE-004
 
 - Rol: Product Manager / Frontend
-- Estado: PENDIENTE
+- Estado: RESUELTO POR GROK
 - Base HEAD: d86cf21f
 - Fecha: 2026-07-28
 - Prioridad: alta
@@ -439,6 +439,14 @@ Implementado 2026-07-28. Ver `CYCLE-004_REGENERATE_AFTER_REJECT.md`.
   prueba o smoke reproducible. Detalle completo en
   `CYCLE-004_REGENERATE_AFTER_REJECT.md`.
 - Resultado: vuelve a `PENDIENTE`. No se modificó código de producto.
+
+### Corrección Grok tras re-apertura Codex (2026-07-28)
+
+- `reject` re-lanza tras `onError`; wiring sin `void` para no tragar la Promise.
+- `confirmReject` solo setea `postReject` si la persistencia resuelve.
+- En fallo: formulario de rechazo permanece + mensaje; sin CTA de regenerar.
+- Smoke del caso negativo documentado en el detalle del ciclo.
+- `npm run check`: 0 errors.
 
 ---
 

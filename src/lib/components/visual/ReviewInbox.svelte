@@ -13,6 +13,7 @@
     candidates?: CandidateView[];
     busyId?: string | null;
     onApprove: (c: CandidateView, place: boolean) => void;
+    /** Must reject/throw if persistence fails — caller must not swallow the error. */
     onReject: (c: CandidateView, reason: string) => void | Promise<void>;
     onRegenerate: (
       c: CandidateView,
@@ -23,6 +24,8 @@
 
   let rejectId = $state<string | null>(null);
   let rejectReason = $state("");
+  /** Local message when backend reject fails (form stays open). */
+  let rejectPersistError = $state<string | null>(null);
   /** PM-004 / CYCLE-004: regenerate only after a confirmed reject. */
   let postReject = $state<CandidateView | null>(null);
   let postRejectEditing = $state(false);
@@ -48,13 +51,21 @@
 
   async function confirmReject(c: CandidateView) {
     const reason = rejectReason || "Rechazo humano";
-    await Promise.resolve(onReject(c, reason));
+    rejectPersistError = null;
+    try {
+      await Promise.resolve(onReject(c, reason));
+    } catch (e) {
+      // Persistence failed: keep reject form, never enable regenerate CTAs.
+      rejectPersistError = String(e);
+      return;
+    }
     postReject = { ...c };
     postRejectEditing = false;
     editPrompt = c.prompt ?? "";
     editNegative = c.negativePrompt ?? "";
     rejectId = null;
     rejectReason = "";
+    rejectPersistError = null;
   }
 
   function clearPostReject() {
@@ -210,6 +221,12 @@
               bind:value={rejectReason}
               placeholder="Motivo del rechazo"
             />
+            {#if rejectPersistError}
+              <p class="rounded border border-red-900/50 bg-red-950/40 px-2 py-1 text-[10px] text-red-200">
+                No se pudo guardar el rechazo. No se ofrece regenerar hasta que se persista.
+                <span class="mt-0.5 block break-words text-red-300/80">{rejectPersistError}</span>
+              </p>
+            {/if}
             <div class="flex gap-2">
               <button
                 type="button"
@@ -217,8 +234,13 @@
                 disabled={busyId === c.id}
                 onclick={() => void confirmReject(c)}>Confirmar rechazo</button
               >
-              <button type="button" class="btn-ghost text-[10px]" onclick={() => (rejectId = null)}
-                >Volver</button
+              <button
+                type="button"
+                class="btn-ghost text-[10px]"
+                onclick={() => {
+                  rejectId = null;
+                  rejectPersistError = null;
+                }}>Volver</button
               >
             </div>
           {:else}
@@ -248,6 +270,7 @@
                 onclick={() => {
                   rejectId = c.id;
                   rejectReason = "";
+                  rejectPersistError = null;
                 }}>Rechazar</button
               >
             </div>

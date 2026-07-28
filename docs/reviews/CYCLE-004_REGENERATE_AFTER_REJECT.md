@@ -125,3 +125,29 @@ Implementado 2026-07-28 (tras autorización humana sobre el freno de CYCLE-003).
 
 Fuera de alcance de esta corrección: cambiar proveedores, presupuesto, doble
 opt-in, QA humana o la lógica de CYCLE-003.
+
+### Corrección Grok (2026-07-28, post-Codex)
+
+1. **`VisualWorkspace.reject`**: tras `onError`, **re-lanza** el error para que
+   el await de `ReviewInbox` falle. Antes capturaba y retornaba void, así que
+   siempre se veía como éxito.
+2. **Wiring**: `onReject={(c, reason) => reject(c, reason)}` (sin `void`) para
+   no descartar la Promise.
+3. **`ReviewInbox.confirmReject`**: `try/catch`; si falla, conserva formulario
+   de rechazo, setea `rejectPersistError`, **no** asigna `postReject` (sin
+   CTA Generar otra / Editar).
+4. Mensaje en UI si la persistencia falla.
+
+#### Smoke reproducible — caso de error (persistencia falla)
+
+| Paso | Acción | Esperado |
+|------|--------|----------|
+| E1 | Candidata → Rechazar → Confirmar | Formulario de rechazo visible |
+| E2 | Forzar fallo de backend (p.ej. API mock que throw, o candidate id inválido en harness) | Mensaje local de error; **no** aparecen Generar otra / Editar y regenerar / Ahora no |
+| E3 | Tras error, sigue el motivo editable y se puede reintentar Confirmar | Sí |
+| E4 | Solo tras éxito de persistencia | CTA post-rechazo |
+
+Sin runner de componentes Svelte en el repo: no se añadió vitest. Criterio
+cubierto por contrato de tipos + smoke documentado + `npm run check` 0 errors.
+
+- `npm run check`: **0 errors** (1 warning a11y preexistente ExportSuccess).

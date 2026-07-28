@@ -500,7 +500,11 @@
     }
   }
 
-  async function reject(c: CandidateView, reason: string) {
+  /**
+   * Persist human reject. On failure: report via onError and rethrow so
+   * ReviewInbox does not enter post-reject / regenerate (CYCLE-004 Codex).
+   */
+  async function reject(c: CandidateView, reason: string): Promise<void> {
     busyId = c.id;
     try {
       await api.visualRejectCandidate(c.id, reason);
@@ -508,6 +512,7 @@
       await refreshSnap();
     } catch (e) {
       onError(String(e));
+      throw e;
     } finally {
       busyId = null;
     }
@@ -823,7 +828,7 @@
         candidates={pending}
         {busyId}
         onApprove={(c, place) => void approve(c, place)}
-        onReject={(c, reason) => void reject(c, reason)}
+        onReject={(c, reason) => reject(c, reason)}
         onRegenerate={(candidate, prompt, negativePrompt) => void regenerateCandidate(candidate, prompt, negativePrompt)}
       />
     {/if}
