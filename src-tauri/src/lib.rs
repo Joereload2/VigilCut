@@ -6,6 +6,7 @@ pub mod models;
 pub mod pipeline;
 mod state;
 pub mod visual_library;
+pub mod vnext;
 
 use commands::analyze::AnalysisCache;
 use commands::clipping::ClippingCache;
