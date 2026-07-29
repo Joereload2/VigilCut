@@ -280,7 +280,7 @@ pub fn vnext_create_job(req: CreateJobRequest) -> AppResult<JobDto> {
 
 #[tauri::command]
 pub fn vnext_get_job(id: String) -> AppResult<JobDto> {
-    let j = get_job(&id)?.ok_or_else(|| AppError::NotFound(id))?;
+    let j = get_job(&id)?.ok_or(AppError::NotFound(id))?;
     Ok(map_job(j))
 }
 
@@ -325,7 +325,7 @@ pub fn vnext_list_clipping_runs(content_project_id: String) -> AppResult<Vec<Str
 
 #[tauri::command]
 pub fn vnext_get_clipping_run(run_id: String) -> AppResult<crate::models::clipping::ClippingRun> {
-    load_run(&run_id)?.ok_or_else(|| AppError::NotFound(run_id))
+    load_run(&run_id)?.ok_or(AppError::NotFound(run_id))
 }
 
 #[tauri::command]
@@ -388,7 +388,7 @@ pub async fn vnext_start_vertical_render(plan_id: String) -> AppResult<JobDto> {
     let job_id = enqueue_vertical_render(&plan.id, &plan.content_project_id)?;
     // Execute in-process (MVP single process; no daemon)
     let _ = execute_vertical_render_job(&job_id).await;
-    let j = get_job(&job_id)?.ok_or_else(|| AppError::NotFound(job_id))?;
+    let j = get_job(&job_id)?.ok_or(AppError::NotFound(job_id))?;
     Ok(map_job(j))
 }
 
