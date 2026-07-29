@@ -9,4 +9,5 @@
 
 pub mod application;
 pub mod domain;
+pub mod media;
 pub mod persistence;

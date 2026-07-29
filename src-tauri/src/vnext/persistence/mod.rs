@@ -8,6 +8,7 @@ mod decisions;
 mod jobs;
 mod projects;
 mod recipes;
+mod render_plans;
 
 pub use artifacts::*;
 pub use candidates::*;
@@ -17,3 +18,4 @@ pub use decisions::*;
 pub use jobs::*;
 pub use projects::*;
 pub use recipes::*;
+pub use render_plans::*;
