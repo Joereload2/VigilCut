@@ -1,8 +1,8 @@
 <script lang="ts">
   /** Horizontal work-mode switcher for the top bar (no left sidebar). */
   interface Props {
-    mode: "silence" | "clips" | "visual" | "library";
-    onMode: (m: "silence" | "clips" | "visual" | "library") => void;
+    mode: "vnext" | "silence" | "clips" | "visual" | "library";
+    onMode: (m: "vnext" | "silence" | "clips" | "visual" | "library") => void;
   }
   let { mode, onMode }: Props = $props();
 </script>
@@ -12,6 +12,18 @@
   role="tablist"
   aria-label="Modo de trabajo"
 >
+  <button
+    type="button"
+    role="tab"
+    aria-selected={mode === "vnext"}
+    class="shrink-0 rounded-md px-2.5 py-1 text-[11px] font-semibold transition sm:px-3 sm:text-xs
+      {mode === 'vnext'
+      ? 'bg-emerald-600 text-white'
+      : 'text-surface-400 hover:bg-surface-800 hover:text-surface-200'}"
+    onclick={() => onMode("vnext")}
+  >
+    Producción
+  </button>
   <button
     type="button"
     role="tab"

@@ -107,6 +107,46 @@ pub fn get_artifact(id: &str) -> AppResult<Option<ArtifactRow>> {
     .map_err(|e| AppError::Message(e.to_string()))
 }
 
+pub fn list_artifacts_for_project(
+    content_project_id: &str,
+    limit: usize,
+) -> AppResult<Vec<ArtifactRow>> {
+    let conn = open_vnext_db()?;
+    let limit = limit.clamp(1, 500) as i64;
+    let mut stmt = conn
+        .prepare(
+            r#"SELECT id, content_project_id, kind, role, path, sha256, byte_size, mime_type,
+                      created_by_job_id, probe_json, validation_status, validation_notes, created_at
+               FROM artifacts WHERE content_project_id = ?1
+               ORDER BY created_at DESC LIMIT ?2"#,
+        )
+        .map_err(|e| AppError::Message(e.to_string()))?;
+    let rows = stmt
+        .query_map(params![content_project_id, limit], |r| {
+            Ok(ArtifactRow {
+                id: r.get(0)?,
+                content_project_id: r.get(1)?,
+                kind: r.get(2)?,
+                role: r.get(3)?,
+                path: r.get(4)?,
+                sha256: r.get(5)?,
+                byte_size: r.get(6)?,
+                mime_type: r.get(7)?,
+                created_by_job_id: r.get(8)?,
+                probe_json: r.get(9)?,
+                validation_status: r.get(10)?,
+                validation_notes: r.get(11)?,
+                created_at: r.get(12)?,
+            })
+        })
+        .map_err(|e| AppError::Message(e.to_string()))?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(|e| AppError::Message(e.to_string()))?);
+    }
+    Ok(out)
+}
+
 pub fn list_parent_ids(artifact_id: &str) -> AppResult<Vec<String>> {
     let conn = open_vnext_db()?;
     let mut stmt = conn

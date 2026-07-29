@@ -14,4 +14,5 @@ pub mod timeline;
 pub mod vad;
 pub mod visual;
 pub mod visual_intel;
+pub mod vnext;
 pub mod watch;

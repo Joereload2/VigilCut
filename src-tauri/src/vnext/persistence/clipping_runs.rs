@@ -97,3 +97,20 @@ pub fn load_clipping_run(id: &str) -> AppResult<Option<ClippingRun>> {
 pub fn content_project_id_for_run(run_id: &str) -> AppResult<Option<String>> {
     Ok(get_clipping_run_meta(run_id)?.map(|m| m.content_project_id))
 }
+
+pub fn list_run_ids_for_project(content_project_id: &str) -> AppResult<Vec<String>> {
+    let conn = open_vnext_db()?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id FROM clipping_runs WHERE content_project_id = ?1 ORDER BY created_at DESC",
+        )
+        .map_err(|e| AppError::Message(e.to_string()))?;
+    let rows = stmt
+        .query_map(params![content_project_id], |r| r.get(0))
+        .map_err(|e| AppError::Message(e.to_string()))?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(|e| AppError::Message(e.to_string()))?);
+    }
+    Ok(out)
+}

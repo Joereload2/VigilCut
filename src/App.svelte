@@ -13,6 +13,7 @@
   import VisualPanel from "$lib/components/VisualPanel.svelte";
   import LibraryWorkspace from "$lib/components/library/LibraryWorkspace.svelte";
   import AuxTabShell from "$lib/components/AuxTabShell.svelte";
+  import VnextShell from "$lib/components/vnext/VnextShell.svelte";
   import { projectStore } from "$lib/stores/project.svelte";
   import type { FfmpegStatus, JobProgress } from "$lib/types";
   import * as api from "$lib/utils/tauri";
@@ -20,7 +21,7 @@
   let ffmpeg = $state<FfmpegStatus | null>(null);
   let version = $state("0.1.0");
   /** Top-level work mode — tabs in TopBar, no left sidebar */
-  let workspaceTab = $state<"silence" | "clips" | "visual" | "library">("silence");
+  let workspaceTab = $state<"vnext" | "silence" | "clips" | "visual" | "library">("vnext");
   let toast = $state<string | null>(null);
   let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -284,7 +285,15 @@
     onReanalyze={() => projectStore.reanalyze()}
   />
 
-  {#if workspaceTab === "library"}
+  {#if workspaceTab === "vnext"}
+    <div class="min-h-0 min-w-0 flex-1 overflow-hidden">
+      <VnextShell
+        onOpenLegacy={() => {
+          workspaceTab = "clips";
+        }}
+      />
+    </div>
+  {:else if workspaceTab === "library"}
     <LibraryWorkspace />
   {:else if workspaceTab === "visual" && !projectStore.mediaPath}
     <div class="flex min-h-0 min-w-0 flex-1 items-center justify-center p-6">

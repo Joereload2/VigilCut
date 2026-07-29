@@ -9,8 +9,8 @@
     version: string;
     onOpen: () => void;
     onReanalyze: () => void;
-    mode?: "silence" | "clips" | "visual" | "library";
-    onMode?: (m: "silence" | "clips" | "visual" | "library") => void;
+    mode?: "vnext" | "silence" | "clips" | "visual" | "library";
+    onMode?: (m: "vnext" | "silence" | "clips" | "visual" | "library") => void;
   }
 
   let {

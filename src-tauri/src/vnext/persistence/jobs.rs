@@ -79,6 +79,53 @@ pub fn get_job(id: &str) -> AppResult<Option<JobRow>> {
     get_job_conn(&conn, id)
 }
 
+pub fn list_jobs_for_project(content_project_id: &str, limit: usize) -> AppResult<Vec<JobRow>> {
+    let conn = open_vnext_db()?;
+    let limit = limit.clamp(1, 500) as i64;
+    let mut stmt = conn
+        .prepare(
+            r#"SELECT id, content_project_id, kind, status, idempotency_key,
+                      attempt, max_attempts, priority, input_json,
+                      result_artifact_id, render_plan_id, error_json, stage, progress_pct,
+                      locked_by, lease_expires_at, cancel_requested,
+                      created_at, updated_at, started_at, finished_at
+               FROM jobs WHERE content_project_id = ?1
+               ORDER BY created_at DESC LIMIT ?2"#,
+        )
+        .map_err(|e| AppError::Message(e.to_string()))?;
+    let rows = stmt
+        .query_map(params![content_project_id, limit], map_job_row)
+        .map_err(|e| AppError::Message(e.to_string()))?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(|e| AppError::Message(e.to_string()))?);
+    }
+    Ok(out)
+}
+
+pub fn list_recent_jobs(limit: usize) -> AppResult<Vec<JobRow>> {
+    let conn = open_vnext_db()?;
+    let limit = limit.clamp(1, 500) as i64;
+    let mut stmt = conn
+        .prepare(
+            r#"SELECT id, content_project_id, kind, status, idempotency_key,
+                      attempt, max_attempts, priority, input_json,
+                      result_artifact_id, render_plan_id, error_json, stage, progress_pct,
+                      locked_by, lease_expires_at, cancel_requested,
+                      created_at, updated_at, started_at, finished_at
+               FROM jobs ORDER BY updated_at DESC LIMIT ?1"#,
+        )
+        .map_err(|e| AppError::Message(e.to_string()))?;
+    let rows = stmt
+        .query_map(params![limit], map_job_row)
+        .map_err(|e| AppError::Message(e.to_string()))?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(|e| AppError::Message(e.to_string()))?);
+    }
+    Ok(out)
+}
+
 fn get_job_conn(conn: &rusqlite::Connection, id: &str) -> AppResult<Option<JobRow>> {
     conn.query_row(
         r#"SELECT id, content_project_id, kind, status, idempotency_key,

@@ -172,6 +172,26 @@ pub fn run() {
             visual_library::commands::sync_commands::library_sync_health_check,
             visual_library::commands::sync_commands::library_sync_enqueue_asset,
             visual_library::commands::sync_commands::library_sync_run_once,
+            // vNext production API
+            commands::vnext::vnext_create_content_project,
+            commands::vnext::vnext_list_content_projects,
+            commands::vnext::vnext_get_content_project,
+            commands::vnext::vnext_create_job,
+            commands::vnext::vnext_get_job,
+            commands::vnext::vnext_list_project_jobs,
+            commands::vnext::vnext_list_queue_jobs,
+            commands::vnext::vnext_retry_job,
+            commands::vnext::vnext_cancel_job,
+            commands::vnext::vnext_list_short_candidates,
+            commands::vnext::vnext_list_clipping_runs,
+            commands::vnext::vnext_get_clipping_run,
+            commands::vnext::vnext_save_review_decision,
+            commands::vnext::vnext_list_review_decisions,
+            commands::vnext::vnext_create_vertical_render_plan,
+            commands::vnext::vnext_start_vertical_render,
+            commands::vnext::vnext_list_project_artifacts,
+            commands::vnext::vnext_project_next_action,
+            commands::vnext::vnext_run_clipping_for_project,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

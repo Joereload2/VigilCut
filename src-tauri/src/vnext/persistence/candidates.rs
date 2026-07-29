@@ -149,6 +149,29 @@ pub fn get_candidate(id: &str) -> AppResult<Option<ClipCandidate>> {
     .map_err(|e| AppError::Message(e.to_string()))
 }
 
+pub fn list_candidates_for_project(content_project_id: &str) -> AppResult<Vec<ClipCandidate>> {
+    let conn = open_vnext_db()?;
+    let mut stmt = conn
+        .prepare(
+            r#"SELECT id, source_media_path, start_s, end_s, duration_s, original_start_s, original_end_s,
+                      transcript_text, title, summary, score, confidence,
+                      score_breakdown_json, reasons_json, warnings_json, strengths_json, risks_json,
+                      workflow_status, variant_group_id, is_primary_variant, framing_json,
+                      source_job_id
+               FROM short_candidates WHERE content_project_id = ?1
+               ORDER BY score DESC"#,
+        )
+        .map_err(|e| AppError::Message(e.to_string()))?;
+    let rows = stmt
+        .query_map(params![content_project_id], map_clip_row)
+        .map_err(|e| AppError::Message(e.to_string()))?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(|e| AppError::Message(e.to_string()))?);
+    }
+    Ok(out)
+}
+
 pub fn list_candidates_for_run(clipping_run_id: &str) -> AppResult<Vec<ClipCandidate>> {
     let conn = open_vnext_db()?;
     let mut stmt = conn
