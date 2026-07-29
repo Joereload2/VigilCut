@@ -90,12 +90,22 @@ pub async fn run_clipping(
         return Err(AppError::Cancelled);
     }
     let run = run?;
+    // Phase 3: durable vNext store (cache is no longer the source of truth).
+    let project = crate::vnext::application::ensure_project_for_media(&run.media_path)?;
+    crate::vnext::application::persist_clipping_run(&run, &project.id)?;
     put_run(&cache, run)
 }
 
 #[tauri::command]
 pub fn get_clipping_run(run_id: String, cache: State<'_, ClippingCache>) -> AppResult<ClippingRun> {
-    get_run(&cache, &run_id)
+    if let Ok(run) = get_run(&cache, &run_id) {
+        return Ok(run);
+    }
+    // Reconstruct from SQLite after restart / cache miss.
+    if let Some(run) = crate::vnext::application::load_run(&run_id)? {
+        return put_run(&cache, run);
+    }
+    Err(AppError::NotFound(format!("Clipping run {run_id}")))
 }
 
 #[tauri::command]
@@ -105,15 +115,19 @@ pub fn update_clip_status(
     status: String,
     cache: State<'_, ClippingCache>,
 ) -> AppResult<ClipCandidate> {
-    take_mut(&cache, &run_id, |run| {
-        let c = run
-            .candidates
-            .iter_mut()
-            .find(|c| c.id == candidate_id)
-            .ok_or_else(|| AppError::NotFound(candidate_id.clone()))?;
-        c.status = parse_status(&status)?;
-        Ok(c.clone())
-    })
+    let st = parse_status(&status)?;
+    // Persist decision first; then refresh cache from DB.
+    let updated =
+        crate::vnext::application::apply_status_decision(&run_id, &candidate_id, st, None)?;
+    let _ = sync_run_cache_from_db(&cache, &run_id);
+    // Also patch cache if present for snappy UI
+    let _ = take_mut(&cache, &run_id, |run| {
+        if let Some(c) = run.candidates.iter_mut().find(|c| c.id == candidate_id) {
+            *c = updated.clone();
+        }
+        Ok(())
+    });
+    Ok(updated)
 }
 
 #[tauri::command]
@@ -124,15 +138,15 @@ pub fn update_clip_span(
     end: f64,
     cache: State<'_, ClippingCache>,
 ) -> AppResult<ClipCandidate> {
-    take_mut(&cache, &run_id, |run| {
-        let c = run
-            .candidates
-            .iter_mut()
-            .find(|c| c.id == candidate_id)
-            .ok_or_else(|| AppError::NotFound(candidate_id.clone()))?;
-        c.set_span(start, end);
-        Ok(c.clone())
-    })
+    let updated =
+        crate::vnext::application::apply_span_decision(&run_id, &candidate_id, start, end)?;
+    let _ = take_mut(&cache, &run_id, |run| {
+        if let Some(c) = run.candidates.iter_mut().find(|c| c.id == candidate_id) {
+            *c = updated.clone();
+        }
+        Ok(())
+    });
+    Ok(updated)
 }
 
 #[tauri::command]
@@ -142,18 +156,22 @@ pub fn update_clip_framing(
     framing: ClipFraming,
     cache: State<'_, ClippingCache>,
 ) -> AppResult<ClipCandidate> {
-    take_mut(&cache, &run_id, |run| {
-        let c = run
-            .candidates
-            .iter_mut()
-            .find(|c| c.id == candidate_id)
-            .ok_or_else(|| AppError::NotFound(candidate_id.clone()))?;
-        c.framing = framing;
-        if !matches!(c.status, ClipReviewStatus::Exported) {
-            c.status = ClipReviewStatus::Modified;
+    let updated =
+        crate::vnext::application::apply_framing_decision(&run_id, &candidate_id, framing)?;
+    let _ = take_mut(&cache, &run_id, |run| {
+        if let Some(c) = run.candidates.iter_mut().find(|c| c.id == candidate_id) {
+            *c = updated.clone();
         }
-        Ok(c.clone())
-    })
+        Ok(())
+    });
+    Ok(updated)
+}
+
+fn sync_run_cache_from_db(cache: &ClippingCache, run_id: &str) -> AppResult<()> {
+    if let Some(run) = crate::vnext::application::load_run(run_id)? {
+        put_run(cache, run)?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -164,7 +182,7 @@ pub fn bulk_clip_status(
     cache: State<'_, ClippingCache>,
 ) -> AppResult<ClippingRun> {
     let st = parse_status(&status)?;
-    take_mut(&cache, &run_id, |run| {
+    let run = take_mut(&cache, &run_id, |run| {
         for c in run.candidates.iter_mut() {
             if !c.is_primary_variant {
                 continue;
@@ -188,7 +206,12 @@ pub fn bulk_clip_status(
             }
         }
         Ok(run.clone())
-    })
+    })?;
+    // Durable snapshot of bulk status changes
+    if let Ok(project) = crate::vnext::application::ensure_project_for_media(&run.media_path) {
+        let _ = crate::vnext::application::persist_clipping_run(&run, &project.id);
+    }
+    Ok(run)
 }
 
 #[derive(Serialize)]
@@ -227,6 +250,9 @@ pub async fn export_clips(
     )
     .await?;
 
+    for c in &run.candidates {
+        let _ = crate::vnext::application::sync_candidate_state(c, &run_id);
+    }
     let run = put_run(&cache, run)?;
     Ok(ExportClipsResponse {
         results,
@@ -242,7 +268,7 @@ pub fn promote_clip_variant(
     candidate_id: String,
     cache: State<'_, ClippingCache>,
 ) -> AppResult<ClippingRun> {
-    take_mut(&cache, &run_id, |run| {
+    let run = take_mut(&cache, &run_id, |run| {
         let gid = run
             .candidates
             .iter()
@@ -255,7 +281,11 @@ pub fn promote_clip_variant(
             }
         }
         Ok(run.clone())
-    })
+    })?;
+    if let Ok(project) = crate::vnext::application::ensure_project_for_media(&run.media_path) {
+        let _ = crate::vnext::application::persist_clipping_run(&run, &project.id);
+    }
+    Ok(run)
 }
 
 #[tauri::command]
@@ -287,12 +317,14 @@ pub async fn export_single_clip(
                 output_path: Some(p.to_string_lossy().into_owned()),
                 error: None,
             };
+            let _ = crate::vnext::application::sync_candidate_state(c, &run_id);
             put_run(&cache, run)?;
             Ok(res)
         }
         Err(e) => {
             c.status = ClipReviewStatus::Error;
             c.error = Some(e.to_string());
+            let _ = crate::vnext::application::sync_candidate_state(c, &run_id);
             put_run(&cache, run)?;
             Ok(ClipExportResult {
                 candidate_id,

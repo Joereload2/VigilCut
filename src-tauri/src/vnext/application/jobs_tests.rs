@@ -9,14 +9,11 @@ use crate::vnext::domain::{
 };
 use crate::vnext::persistence::{
     get_artifact, get_job, insert_artifact, insert_project, insert_recipe, list_parent_ids,
-    open_vnext_db, set_vnext_root_override, InsertArtifact,
+    open_vnext_db, set_vnext_root_override, vnext_test_lock, InsertArtifact,
 };
 use std::path::PathBuf;
-use std::sync::{Arc, Barrier, Mutex, MutexGuard};
+use std::sync::{Arc, Barrier, MutexGuard};
 use std::thread;
-
-/// Serializes tests that share `set_vnext_root_override` (process-global).
-static VNEXT_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 struct TestEnv {
     _guard: MutexGuard<'static, ()>,
@@ -24,7 +21,7 @@ struct TestEnv {
 }
 
 fn setup(label: &str) -> TestEnv {
-    let guard = VNEXT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let guard = vnext_test_lock();
     let dir = std::env::temp_dir().join(format!("vc-vnext-app-{}-{}", label, uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
     set_vnext_root_override(Some(dir.clone()));

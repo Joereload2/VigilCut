@@ -7,7 +7,7 @@ use rusqlite::Connection;
 
 use crate::error::{AppError, AppResult};
 
-pub const VNEXT_SCHEMA_VERSION: i32 = 1;
+pub const VNEXT_SCHEMA_VERSION: i32 = 2;
 pub const VNEXT_DB_FILE: &str = "vnext.db";
 
 static DB_ROOT_OVERRIDE: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
@@ -19,6 +19,15 @@ fn override_lock() -> &'static Mutex<Option<PathBuf>> {
 /// Test/harness: force directory that will contain `vnext.db`.
 pub fn set_vnext_root_override(path: Option<PathBuf>) {
     *override_lock().lock().unwrap_or_else(|e| e.into_inner()) = path;
+}
+
+/// Global mutex for tests that use `set_vnext_root_override` (process-wide path).
+pub fn vnext_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    TEST_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
 }
 
 pub fn vnext_root() -> AppResult<PathBuf> {
@@ -81,7 +90,7 @@ pub fn migrate(conn: &Connection) -> AppResult<()> {
     )
     .map_err(|e| AppError::Message(e.to_string()))?;
 
-    let ver = schema_version(conn)?;
+    let mut ver = schema_version(conn)?;
     if ver < 1 {
         migrate_v1(conn)?;
         conn.execute(
@@ -89,7 +98,47 @@ pub fn migrate(conn: &Connection) -> AppResult<()> {
             [],
         )
         .map_err(|e| AppError::Message(e.to_string()))?;
+        ver = 1;
     }
+    if ver < 2 {
+        migrate_v2(conn)?;
+        conn.execute(
+            "INSERT OR REPLACE INTO vnext_schema_meta(key,value) VALUES('version','2')",
+            [],
+        )
+        .map_err(|e| AppError::Message(e.to_string()))?;
+    }
+    Ok(())
+}
+
+/// Phase 3: durable clipping runs + link candidates to a run.
+fn migrate_v2(conn: &Connection) -> AppResult<()> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS clipping_runs (
+            id TEXT PRIMARY KEY,
+            content_project_id TEXT NOT NULL,
+            media_path TEXT NOT NULL,
+            source_duration REAL NOT NULL,
+            options_json TEXT NOT NULL,
+            summary_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(content_project_id) REFERENCES content_projects(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_clipping_runs_project ON clipping_runs(content_project_id);
+        CREATE INDEX IF NOT EXISTS idx_clipping_runs_media ON clipping_runs(media_path);
+        "#,
+    )
+    .map_err(|e| AppError::Message(e.to_string()))?;
+    // Additive column — ignore if already present
+    let _ = conn.execute(
+        "ALTER TABLE short_candidates ADD COLUMN clipping_run_id TEXT",
+        [],
+    );
+    let _ = conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_candidates_run ON short_candidates(clipping_run_id)",
+        [],
+    );
     Ok(())
 }
 
@@ -272,7 +321,7 @@ mod tests {
         let conn = open_vnext_db_at(&path).unwrap();
         assert_eq!(schema_version(&conn).unwrap(), VNEXT_SCHEMA_VERSION);
         migrate(&conn).unwrap();
-        assert_eq!(schema_version(&conn).unwrap(), 1);
+        assert_eq!(schema_version(&conn).unwrap(), VNEXT_SCHEMA_VERSION);
 
         let n: i64 = conn
             .query_row(
@@ -292,11 +341,11 @@ mod tests {
         let path = root.join("vnext.db");
         {
             let c = open_vnext_db_at(&path).unwrap();
-            assert_eq!(schema_version(&c).unwrap(), 1);
+            assert_eq!(schema_version(&c).unwrap(), VNEXT_SCHEMA_VERSION);
         }
         {
             let c = open_vnext_db_at(&path).unwrap();
-            assert_eq!(schema_version(&c).unwrap(), 1);
+            assert_eq!(schema_version(&c).unwrap(), VNEXT_SCHEMA_VERSION);
         }
         let _ = std::fs::remove_dir_all(root);
     }
