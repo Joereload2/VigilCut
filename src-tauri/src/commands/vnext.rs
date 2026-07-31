@@ -386,8 +386,11 @@ pub async fn vnext_start_vertical_render(plan_id: String) -> AppResult<JobDto> {
     let plan = crate::vnext::persistence::get_render_plan(&plan_id)?
         .ok_or_else(|| AppError::NotFound(plan_id.clone()))?;
     let job_id = enqueue_vertical_render(&plan.id, &plan.content_project_id)?;
-    // Execute in-process (MVP single process; no daemon)
-    let _ = execute_vertical_render_job(&job_id).await;
+    // Execute in-process — surface FFmpeg/path errors to the UI (do not swallow)
+    if let Err(e) = execute_vertical_render_job(&job_id).await {
+        // Job row already marked failed; still return a useful error to the client
+        return Err(e);
+    }
     let j = get_job(&job_id)?.ok_or(AppError::NotFound(job_id))?;
     Ok(map_job(j))
 }
@@ -410,14 +413,96 @@ pub fn vnext_project_next_action(content_project_id: String) -> AppResult<String
     Ok(project_next_action(&content_project_id)?.as_str().into())
 }
 
+/// True if media file on disk looks unchanged since a prior analysis timestamp (RFC3339).
+fn media_looks_unchanged(media_path: &str, analyzed_at_rfc3339: &str) -> bool {
+    use std::time::SystemTime;
+    let path = std::path::Path::new(media_path);
+    let Ok(meta) = std::fs::metadata(path) else {
+        return false;
+    };
+    let Ok(modified) = meta.modified() else {
+        return false;
+    };
+    let Ok(run_dt) = chrono::DateTime::parse_from_rfc3339(analyzed_at_rfc3339) else {
+        return false;
+    };
+    let run_sys = SystemTime::UNIX_EPOCH
+        + std::time::Duration::from_secs(run_dt.timestamp().max(0) as u64);
+    // File not newer than analysis (2s skew for FS precision)
+    modified
+        <= run_sys
+            .checked_add(std::time::Duration::from_secs(2))
+            .unwrap_or(run_sys)
+}
+
+/// Try load last clipping run with candidates for this project if media unchanged.
+fn try_reuse_cached_clipping_run(
+    content_project_id: &str,
+    media_path: &str,
+) -> AppResult<Option<crate::models::clipping::ClippingRun>> {
+    let run_ids = list_run_ids_for_project(content_project_id)?;
+    for id in run_ids {
+        let Some(run) = load_run(&id)? else {
+            continue;
+        };
+        if run.candidates.is_empty() {
+            continue;
+        }
+        if !media_looks_unchanged(media_path, &run.created_at) {
+            continue;
+        }
+        // Prefer path match (same file identity by path for this project)
+        if !run.media_path.is_empty()
+            && !media_path.is_empty()
+            && std::path::Path::new(&run.media_path) != std::path::Path::new(media_path)
+        {
+            // Still ok if same project source — project owns the media path
+        }
+        return Ok(Some(run));
+    }
+    // Fallback: candidates exist without loadable run meta — reconstruct not needed;
+    // empty means full analysis.
+    Ok(None)
+}
+
 /// Run legacy clipping analysis and persist into vNext (bridge for UI).
+///
+/// `force` = true always re-analyzes. Default false: reuses last run for this
+/// project when the media file was not modified (keeps transcript + moment statuses).
 #[tauri::command]
 pub async fn vnext_run_clipping_for_project(
+    app: tauri::AppHandle,
     content_project_id: String,
+    force: Option<bool>,
 ) -> AppResult<crate::models::clipping::ClippingRun> {
     let p = get_project(&content_project_id)?
         .ok_or_else(|| AppError::NotFound(content_project_id.clone()))?;
-    let mut on_prog = |_s: &str, _m: &str, _p: f64| {};
+    let force = force.unwrap_or(false);
+
+    if !force {
+        if let Some(cached) = try_reuse_cached_clipping_run(&content_project_id, &p.source_media_path)?
+        {
+            crate::models::progress::emit(
+                &app,
+                "clipping",
+                "cache",
+                "Reutilizando análisis y momentos guardados…",
+                90.0,
+            );
+            crate::models::progress::emit(
+                &app,
+                "clipping",
+                "done",
+                "Análisis en caché listo",
+                100.0,
+            );
+            return Ok(cached);
+        }
+    }
+
+    let mut on_prog = |stage: &str, message: &str, percent: f64| {
+        crate::models::progress::emit(&app, "clipping", stage, message, percent);
+    };
     let run = crate::pipeline::clipping::run_clipping_analysis_with_progress(
         std::path::Path::new(&p.source_media_path),
         crate::models::clipping::ClippingOptions::default(),
@@ -426,5 +511,6 @@ pub async fn vnext_run_clipping_for_project(
     )
     .await?;
     persist_clipping_run(&run, &content_project_id)?;
+    crate::models::progress::emit(&app, "clipping", "done", "Clips listos", 100.0);
     Ok(run)
 }

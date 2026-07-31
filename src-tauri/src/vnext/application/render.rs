@@ -89,6 +89,52 @@ fn sha256_file(path: &Path) -> AppResult<String> {
     Ok(hex::encode(h.finalize()))
 }
 
+/// Sanitize a file stem for use as a folder/file name.
+fn safe_stem(raw: &str) -> String {
+    let s: String = raw
+        .chars()
+        .map(|c| match c {
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '_',
+            c if c.is_control() => '_',
+            c => c,
+        })
+        .collect();
+    let t = s.trim().trim_matches('.');
+    if t.is_empty() {
+        "video".into()
+    } else {
+        t.chars().take(80).collect()
+    }
+}
+
+/// `{parent}/{VideoName}/shorts/{VideoName}_short.mp4` next to the source file.
+fn deliverable_path_for_source(source_media_path: &str, candidate_id: &str) -> Option<std::path::PathBuf> {
+    use crate::pipeline::safe_paths::unique_output_path;
+    let source = Path::new(source_media_path);
+    let parent = source.parent()?;
+    let stem = source
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .map(safe_stem)
+        .unwrap_or_else(|| "video".into());
+    let dir = parent.join(&stem).join("shorts");
+    if std::fs::create_dir_all(&dir).is_err() {
+        return None;
+    }
+    // Short suffix from candidate id for uniqueness among many clips
+    let short_tag: String = candidate_id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .take(6)
+        .collect();
+    let name = if short_tag.is_empty() {
+        format!("{stem}_short.mp4")
+    } else {
+        format!("{stem}_short_{short_tag}.mp4")
+    };
+    Some(unique_output_path(&dir.join(name)))
+}
+
 /// Execute one vertical_render job (must be queued or running).
 pub async fn execute_vertical_render_job(job_id: &str) -> AppResult<VerticalRenderResult> {
     let job = get_job(job_id)?.ok_or_else(|| AppError::NotFound(job_id.into()))?;
@@ -152,7 +198,15 @@ pub async fn execute_vertical_render_job(job_id: &str) -> AppResult<VerticalRend
         .join("jobs")
         .join(job_id);
     std::fs::create_dir_all(&work_dir)?;
-    let final_out = work_dir.join("output-final.mp4");
+
+    // Entrega al lado del video original:
+    //   C:\Videos\MiVideo.mp4  →  C:\Videos\MiVideo\shorts\MiVideo_short.mp4
+    // Fallback: work_dir si no se puede crear junto al original.
+    let final_out = deliverable_path_for_source(&plan.source_media_path, &plan.candidate_id)
+        .unwrap_or_else(|| work_dir.join("output-final.mp4"));
+    if let Some(parent) = final_out.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
 
     let ffmpeg = Ffmpeg::new()?;
     let (src_w, src_h) = match ffmpeg.probe(Path::new(&plan.source_media_path)).await {

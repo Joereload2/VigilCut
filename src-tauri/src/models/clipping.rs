@@ -159,6 +159,16 @@ pub enum FramingMode {
     FitWithBars,
 }
 
+/// One green-box region in source UV space (0..1), used for multi-panel 9:16 layout.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LayoutPanel {
+    pub center_x: f64,
+    pub center_y: f64,
+    pub width_frac: f64,
+    pub height_frac: f64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClipFraming {
@@ -167,13 +177,21 @@ pub struct ClipFraming {
     pub center_x: f64,
     /// Normalized crop center Y (0..1)
     pub center_y: f64,
-    /// Zoom factor >= 1.0
+    /// Zoom factor >= 1.0 (legacy single-crop when panels empty and width_frac==0)
     pub zoom: f64,
     pub output_width: u32,
     pub output_height: u32,
     /// Reserved for future face-tracking keyframes
     #[serde(default)]
     pub tracking_ready: bool,
+    /// Single-region UV size (0 = use zoom legacy). Matches green selector.
+    #[serde(default)]
+    pub width_frac: f64,
+    #[serde(default)]
+    pub height_frac: f64,
+    /// Multi-section layout (1..=3). If non-empty, drives vstack render.
+    #[serde(default)]
+    pub panels: Vec<LayoutPanel>,
 }
 
 impl Default for ClipFraming {
@@ -186,6 +204,9 @@ impl Default for ClipFraming {
             output_width: 1080,
             output_height: 1920,
             tracking_ready: false,
+            width_frac: 0.0,
+            height_frac: 0.0,
+            panels: Vec::new(),
         }
     }
 }

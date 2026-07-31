@@ -94,8 +94,9 @@ pub async fn render_vertical_plan(
     };
 
     let crop = compute_crop_filter(&plan.framing, src_w, src_h);
+    let multi = crop.contains("split=") || crop.contains("vstack");
     let mut burned = false;
-    let mut vf = crop;
+    let mut vf = crop.clone();
 
     if plan.subtitles.enabled && !plan.subtitles.cues.is_empty() {
         if plan.subtitles.preset_id != SUBTITLE_PRESET_SAFE_CENTER_BOTTOM_V1 {
@@ -107,7 +108,12 @@ pub async fn render_vertical_plan(
         write_srt_for_cues(&srt, &plan.subtitles.cues)?;
         let esc = escape_subtitles_path(&srt);
         let style = ass_force_style_safe_center_bottom();
-        vf = format!("{vf},subtitles='{esc}':force_style='{style}'");
+        if multi {
+            // Append burn-in after vstack labeled output is implicit last filter
+            vf = format!("{vf},subtitles='{esc}':force_style='{style}'");
+        } else {
+            vf = format!("{vf},subtitles='{esc}':force_style='{style}'");
+        }
         burned = true;
     }
 
@@ -115,34 +121,57 @@ pub async fn render_vertical_plan(
     let dur = plan.duration_s();
     let spec = &plan.output_spec;
 
-    let mut args = vec![
-        "-y".into(),
-        "-ss".into(),
-        format!("{start:.3}"),
-        "-i".into(),
-        input.to_string_lossy().into_owned(),
-        "-t".into(),
-        format!("{dur:.3}"),
-        "-vf".into(),
-        vf,
-        "-c:v".into(),
-        spec.video_codec.clone(),
-        "-preset".into(),
-        "veryfast".into(),
-        "-crf".into(),
-        spec.crf.to_string(),
-        "-c:a".into(),
-        spec.audio_codec.clone(),
-        "-b:a".into(),
-        format!("{}k", spec.audio_bitrate_kbps),
-        "-pix_fmt".into(),
-        spec.pixel_format.clone(),
-    ];
-    if spec.faststart {
-        args.push("-movflags".into());
-        args.push("+faststart".into());
+    fn build_args(
+        input: &Path,
+        temp: &Path,
+        start: f64,
+        dur: f64,
+        vf: &str,
+        multi: bool,
+        spec: &crate::vnext::domain::OutputSpecV1,
+    ) -> Vec<String> {
+        let mut args = vec![
+            "-y".into(),
+            "-ss".into(),
+            format!("{start:.3}"),
+            "-i".into(),
+            input.to_string_lossy().into_owned(),
+            "-t".into(),
+            format!("{dur:.3}"),
+        ];
+        if multi {
+            // Graph: [0:v]split=...vstack → map video + optional audio
+            args.push("-filter_complex".into());
+            args.push(format!("[0:v]{vf}[vout]"));
+            args.push("-map".into());
+            args.push("[vout]".into());
+            args.push("-map".into());
+            args.push("0:a?".into());
+        } else {
+            args.push("-vf".into());
+            args.push(vf.into());
+        }
+        args.push("-c:v".into());
+        args.push(spec.video_codec.clone());
+        args.push("-preset".into());
+        args.push("veryfast".into());
+        args.push("-crf".into());
+        args.push(spec.crf.to_string());
+        args.push("-c:a".into());
+        args.push(spec.audio_codec.clone());
+        args.push("-b:a".into());
+        args.push(format!("{}k", spec.audio_bitrate_kbps));
+        args.push("-pix_fmt".into());
+        args.push(spec.pixel_format.clone());
+        if spec.faststart {
+            args.push("-movflags".into());
+            args.push("+faststart".into());
+        }
+        args.push(temp.to_string_lossy().into_owned());
+        args
     }
-    args.push(temp.to_string_lossy().into_owned());
+
+    let args = build_args(&input, &temp, start, dur, &vf, multi, spec);
 
     let ffmpeg = Ffmpeg::new()?;
     match ffmpeg.run_expecting(&args, Some(&temp)).await {
@@ -153,32 +182,8 @@ pub async fn render_vertical_plan(
             cleanup_temp(&temp);
             burned = false;
             let vf_only = compute_crop_filter(&plan.framing, src_w, src_h);
-            let args2 = vec![
-                "-y".into(),
-                "-ss".into(),
-                format!("{start:.3}"),
-                "-i".into(),
-                input.to_string_lossy().into_owned(),
-                "-t".into(),
-                format!("{dur:.3}"),
-                "-vf".into(),
-                vf_only,
-                "-c:v".into(),
-                spec.video_codec.clone(),
-                "-preset".into(),
-                "veryfast".into(),
-                "-crf".into(),
-                spec.crf.to_string(),
-                "-c:a".into(),
-                spec.audio_codec.clone(),
-                "-b:a".into(),
-                format!("{}k", spec.audio_bitrate_kbps),
-                "-movflags".into(),
-                "+faststart".into(),
-                "-pix_fmt".into(),
-                spec.pixel_format.clone(),
-                temp.to_string_lossy().into_owned(),
-            ];
+            let multi2 = vf_only.contains("split=") || vf_only.contains("vstack");
+            let args2 = build_args(&input, &temp, start, dur, &vf_only, multi2, spec);
             ffmpeg.run_expecting(&args2, Some(&temp)).await?;
         }
         Err(e) => {
