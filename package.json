@@ -20,6 +20,7 @@
     "cli": "cargo run --manifest-path src-tauri/Cargo.toml --bin vigilcut-cli --",
     "cli:release": "cargo run --manifest-path src-tauri/Cargo.toml --release --bin vigilcut-cli --",
     "test": "powershell -ExecutionPolicy Bypass -File scripts/test-all.ps1",
+    "test:vnext-ui": "vitest run --config vitest.config.ts",
     "test:unit": "cargo test --manifest-path src-tauri/Cargo.toml --lib",
     "test:unit:visual": "cargo test --manifest-path src-tauri/Cargo.toml --lib pipeline::visual -- --nocapture",
     "test:smoke": "cargo test --manifest-path src-tauri/Cargo.toml --test smoke_pipeline --test smoke_clipping --test smoke_visual --test smoke_visual_intel -- --nocapture",
@@ -49,6 +50,7 @@
     "tailwindcss": "^3.4.17",
     "tslib": "^2.8.1",
     "typescript": "^5.7.2",
-    "vite": "^6.0.7"
+    "vite": "^6.0.7",
+    "vitest": "^3.2.7"
   }
 }

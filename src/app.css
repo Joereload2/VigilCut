@@ -31,7 +31,8 @@ body {
   flex-direction: column;
   overflow: hidden;
   background: #020617;
-  padding: 8px;
+  /* Minimal chrome so the full operator UI fits the window */
+  padding: 2px;
 }
 
 #app {
