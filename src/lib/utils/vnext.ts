@@ -109,11 +109,20 @@ export async function projectNextAction(contentProjectId: string): Promise<strin
   return invoke("vnext_project_next_action", { contentProjectId });
 }
 
+/**
+ * Analiza el video del proyecto.
+ * @param force si true, reanaliza aunque haya caché. Default false = reutiliza
+ *   transcripción/momentos si el archivo no cambió.
+ */
 export async function runClippingForProject(
   contentProjectId: string,
+  force = false,
 ): Promise<ClippingRun> {
   if (!isTauri()) webStub();
-  return invoke("vnext_run_clipping_for_project", { contentProjectId });
+  return invoke("vnext_run_clipping_for_project", {
+    contentProjectId,
+    force,
+  });
 }
 
 export type { ClipFraming };

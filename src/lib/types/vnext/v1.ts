@@ -114,6 +114,14 @@ export interface SaveReviewDecisionRequestV1 {
     outputWidth: number;
     outputHeight: number;
     trackingReady?: boolean;
+    widthFrac?: number;
+    heightFrac?: number;
+    panels?: {
+      centerX: number;
+      centerY: number;
+      widthFrac: number;
+      heightFrac: number;
+    }[];
   } | null;
 }
 

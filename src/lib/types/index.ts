@@ -266,6 +266,13 @@ export type ClipReviewStatus =
   | "discarded";
 export type FramingMode = "auto_center" | "manual" | "blurred_background" | "fit_with_bars";
 
+export interface LayoutPanel {
+  centerX: number;
+  centerY: number;
+  widthFrac: number;
+  heightFrac: number;
+}
+
 export interface ClipFraming {
   mode: FramingMode;
   centerX: number;
@@ -274,6 +281,11 @@ export interface ClipFraming {
   outputWidth: number;
   outputHeight: number;
   trackingReady: boolean;
+  /** Exact green-box size in source UV (0 = legacy zoom). */
+  widthFrac?: number;
+  heightFrac?: number;
+  /** Multi-section layout for vstack render (1..3). */
+  panels?: LayoutPanel[];
 }
 
 export interface ClipScoreBreakdown {
