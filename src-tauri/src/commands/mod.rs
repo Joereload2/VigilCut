@@ -10,6 +10,7 @@ pub mod presets;
 pub mod project;
 pub mod subtitles;
 pub mod system;
+pub mod system_open;
 pub mod timeline;
 pub mod vad;
 pub mod visual;

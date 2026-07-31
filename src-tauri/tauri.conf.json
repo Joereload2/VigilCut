@@ -31,13 +31,20 @@
           "$APPDATA/**",
           "$RESOURCE/**",
           "$TEMP/**",
+          "$CACHE/**",
           "$HOME/**",
           "$DOCUMENT/**",
           "$DOWNLOAD/**",
           "$DESKTOP/**",
           "$VIDEO/**",
           "$PICTURE/**",
-          "$AUDIO/**"
+          "$AUDIO/**",
+          "/**",
+          "**",
+          "C:/**",
+          "D:/**",
+          "E:/**",
+          "F:/**"
         ]
       },
       "csp": "default-src 'self' ipc: http://ipc.localhost https://ipc.localhost; connect-src 'self' ipc: http://ipc.localhost https://ipc.localhost; img-src 'self' asset: http://asset.localhost https://asset.localhost data: blob:; media-src 'self' asset: http://asset.localhost https://asset.localhost blob: data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; object-src 'none'"

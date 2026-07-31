@@ -33,7 +33,13 @@
         { "path": "$DESKTOP/**" },
         { "path": "$VIDEO/**" },
         { "path": "$PICTURE/**" },
-        { "path": "$AUDIO/**" }
+        { "path": "$AUDIO/**" },
+        { "path": "/**" },
+        { "path": "**" },
+        { "path": "C:/**" },
+        { "path": "D:/**" },
+        { "path": "E:/**" },
+        { "path": "F:/**" }
       ]
     },
     "shell:allow-open",
