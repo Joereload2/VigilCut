@@ -13,6 +13,7 @@ import type {
   ProjectStage,
 } from "$lib/vnext/types/flow";
 import {
+  applySessionStageOverrides,
   deriveProjectStage,
   isPendingExportStatus,
   isPickableCandidateStatus,
@@ -129,25 +130,13 @@ class VnextSessionStore {
    * (Analysis may run as a blocking command without intermediate jobs.)
    */
   get stage(): ProjectStage {
-    if (this.pendingAction === "analyze" && this.project) return "processing";
-    if (this.pendingAction === "create" && this.project) return "processing";
-    if (this.pendingAction === "render") return "rendering";
-    const st = this.computeStage();
-    // Desde Resultado: “Ir al video completo” vuelve al flujo de momentos
-    if (this.preferReviewOverResult && this.candidates.length > 0) {
-      if (st === "rendering" || st === "failed" || st === "interrupted") return st;
-      if (this.part1Confirmed) return "adjusting";
-      return "candidates_ready";
-    }
-    // Tras análisis/caché: quedarse en Parte 1 hasta "Continuar con N"
-    if (
-      !this.part1Confirmed &&
-      this.candidates.length > 0 &&
-      (st === "adjusting" || st === "candidates_ready")
-    ) {
-      return "candidates_ready";
-    }
-    return st;
+    return applySessionStageOverrides(this.computeStage(), {
+      pendingAction: this.pendingAction,
+      hasProject: !!this.project,
+      candidateCount: this.candidates.length,
+      part1Confirmed: this.part1Confirmed,
+      preferReviewOverResult: this.preferReviewOverResult,
+    });
   }
 
   get route(): FlowRoute {

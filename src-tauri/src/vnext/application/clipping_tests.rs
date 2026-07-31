@@ -10,7 +10,10 @@ use crate::vnext::application::{
     project_next_action,
 };
 use crate::vnext::domain::NextAction;
-use crate::vnext::persistence::{open_vnext_db, set_vnext_root_override, vnext_test_lock};
+use crate::vnext::persistence::{
+    delete_project, get_project, list_candidates_for_project, list_projects, open_vnext_db,
+    set_vnext_root_override, vnext_test_lock,
+};
 use std::path::PathBuf;
 use std::sync::MutexGuard;
 
@@ -182,6 +185,37 @@ fn next_action_after_candidates_is_review() {
     apply_status_decision(&run_id, "cand-4", ClipReviewStatus::Approved, None).unwrap();
     let action2 = project_next_action(&project.id).unwrap();
     assert_eq!(action2, NextAction::Render);
+
+    teardown(env);
+}
+
+#[test]
+fn delete_project_removes_history_and_candidates() {
+    let env = setup("del");
+    let media = r"C:\videos\history-del.mp4";
+    let project = ensure_project_for_media(media).unwrap();
+    let pid = project.id.clone();
+    let run_id = uuid::Uuid::new_v4().to_string();
+    persist_clipping_run(
+        &sample_run(
+            &run_id,
+            media,
+            vec![sample_candidate("cand-del", media)],
+        ),
+        &pid,
+    )
+    .unwrap();
+    assert_eq!(list_candidates_for_project(&pid).unwrap().len(), 1);
+    assert!(list_projects(20)
+        .unwrap()
+        .iter()
+        .any(|p| p.id == pid));
+
+    delete_project(&pid).unwrap();
+
+    assert!(get_project(&pid).unwrap().is_none());
+    assert!(list_candidates_for_project(&pid).unwrap().is_empty());
+    assert!(!list_projects(20).unwrap().iter().any(|p| p.id == pid));
 
     teardown(env);
 }

@@ -36,9 +36,11 @@ describe("vNext shell contract", () => {
     expect(src).toMatch(/Analizar video/);
   });
 
-  it("projects hub is simple open video", () => {
+  it("projects hub is simple open video with compact deletable history", () => {
     const src = read("lib/vnext/pages/ProjectsPage.svelte");
     expect(src).toMatch(/Abrir un video|cta-create-short/);
+    expect(src).toMatch(/deleteProjectFromHistory|confirmDelete|Quitar del historial/);
+    expect(src).toMatch(/overflow-hidden|overflow-y-auto/);
     expect(src).not.toMatch(/Silencios|Biblioteca|B-roll/);
   });
 

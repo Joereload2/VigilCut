@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  applySessionStageOverrides,
   deriveProjectStage,
   nextActionHuman,
   stageToRoute,
@@ -449,5 +450,72 @@ describe("integration transitions (derive only)", () => {
     expect(nextActionHuman("candidates_ready")).toBe("Elegir momentos");
     expect(nextActionHuman("completed")).toBe("Ver resultado");
     expect(nextActionHuman("source_ready")).not.toMatch(/ingest|queued|vertical/i);
+  });
+});
+
+describe("applySessionStageOverrides", () => {
+  const baseOpts = {
+    pendingAction: null as string | null,
+    hasProject: true,
+    candidateCount: 3,
+    part1Confirmed: false,
+    preferReviewOverResult: false,
+  };
+
+  it("forces processing while analyzing", () => {
+    expect(
+      applySessionStageOverrides("source_ready", {
+        ...baseOpts,
+        pendingAction: "analyze",
+      }),
+    ).toBe("processing");
+  });
+
+  it("forces rendering while export pendingAction", () => {
+    expect(
+      applySessionStageOverrides("adjusting", {
+        ...baseOpts,
+        pendingAction: "render",
+        part1Confirmed: true,
+      }),
+    ).toBe("rendering");
+  });
+
+  it("after analyze keeps Part1 even if base is adjusting (approved cache)", () => {
+    expect(
+      applySessionStageOverrides("adjusting", {
+        ...baseOpts,
+        part1Confirmed: false,
+      }),
+    ).toBe("candidates_ready");
+  });
+
+  it("Ir al video completo leaves completed for candidates review", () => {
+    expect(
+      applySessionStageOverrides("completed", {
+        ...baseOpts,
+        preferReviewOverResult: true,
+        part1Confirmed: false,
+      }),
+    ).toBe("candidates_ready");
+  });
+
+  it("Ir al video completo + Part1 done goes to adjusting", () => {
+    expect(
+      applySessionStageOverrides("completed", {
+        ...baseOpts,
+        preferReviewOverResult: true,
+        part1Confirmed: true,
+      }),
+    ).toBe("adjusting");
+  });
+
+  it("after Part1 confirm, adjusting is allowed", () => {
+    expect(
+      applySessionStageOverrides("adjusting", {
+        ...baseOpts,
+        part1Confirmed: true,
+      }),
+    ).toBe("adjusting");
   });
 });

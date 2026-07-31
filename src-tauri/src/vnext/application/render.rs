@@ -90,7 +90,7 @@ fn sha256_file(path: &Path) -> AppResult<String> {
 }
 
 /// Sanitize a file stem for use as a folder/file name.
-fn safe_stem(raw: &str) -> String {
+pub fn safe_stem(raw: &str) -> String {
     let s: String = raw
         .chars()
         .map(|c| match c {
@@ -108,7 +108,10 @@ fn safe_stem(raw: &str) -> String {
 }
 
 /// `{parent}/{VideoName}/shorts/{VideoName}_short.mp4` next to the source file.
-fn deliverable_path_for_source(source_media_path: &str, candidate_id: &str) -> Option<std::path::PathBuf> {
+pub fn deliverable_path_for_source(
+    source_media_path: &str,
+    candidate_id: &str,
+) -> Option<std::path::PathBuf> {
     use crate::pipeline::safe_paths::unique_output_path;
     let source = Path::new(source_media_path);
     let parent = source.parent()?;

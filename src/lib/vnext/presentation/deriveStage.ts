@@ -132,6 +132,42 @@ export function deriveProjectStage(input: DeriveStageInput): ProjectStage {
   return "source_ready";
 }
 
+/**
+ * Session overlays on top of pure deriveProjectStage (pending actions, Part1 gate,
+ * "Ir al video completo"). Pure — unit-testable without Svelte stores.
+ */
+export function applySessionStageOverrides(
+  base: ProjectStage,
+  opts: {
+    pendingAction?: string | null;
+    hasProject?: boolean;
+    candidateCount: number;
+    part1Confirmed: boolean;
+    preferReviewOverResult: boolean;
+  },
+): ProjectStage {
+  const pending = opts.pendingAction ?? null;
+  if (pending === "analyze" && opts.hasProject) return "processing";
+  if (pending === "create" && opts.hasProject) return "processing";
+  if (pending === "render") return "rendering";
+
+  if (opts.preferReviewOverResult && opts.candidateCount > 0) {
+    if (base === "rendering" || base === "failed" || base === "interrupted") return base;
+    if (opts.part1Confirmed) return "adjusting";
+    return "candidates_ready";
+  }
+
+  if (
+    !opts.part1Confirmed &&
+    opts.candidateCount > 0 &&
+    (base === "adjusting" || base === "candidates_ready")
+  ) {
+    return "candidates_ready";
+  }
+
+  return base;
+}
+
 /** Map stage → primary flow route for the shell. */
 export function stageToRoute(
   stage: ProjectStage,

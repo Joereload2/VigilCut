@@ -195,6 +195,30 @@ mod tests {
         let filter = compute_crop_filter(&f, 1920, 1080);
         assert!(filter.contains("crop="));
         assert!(filter.contains("scale=1080:1920"));
+        // Proportional fit into 9:16 (no stretch)
+        assert!(
+            filter.contains("force_original_aspect_ratio=decrease"),
+            "{filter}"
+        );
+        assert!(filter.contains("pad=1080:1920"), "{filter}");
+    }
+
+    #[test]
+    fn multi_panel_also_uses_proportional_fit() {
+        let mut f = ClipFraming::default();
+        f.mode = FramingMode::Manual;
+        f.panels = vec![LayoutPanel {
+            center_x: 0.3,
+            center_y: 0.45,
+            width_frac: 0.5,
+            height_frac: 0.4,
+        }];
+        let filter = compute_crop_filter(&f, 1920, 1080);
+        assert!(
+            filter.contains("force_original_aspect_ratio=decrease"),
+            "{filter}"
+        );
+        assert!(filter.contains("pad="), "{filter}");
     }
 
     #[test]

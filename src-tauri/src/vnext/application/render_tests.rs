@@ -6,8 +6,8 @@ use crate::models::clipping::{
 };
 use crate::pipeline::safe_paths::{finalize_atomic, temp_export_path, validate_export_request};
 use crate::vnext::application::{
-    complete_with_fixture_file, create_plan_for_candidate_id, enqueue_vertical_render,
-    ensure_project_for_media, persist_clipping_run,
+    complete_with_fixture_file, create_plan_for_candidate_id, deliverable_path_for_source,
+    enqueue_vertical_render, ensure_project_for_media, persist_clipping_run, safe_stem,
 };
 use crate::vnext::domain::{
     assert_distinct_paths, SubtitleCueV1, SUBTITLE_PRESET_SAFE_CENTER_BOTTOM_V1,
@@ -121,6 +121,27 @@ fn render_plan_is_insert_only_and_validates_preset() {
     p2.created_at = "other".into();
     assert!(crate::vnext::persistence::insert_render_plan(&p2).is_err());
     teardown(env);
+}
+
+#[test]
+fn deliverable_path_is_under_video_name_shorts() {
+    let dir = std::env::temp_dir().join(format!("vc-deliv-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let media = dir.join("Mi Video Demo.mp4");
+    std::fs::write(&media, b"fake").unwrap();
+    let out = deliverable_path_for_source(media.to_str().unwrap(), "cand-ab12cd").unwrap();
+    let s = out.to_string_lossy().replace('\\', "/");
+    assert!(s.contains("/Mi Video Demo/shorts/"), "{s}");
+    assert!(s.contains("Mi Video Demo_short_"), "{s}");
+    assert!(s.ends_with(".mp4"), "{s}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn safe_stem_strips_forbidden_chars() {
+    assert_eq!(safe_stem("a:b*c?"), "a_b_c_");
+    assert_eq!(safe_stem("  ..  "), "video");
+    assert_eq!(safe_stem("ok-name"), "ok-name");
 }
 
 #[test]
