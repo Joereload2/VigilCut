@@ -177,6 +177,7 @@ pub fn run() {
             commands::vnext::vnext_create_content_project,
             commands::vnext::vnext_list_content_projects,
             commands::vnext::vnext_get_content_project,
+            commands::vnext::vnext_delete_content_project,
             commands::vnext::vnext_create_job,
             commands::vnext::vnext_get_job,
             commands::vnext::vnext_list_project_jobs,

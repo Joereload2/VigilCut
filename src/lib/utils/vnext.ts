@@ -32,6 +32,12 @@ export async function getContentProject(id: string): Promise<ContentProjectSnaps
   return invoke("vnext_get_content_project", { id });
 }
 
+/** Quita el proyecto del historial Continuar (no borra el video fuente ni los Shorts exportados). */
+export async function deleteContentProject(id: string): Promise<void> {
+  if (!isTauri()) webStub();
+  return invoke("vnext_delete_content_project", { id });
+}
+
 export async function getJob(id: string): Promise<JobSnapshotV1> {
   if (!isTauri()) webStub();
   return invoke("vnext_get_job", { id });

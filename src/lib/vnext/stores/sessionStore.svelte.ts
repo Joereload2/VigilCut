@@ -248,6 +248,27 @@ class VnextSessionStore {
     }
   }
 
+  /** Quitar un item del historial Continuar. */
+  async deleteProjectFromHistory(id: string) {
+    if (this.pendingAction) return;
+    this.pendingAction = "delete_project";
+    this.error = null;
+    try {
+      await api.deleteContentProject(id);
+      this.projects = this.projects.filter((p) => p.id !== id);
+      if (this.project?.id === id) {
+        this.goProjects();
+        return;
+      }
+      this.syncSliceStores();
+    } catch (e) {
+      this.error = String(e);
+    } finally {
+      this.pendingAction = null;
+      this.syncSliceStores();
+    }
+  }
+
   /**
    * Full snapshot load for a project then stage-driven navigation.
    */

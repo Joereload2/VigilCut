@@ -14,7 +14,7 @@ use crate::vnext::domain::{
     ContentProjectRecord, JobKind, ReviewDecisionRecord, SubtitleCueV1, VerticalRenderPlanV1,
 };
 use crate::vnext::persistence::{
-    get_job, get_project, list_artifacts_for_project, list_candidates_for_project,
+    delete_project, get_job, get_project, list_artifacts_for_project, list_candidates_for_project,
     list_jobs_for_project, list_projects, list_recent_jobs, list_run_ids_for_project, ArtifactRow,
     JobRow,
 };
@@ -263,6 +263,12 @@ pub fn vnext_get_content_project(id: String) -> AppResult<ContentProjectDto> {
         .ok()
         .map(|a| a.as_str().to_string());
     Ok(map_project(p, next))
+}
+
+/// Remove a project from Continuar history (does not delete source video or exported shorts).
+#[tauri::command]
+pub fn vnext_delete_content_project(id: String) -> AppResult<()> {
+    delete_project(&id)
 }
 
 #[tauri::command]

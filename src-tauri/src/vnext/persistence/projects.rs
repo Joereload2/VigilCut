@@ -114,6 +114,56 @@ pub fn find_project_by_media_path(media_path: &str) -> AppResult<Option<ContentP
     .map_err(|e| AppError::Message(e.to_string()))
 }
 
+/// Delete a content project and all related vNext rows (history).
+/// Does not delete the user's source media or exported Shorts next to the video.
+pub fn delete_project(id: &str) -> AppResult<()> {
+    let Some(p) = get_project(id)? else {
+        return Err(AppError::NotFound(id.into()));
+    };
+    let conn = open_vnext_db()?;
+    // Child tables first (no ON DELETE CASCADE in schema)
+    let tables = [
+        "review_decisions",
+        "artifact_parents",
+        "artifacts",
+        "jobs",
+        "render_plans",
+        "short_candidates",
+        "clipping_runs",
+        "production_recipes",
+    ];
+    for t in tables {
+        // artifact_parents has no content_project_id — cleaned via artifacts if needed
+        if t == "artifact_parents" {
+            conn.execute(
+                r#"DELETE FROM artifact_parents WHERE artifact_id IN (
+                     SELECT id FROM artifacts WHERE content_project_id = ?1
+                   ) OR parent_artifact_id IN (
+                     SELECT id FROM artifacts WHERE content_project_id = ?1
+                   )"#,
+                params![id],
+            )
+            .map_err(|e| AppError::Message(e.to_string()))?;
+            continue;
+        }
+        conn.execute(
+            &format!("DELETE FROM {t} WHERE content_project_id = ?1"),
+            params![id],
+        )
+        .map_err(|e| AppError::Message(e.to_string()))?;
+    }
+    conn.execute("DELETE FROM content_projects WHERE id = ?1", params![id])
+        .map_err(|e| AppError::Message(e.to_string()))?;
+    // Best-effort remove project work_dir under vnext/projects/{id}
+    if !p.work_dir.is_empty() {
+        let path = std::path::Path::new(&p.work_dir);
+        if path.exists() {
+            let _ = std::fs::remove_dir_all(path);
+        }
+    }
+    Ok(())
+}
+
 pub fn list_projects(limit: usize) -> AppResult<Vec<ContentProjectRecord>> {
     let conn = open_vnext_db()?;
     let limit = limit.clamp(1, 500) as i64;
