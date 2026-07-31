@@ -37,7 +37,7 @@ foreach ($path in @($lnkDesktop, $lnkProject)) {
     $s.TargetPath = $target
     $s.WorkingDirectory = $workDir
     $s.IconLocation = "$ico,0"
-    $s.Description = "VigilCut Factory (sin terminal)"
+    $s.Description = "VigilCut Shorts (release, sin localhost)"
     $s.WindowStyle = 1
     $s.Save()
     Write-Host "OK $path -> $target"

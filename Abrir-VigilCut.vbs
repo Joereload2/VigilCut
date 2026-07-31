@@ -1,5 +1,5 @@
 ' Silent launcher — production only (no localhost / Vite).
-' Always opens release build with embedded UI.
+' Opens release build with embedded Shorts UI (vNext).
 
 Option Explicit
 Dim fso, sh, root, releaseExe
