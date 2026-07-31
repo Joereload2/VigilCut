@@ -1,0 +1,102 @@
+/**
+ * vNext station design tokens — coherent layout grammar.
+ * Pattern: chrome → header → canvas → dock (next step + CTA)
+ */
+
+.vn-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+.vn-canvas {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.vn-canvas-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.vn-panel {
+  border-radius: 1rem;
+  border: 1px solid rgb(30 41 59 / 0.95);
+  background: rgb(15 23 42 / 0.55);
+}
+
+.vn-panel-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgb(52 211 153); /* vigil-ish */
+}
+
+.vn-panel-sub {
+  font-size: 11px;
+  color: rgb(148 163 184);
+}
+
+.vn-dock {
+  flex-shrink: 0;
+  border-top: 1px solid rgb(30 41 59 / 0.9);
+  background: rgb(2 6 23 / 0.96);
+  padding: 0.65rem 1rem 0.85rem;
+}
+
+.vn-dock-next {
+  font-size: 11px;
+  color: rgb(148 163 184);
+  margin-bottom: 0.45rem;
+}
+
+.vn-dock-next strong {
+  color: rgb(241 245 249);
+  font-weight: 600;
+}
+
+.vn-cta {
+  display: inline-flex;
+  min-width: 12rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.75rem;
+  background: rgb(5 150 105);
+  padding: 0.65rem 1.5rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: white;
+  box-shadow: 0 10px 24px rgb(6 78 59 / 0.35);
+  transition: background 0.15s ease;
+}
+
+.vn-cta:hover:not(:disabled) {
+  background: rgb(16 185 129);
+}
+
+.vn-cta:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.vn-cta-ghost {
+  border-radius: 0.75rem;
+  border: 1px solid rgb(51 65 85);
+  padding: 0.65rem 1rem;
+  font-size: 0.875rem;
+  color: rgb(203 213 225);
+  transition: background 0.15s ease;
+}
+
+.vn-cta-ghost:hover:not(:disabled) {
+  background: rgb(15 23 42);
+}
+
+.vn-cta-ghost:disabled {
+  opacity: 0.4;
+}
