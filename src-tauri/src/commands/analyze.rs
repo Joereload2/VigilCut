@@ -9,7 +9,6 @@ use crate::models::analysis::{AnalysisRun, ResolveExceptionRequest};
 use crate::models::edl::PolicyConfig;
 use crate::models::progress;
 use crate::models::segment::SilenceDetectionOptions;
-use crate::pipeline::engine::run_silence_analysis_with_progress;
 use crate::pipeline::{
     accept_all_exceptions, policy_from_silence_options, reject_all_exceptions, resolve_exception,
 };
@@ -21,7 +20,7 @@ pub struct AnalysisCache {
     pub runs: Mutex<std::collections::HashMap<String, AnalysisRun>>,
 }
 
-fn load_run_from_disk(run_id: &str) -> Option<AnalysisRun> {
+pub fn load_run_from_disk(run_id: &str) -> Option<AnalysisRun> {
     let file = AppState::cache_dir()
         .ok()?
         .join("runs")
@@ -38,7 +37,43 @@ fn persist_run(run: &AnalysisRun) {
         if let Ok(json) = serde_json::to_string_pretty(run) {
             let _ = std::fs::write(file, json);
         }
+        // Media index for guaranteed silence→clipping reuse (Sprint A1)
+        let idx = runs_dir.join("by_media");
+        let _ = std::fs::create_dir_all(&idx);
+        let key = crate::pipeline::features::media_cache_key(std::path::Path::new(&run.media_path))
+            .unwrap_or_else(|_| {
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                use std::hash::{Hash, Hasher};
+                run.media_path.hash(&mut h);
+                format!("{:016x}", h.finish())
+            });
+        let _ = std::fs::write(idx.join(format!("{key}.runid")), run.id.as_bytes());
     }
+}
+
+/// Resolve latest analysis run for media (memory or by_media index → disk).
+pub fn find_analysis_for_media(cache: &AnalysisCache, media_path: &str) -> Option<AnalysisRun> {
+    if let Ok(map) = cache.runs.lock() {
+        let mut best: Option<AnalysisRun> = None;
+        for run in map.values() {
+            let na = run.media_path.replace('\\', "/").to_lowercase();
+            let nb = media_path.replace('\\', "/").to_lowercase();
+            if na == nb {
+                best = Some(run.clone());
+            }
+        }
+        if best.is_some() {
+            return best;
+        }
+    }
+    let key = crate::pipeline::features::media_cache_key(std::path::Path::new(media_path)).ok()?;
+    let id_path = AppState::cache_dir()
+        .ok()?
+        .join("runs")
+        .join("by_media")
+        .join(format!("{key}.runid"));
+    let id = std::fs::read_to_string(id_path).ok()?;
+    load_run_from_disk(id.trim())
 }
 
 fn take_run(cache: &AnalysisCache, run_id: &str) -> AppResult<AnalysisRun> {
@@ -83,9 +118,13 @@ pub async fn run_analysis(
     let mut on_prog = |stage: &str, message: &str, percent: f64| {
         progress::emit(&app, "analysis", stage, message, percent);
     };
-    let run =
-        run_silence_analysis_with_progress(PathBuf::from(&path).as_path(), &pol, &mut on_prog)
-            .await;
+    let run = crate::pipeline::engine::run_silence_analysis_with_progress_cancel(
+        PathBuf::from(&path).as_path(),
+        &pol,
+        &mut on_prog,
+        Some(jobs.cancel_flag()),
+    )
+    .await;
     if jobs.is_cancelled() {
         return Err(AppError::Cancelled);
     }

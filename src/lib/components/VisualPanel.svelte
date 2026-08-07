@@ -293,11 +293,11 @@
     lastMessage = "Preparando el corte de tu video…";
     projectStore.statusMessage = lastMessage;
     const cutOut = sidePath(media, "-corte.mp4");
+    const keep = projectStore.localKeepRanges();
     const result = await api.exportVideo({
       mediaPath: media,
       outputPath: cutOut,
-      keepRanges:
-        projectStore.keepRanges.length > 0 ? projectStore.keepRanges : undefined,
+      keepRanges: keep.length > 0 ? keep : undefined,
       segments: projectStore.segments,
       exportOptions: projectStore.project?.preset.export,
       colorOptions: projectStore.project?.preset.color,

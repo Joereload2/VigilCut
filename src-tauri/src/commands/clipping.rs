@@ -69,13 +69,20 @@ pub async fn run_clipping(
 ) -> AppResult<ClippingRun> {
     jobs.begin();
     let opts = options.unwrap_or_default();
-    let reused = analysis_run_id.as_ref().and_then(|id| {
-        analysis_cache
-            .runs
-            .lock()
-            .ok()
-            .and_then(|m| m.get(id).cloned())
-    });
+    // Sprint A1: reuse by run id (memory or disk) or by media path index.
+    let reused = analysis_run_id
+        .as_ref()
+        .and_then(|id| {
+            analysis_cache
+                .runs
+                .lock()
+                .ok()
+                .and_then(|m| m.get(id).cloned())
+                .or_else(|| crate::commands::analyze::load_run_from_disk(id))
+        })
+        .or_else(|| {
+            crate::commands::analyze::find_analysis_for_media(&analysis_cache, &media_path)
+        });
     let mut on_prog = |stage: &str, message: &str, percent: f64| {
         progress::emit(&app, "clipping", stage, message, percent);
     };

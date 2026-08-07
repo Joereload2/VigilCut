@@ -28,6 +28,16 @@ pub async fn run_silence_analysis_with_progress(
     policy: &PolicyConfig,
     on_progress: &mut ProgressFn<'_>,
 ) -> AppResult<AnalysisRun> {
+    run_silence_analysis_with_progress_cancel(media_path, policy, on_progress, None).await
+}
+
+/// Full analysis with optional cooperative cancel (Sprint A3).
+pub async fn run_silence_analysis_with_progress_cancel(
+    media_path: &Path,
+    policy: &PolicyConfig,
+    on_progress: &mut ProgressFn<'_>,
+    cancelled: Option<&std::sync::atomic::AtomicBool>,
+) -> AppResult<AnalysisRun> {
     let run_id = AnalysisRun::new_id();
     on_progress("probe", "Leyendo vídeo…", 4.0);
     let ffmpeg = Ffmpeg::new()?;
@@ -45,8 +55,16 @@ pub async fn run_silence_analysis_with_progress(
         }
     };
 
+    if cancelled
+        .map(|c| c.load(std::sync::atomic::Ordering::SeqCst))
+        .unwrap_or(false)
+    {
+        return Err(crate::error::AppError::Cancelled);
+    }
+
     on_progress("vad", "Detectando silencios (VAD)…", 35.0);
-    let (method, silence_ranges) = detect_silence_ranges(media_path, policy).await?;
+    let (method, silence_ranges) =
+        detect_silence_ranges_cancellable(media_path, policy, cancelled).await?;
 
     // Build alternating speech/silence events covering [0, duration]
     let mut events = ranges_to_events(&run_id, duration, &silence_ranges, &method, policy);
@@ -174,9 +192,11 @@ impl WithStats for AnalysisRun {
     }
 }
 
-async fn detect_silence_ranges(
+/// Detect silence ranges; pass cancel flag for cooperative cancel (Sprint A3).
+pub async fn detect_silence_ranges_cancellable(
     media_path: &Path,
     policy: &PolicyConfig,
+    cancelled: Option<&std::sync::atomic::AtomicBool>,
 ) -> AppResult<(String, Vec<(f64, f64)>)> {
     let silero_model = AppState::models_dir()
         .ok()
@@ -184,10 +204,11 @@ async fn detect_silence_ranges(
     let silero_available = silero_model.as_ref().map(|p| p.is_file()).unwrap_or(false);
 
     if policy.prefer_silero && silero_available {
-        match crate::pipeline::detectors::detect_silences_silero(
+        match crate::pipeline::detectors::detect_silences_silero_cancellable(
             media_path,
             policy.min_silence_duration,
             policy.threshold,
+            cancelled,
         )
         .await
         {
@@ -195,10 +216,20 @@ async fn detect_silence_ranges(
                 tracing::info!("Silero VAD OK ({} ranges)", ranges.len());
                 return Ok(("silero_vad".into(), ranges));
             }
+            Err(e) if matches!(e, crate::error::AppError::Cancelled) => {
+                return Err(e);
+            }
             Err(e) => {
                 tracing::warn!("Silero VAD failed, falling back to FFmpeg: {e}");
             }
         }
+    }
+
+    if cancelled
+        .map(|c| c.load(std::sync::atomic::Ordering::SeqCst))
+        .unwrap_or(false)
+    {
+        return Err(crate::error::AppError::Cancelled);
     }
 
     let ffmpeg = Ffmpeg::new()?;

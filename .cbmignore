@@ -1,0 +1,13 @@
+node_modules/
+src-tauri/target/
+dist/
+*.pdb
+.env
+.env.*
+*.sqlite3
+*.db
+models/*.onnx
+src-tauri/binaries/
+supabase/
+qa-*.log
+build-tauri.log

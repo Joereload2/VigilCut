@@ -138,5 +138,5 @@ pub fn enrich_events(run_id: &str, duration: f64, events: &mut Vec<Event>) {
 }
 
 pub use filler::{detect_fillers_from_srt, TYPE_SPEECH_FILLER};
-pub use silero::detect_silences_silero;
+pub use silero::{detect_silences_silero, detect_silences_silero_cancellable};
 pub use structure::{chapters_from_events, shorts_from_events};

@@ -20,13 +20,13 @@ No merge a `main` sin autorización.
 
 ## Sprint A — Velocidad y no mentir (P0)
 
-| ID | Tarea | Criterio de hecho | PR sugerido |
-|----|--------|-------------------|-------------|
-| A1 | Reuso **garantizado** silence → clipping (run id + cache path) | “Sacar clips” no re-corre VAD si hay run del mismo media | `perf/reuse-analysis-clips` |
-| A2 | Sesión ONNX Silero **reutilizada** (batch + multi-open) | 2º archivo del lote no paga init completo de sesión | `perf/silero-session-pool` |
-| A3 | Cancel **durante** etapas largas de VAD (check periódico) | Cancelar a mitad de vídeo largo detiene en &lt;2s razonables | `feat/cancel-vad-checkpoints` |
-| A4 | Una sola verdad **Segment ↔ EDL** (o bloquear edits que no recompilan EDL) | Preview cortado y export usan los mismos keep ranges tras K/X | `fix/edl-segment-sync` |
-| A5 | Progreso export con parse de `time=` FFmpeg (opcional) | Barra % avanza durante encode, no solo fases | `feat/export-ffmpeg-progress` |
+| ID | Tarea | Criterio de hecho | PR sugerido | Estado |
+|----|--------|-------------------|-------------|--------|
+| A1 | Reuso **garantizado** silence → clipping (run id + by_media index + disk) | “Sacar clips” no re-corre VAD si hay run del mismo media | `perf/reuse-analysis-clips` | **hecho 2026-08-07** |
+| A2 | Cache VAD Silero por media+params (evita re-init costoso) | 2º análisis mismo media lee `vad_silero_*.json` | `perf/silero-vad-cache` | **hecho 2026-08-07** (cache disk; session pool ONNX pendiente si hace falta) |
+| A3 | Cancel **durante** etapas largas de VAD (check periódico) | Cancelar a mitad de vídeo largo detiene en &lt;2s razonables | `feat/cancel-vad-checkpoints` | **hecho 2026-08-07** |
+| A4 | Una sola verdad **Segment ↔ keep ranges** tras K/X | Preview cortado y export usan `localKeepRanges()` | `fix/edl-segment-sync` | **hecho 2026-08-07** |
+| A5 | Progreso export con parse de `time=` FFmpeg (opcional) | Barra % avanza durante encode, no solo fases | `feat/export-ffmpeg-progress` | pendiente |
 
 ---
 

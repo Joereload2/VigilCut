@@ -1,14 +1,78 @@
 //! Silero VAD via ONNX Runtime (`ort`).
 //! Falls back gracefully if the model or runtime is unavailable.
+//!
+//! Sprint A: disk cache of silence ranges (same media+params → no re-VAD)
+//! + cooperative cancel checkpoints during long runs.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
-use crate::pipeline::features::ensure_audio_16k;
+use crate::pipeline::features::{ensure_audio_16k, media_cache_key};
 use crate::state::AppState;
 
 const SAMPLE_RATE: u32 = 16_000;
 const WINDOW: usize = 512; // 32 ms @ 16 kHz
+/// Check cancel every N windows (~0.5s of audio at 16 kHz / 512).
+const CANCEL_EVERY: usize = 16;
+
+#[derive(Debug, Serialize, Deserialize)]
+struct VadCacheFile {
+    method: String,
+    min_silence_duration: f64,
+    speech_threshold: f64,
+    ranges: Vec<[f64; 2]>,
+}
+
+fn vad_cache_path(
+    media_path: &Path,
+    min_silence_duration: f64,
+    speech_threshold: f64,
+) -> AppResult<PathBuf> {
+    let key = media_cache_key(media_path)?;
+    let dir = AppState::cache_dir()?.join("features").join(&key);
+    std::fs::create_dir_all(&dir)?;
+    // Quantize params so tiny float noise does not bust cache.
+    let ms = (min_silence_duration * 1000.0).round() as i64;
+    let thr = (speech_threshold.clamp(0.15, 0.85) * 100.0).round() as i64;
+    Ok(dir.join(format!("vad_silero_ms{ms}_ thr{thr}.json").replace(" thr", "_thr")))
+}
+
+fn load_vad_cache(
+    media_path: &Path,
+    min_silence_duration: f64,
+    speech_threshold: f64,
+) -> Option<Vec<(f64, f64)>> {
+    let path = vad_cache_path(media_path, min_silence_duration, speech_threshold).ok()?;
+    let text = std::fs::read_to_string(path).ok()?;
+    let file: VadCacheFile = serde_json::from_str(&text).ok()?;
+    if file.method != "silero_vad" {
+        return None;
+    }
+    Some(file.ranges.into_iter().map(|r| (r[0], r[1])).collect())
+}
+
+fn save_vad_cache(
+    media_path: &Path,
+    min_silence_duration: f64,
+    speech_threshold: f64,
+    ranges: &[(f64, f64)],
+) {
+    let Ok(path) = vad_cache_path(media_path, min_silence_duration, speech_threshold) else {
+        return;
+    };
+    let file = VadCacheFile {
+        method: "silero_vad".into(),
+        min_silence_duration,
+        speech_threshold,
+        ranges: ranges.iter().map(|(s, e)| [*s, *e]).collect(),
+    };
+    if let Ok(json) = serde_json::to_string(&file) {
+        let _ = std::fs::write(path, json);
+    }
+}
 
 /// Returns silence ranges (start, end) in seconds using Silero VAD ONNX.
 pub async fn detect_silences_silero(
@@ -16,7 +80,26 @@ pub async fn detect_silences_silero(
     min_silence_duration: f64,
     speech_threshold: f64,
 ) -> AppResult<Vec<(f64, f64)>> {
+    detect_silences_silero_cancellable(media_path, min_silence_duration, speech_threshold, None)
+        .await
+}
+
+/// Same as [`detect_silences_silero`] with optional cooperative cancel.
+pub async fn detect_silences_silero_cancellable(
+    media_path: &Path,
+    min_silence_duration: f64,
+    speech_threshold: f64,
+    cancelled: Option<&AtomicBool>,
+) -> AppResult<Vec<(f64, f64)>> {
+    if let Some(cached) = load_vad_cache(media_path, min_silence_duration, speech_threshold) {
+        tracing::info!("Silero VAD cache hit ({} ranges)", cached.len());
+        return Ok(cached);
+    }
+
     let wav_path = ensure_audio_16k(media_path).await?;
+    if cancelled.map(|c| c.load(Ordering::SeqCst)).unwrap_or(false) {
+        return Err(AppError::Cancelled);
+    }
     let samples = read_wav_f32_mono(&wav_path)?;
     if samples.len() < WINDOW {
         return Ok(Vec::new());
@@ -30,7 +113,7 @@ pub async fn detect_silences_silero(
         )));
     }
 
-    let probs = run_silero_probs(&model, &samples)?;
+    let probs = run_silero_probs(&model, &samples, cancelled)?;
     let thr = speech_threshold.clamp(0.15, 0.85) as f32;
     let frame_sec = WINDOW as f64 / SAMPLE_RATE as f64;
     let mut silence = Vec::new();
@@ -60,10 +143,15 @@ pub async fn detect_silences_silero(
         }
     }
 
+    save_vad_cache(media_path, min_silence_duration, speech_threshold, &silence);
     Ok(silence)
 }
 
-fn run_silero_probs(model_path: &Path, samples: &[f32]) -> AppResult<Vec<f32>> {
+fn run_silero_probs(
+    model_path: &Path,
+    samples: &[f32],
+    cancelled: Option<&AtomicBool>,
+) -> AppResult<Vec<f32>> {
     use ort::session::Session;
 
     let mut session = Session::builder()
@@ -77,6 +165,11 @@ fn run_silero_probs(model_path: &Path, samples: &[f32]) -> AppResult<Vec<f32>> {
 
     let n_windows = samples.len() / WINDOW;
     for w in 0..n_windows {
+        if w % CANCEL_EVERY == 0
+            && cancelled.map(|c| c.load(Ordering::SeqCst)).unwrap_or(false)
+        {
+            return Err(AppError::Cancelled);
+        }
         let start = w * WINDOW;
         let chunk = &samples[start..start + WINDOW];
         let mut input_vec = context.clone();

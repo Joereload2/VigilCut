@@ -594,8 +594,26 @@ class ProjectStore {
 
   setDecision(id: string, decision: SegmentDecision) {
     this.segments = this.segments.map((s) => (s.id === id ? { ...s, decision } : s));
+    // Sprint A4: after manual K/X, keep ranges = segments immediately (preview ≡ export).
+    this.syncKeepRangesFromSegments();
     void this.refreshKeepRanges();
     void this.persistSegments();
+  }
+
+  /** Single truth for preview/export after human tramo edits. */
+  syncKeepRangesFromSegments() {
+    this.keepRanges = this.segments
+      .filter((s) => s.decision === "keep" || s.decision === "pending")
+      .map((s) => [s.start, s.end] as [number, number]);
+    this.estimate = {
+      estimatedDuration: this.keepRanges.reduce((a, [s, e]) => a + (e - s), 0),
+      keepRanges: this.keepRanges,
+      cutDuration: Math.max(
+        0,
+        this.duration - this.keepRanges.reduce((a, [s, e]) => a + (e - s), 0),
+      ),
+      sourceDuration: this.duration,
+    };
   }
 
   keepAllSpeech() {
@@ -728,21 +746,23 @@ class ProjectStore {
   }
 
   /**
-   * Keep ranges for cut-preview playback.
-   * Prefer engine EDL ranges when user has not hand-edited tramos; else segment decisions
-   * (keep + pending = still in the video until human cuts).
+   * Keep ranges for cut-preview playback AND export.
+   * After any hand edit (touchedIds), segments are the only truth (Sprint A4).
+   * Untouched: prefer keepRanges (from EDL after analysis).
    */
   localKeepRanges(): [number, number][] {
-    if (this.keepRanges.length > 0 && this.touchedIds.length === 0) {
+    if (this.touchedIds.length > 0) {
+      const fromSegs = this.segments
+        .filter((s) => s.decision === "keep" || s.decision === "pending")
+        .map((s) => [s.start, s.end] as [number, number]);
+      if (fromSegs.length > 0) return fromSegs;
+    }
+    if (this.keepRanges.length > 0) {
       return this.keepRanges.map(([s, e]) => [s, e] as [number, number]);
     }
-    const fromSegs = this.segments
+    return this.segments
       .filter((s) => s.decision === "keep" || s.decision === "pending")
       .map((s) => [s.start, s.end] as [number, number]);
-    if (fromSegs.length > 0) return fromSegs;
-    return this.keepRanges.length > 0
-      ? this.keepRanges.map(([s, e]) => [s, e] as [number, number])
-      : [];
   }
 
   /**

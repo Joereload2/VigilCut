@@ -24,6 +24,11 @@ impl JobControl {
         self.cancelled.load(Ordering::SeqCst)
     }
 
+    /// Shared flag for cooperative cancel inside long loops (VAD windows, etc.).
+    pub fn cancel_flag(&self) -> &AtomicBool {
+        &self.cancelled
+    }
+
     pub fn request_cancel(&self) {
         self.cancelled.store(true, Ordering::SeqCst);
         if let Ok(mut g) = self.ffmpeg_pid.lock() {

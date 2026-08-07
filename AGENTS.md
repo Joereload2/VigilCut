@@ -11,6 +11,22 @@ repetir ese error acá.
 Este archivo es la fuente de verdad para cualquier agente de IA (Codex,
 Grok, Claude Code, u otro) que trabaje autónomamente en este repositorio.
 
+## Ecosistema faceless (2026-08)
+
+VigilCut = **shorts / recorte / post 9:16** (Events → Policy → EDL → artefactos).
+
+| No confundir | Rol |
+|--------------|-----|
+| **VisuaLibrary** (repo aparte) | Library de imágenes por conceptos para long faceless |
+| **visual-library** *dentro* de VigilCut | Enriquecimiento visual del pipeline de clips/shorts |
+| **FacelessCreator** | Montaje **long horizontal** + guion + TTS |
+| **YouToMagic** | Nichos, brief, medición — no edita vídeo |
+
+Flujo long: YTM → VL → FC → (opcional) **VigilCut shorts**.  
+No unificar UI con VisuaLibrary. No implementar NLE completo ni SaaS.
+
+**Sprint A (2026-08):** VAD Silero cache en `features/{media_key}/vad_silero_*.json`; reuso analysis→clipping vía `runs/by_media/{key}.runid`; cancel cooperativo en loop VAD; tras K/X manual `localKeepRanges()` = segmentos (= preview/export). Backlog: `docs/BACKLOG_NEXT.md`.
+
 ## 0. Jerarquía — qué gana si algo contradice algo
 
 - **Sección 4 (dinero) y Sección 5 (secretos) son no-negociables.** Ninguna
